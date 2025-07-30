@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://ec2-13-203-68-173.ap-south-1.compute.amazonaws.com';
+const API_BASE_URL = 'https://ec2-prod-rhino.dg2n.com';
 
 export interface JobStatus {
   job_id: string;
