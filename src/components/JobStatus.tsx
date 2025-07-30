@@ -12,6 +12,7 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
   const [job, setJob] = useState<JobStatusType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchJobStatus = async () => {
@@ -37,6 +38,17 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
 
     return () => clearInterval(interval);
   }, [jobId, job?.status]);
+
+  const handleDownload = async (fileName: string) => {
+    try {
+      setDownloadingFile(fileName);
+      await apiService.downloadFile(jobId, fileName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download file');
+    } finally {
+      setDownloadingFile(null);
+    }
+  };
 
   const getStatusIcon = () => {
     if (loading) return <Loader2 className="h-5 w-5 animate-spin" />;
@@ -146,8 +158,17 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
                   <p className="text-sm font-medium">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{file.type}</p>
                 </div>
-                <Button size="sm" variant="outline" disabled>
-                  Download
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => handleDownload(file.name)}
+                  disabled={downloadingFile !== null}
+                >
+                  {downloadingFile === file.name ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'Download'
+                  )}
                 </Button>
               </div>
             ))}

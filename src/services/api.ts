@@ -55,5 +55,23 @@ export const apiService = {
     }
 
     return response.json();
+  },
+
+  async downloadFile(jobId: string, fileName: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/download/${jobId}/${fileName}`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download file: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   }
 };
