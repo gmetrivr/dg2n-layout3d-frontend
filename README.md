@@ -1,3 +1,15 @@
+# Run
+```sh
+npm install
+npm run dev
+```
+
+# Install SHADCN components
+```sh
+npx shadcn@latest add button
+```
+
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
