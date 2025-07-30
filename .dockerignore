@@ -1,0 +1,24 @@
+.react-router
+node_modules
+README.md
+
+.npm/
+.git/
+#short_ref needed in BUILD_VERSION
+!.git/short_ref
+
+.idea/
+.vscode/
+
+data/
+cloud/
+
+# ESlint coverage files
+.coverage.eslint.codeframe
+.pnpm-store/
+dev/pgadmin4/.pgpass
+
+# buildinfo
+tsconfig.vite.tsbuildinfo
+screenshots
+pdfs
