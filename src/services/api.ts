@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://ec2-prod-rhino.dg2n.com';
+const API_BASE_URL = import.meta.env.MODE==="production"?'https://ec2-prod-rhino.dg2n.com':"http://localhost:8081";
 
 export interface JobStatus {
   job_id: string;
