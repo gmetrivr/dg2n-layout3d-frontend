@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { Home } from './components/Home';
 import { CadTo3D } from './components/CadTo3D';
 import { ThreeDViewerModifier } from './components/3DViewerModifier';
 import dg2nLogo from './assets/dg2n_logo_wb.png';
@@ -11,7 +12,7 @@ function App() {
         <header className="border-b border-border">
           <div className="container mx-auto px-4 py-6">
             <div className="flex items-center justify-between">
-              <Link to="/cad-to-3d">
+              <Link to="/">
                 <img 
                   src={dg2nLogo} 
                   alt="dg2n" 
@@ -37,7 +38,8 @@ function App() {
         </header>
 
         <Routes>
-          <Route path="/cad-to-3d" index element={<CadTo3D />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/cad-to-3d" element={<CadTo3D />} />
           <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
         </Routes>
 
