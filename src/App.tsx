@@ -37,8 +37,12 @@ function App() {
         </header>
 
         <Routes>
+<<<<<<< HEAD
           <Route path="/" element={<Navigate to="/cad-to-3d" replace />} />
           <Route path="/cad-to-3d" element={<CadTo3D />} />
+=======
+          <Route path="/cad-to-3d" index element={<CadTo3D />} />
+>>>>>>> 4ebcc4ee325f7093b61534611ea35ae5e9823750
           <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
         </Routes>
 
