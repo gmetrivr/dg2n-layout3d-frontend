@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { CadTo3D } from './components/CadTo3D';
 import { ThreeDViewerModifier } from './components/3DViewerModifier';
 import dg2nLogo from './assets/dg2n_logo_wb.png';
