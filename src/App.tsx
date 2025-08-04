@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { CadTo3D } from './components/CadTo3D';
 import { ThreeDViewerModifier } from './components/3DViewerModifier';
 import dg2nLogo from './assets/dg2n_logo_wb.png';
@@ -37,6 +37,7 @@ function App() {
         </header>
 
         <Routes>
+          <Route path="/" element={<Navigate to="/cad-to-3d" replace />} />
           <Route path="/cad-to-3d" element={<CadTo3D />} />
           <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
         </Routes>

@@ -73,5 +73,34 @@ export const apiService = {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  },
+  
+  async downloadJobZip(jobId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download ZIP: ${response.statusText}`);
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${jobId}_output.zip`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
+  async fetchJobFilesAsZip(jobId: string): Promise<Blob> {
+    // Use the new backend ZIP endpoint
+    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch ZIP: ${response.statusText}`);
+    }
+
+    return response.blob();
   }
 };

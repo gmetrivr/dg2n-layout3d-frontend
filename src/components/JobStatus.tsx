@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from "@/shadcn/components/ui/button";
-import { CheckCircle, Clock, AlertCircle, Loader2, Download } from 'lucide-react';
+import { CheckCircle, Clock, AlertCircle, Loader2, Download, Eye } from 'lucide-react';
 import { apiService, type JobStatus as JobStatusType } from '../services/api';
 
 interface JobStatusProps {
@@ -9,17 +10,34 @@ interface JobStatusProps {
 }
 
 export function JobStatus({ jobId, onReset }: JobStatusProps) {
+  const navigate = useNavigate();
   const [job, setJob] = useState<JobStatusType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [downloadingFile, setDownloadingFile] = useState<string | null>(null);
+  const [downloadingFiles, setDownloadingFiles] = useState<boolean>(false);
+  const [filesDownloaded, setFilesDownloaded] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchJobStatus = async () => {
       try {
         const jobData = await apiService.getJobStatus(jobId);
+        const wasProcessing = job?.status === 'processing' || job?.status === 'pending';
         setJob(jobData);
         setError(null);
+        
+        // Auto-download files when job completes
+        if (wasProcessing && jobData.status === 'completed' && !filesDownloaded) {
+          setDownloadingFiles(true);
+          try {
+            await apiService.downloadJobZip(jobData.job_id);
+            setFilesDownloaded(true);
+          } catch (err) {
+            console.error('Auto-download failed:', err);
+            setError('Files are ready but auto-download failed. Use the download button below.');
+          } finally {
+            setDownloadingFiles(false);
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch job status');
       } finally {
@@ -37,17 +55,24 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [jobId, job?.status]);
+  }, [jobId, job?.status, filesDownloaded]);
 
-  const handleDownload = async (fileName: string) => {
+  const handleManualDownload = async () => {
+    if (!job?.job_id) return;
+    
     try {
-      setDownloadingFile(fileName);
-      await apiService.downloadFile(jobId, fileName);
+      setDownloadingFiles(true);
+      await apiService.downloadJobZip(job.job_id);
+      setFilesDownloaded(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to download file');
+      setError(err instanceof Error ? err.message : 'Failed to download files');
     } finally {
-      setDownloadingFile(null);
+      setDownloadingFiles(false);
     }
+  };
+
+  const handleVisualize = () => {
+    navigate(`/3d-viewer-modifier?jobId=${jobId}`);
   };
 
   const getStatusIcon = () => {
@@ -82,20 +107,6 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
     }
   };
 
-  const getOutputFiles = () => {
-    if (!job?.output_dir) return [];
-    
-    // Based on backend output structure
-    return [
-      { name: 'dg2n-3d-floor-0.glb', type: '3D Model (Floor 0)' },
-      { name: 'dg2n-3d-floor-1.glb', type: '3D Model (Floor 1)' },
-      { name: 'dg2n-3d-floor-2.glb', type: '3D Model (Floor 2)' },
-      { name: 'dg2n-3d-floor-3.glb', type: '3D Model (Floor 3)' },
-      { name: 'location-master.csv', type: 'Location Report' },
-      { name: 'brand-fixture-report.csv', type: 'Brand Fixture Report' },
-      { name: 'detailed-dg2n-log.txt', type: 'Processing Log' }
-    ];
-  };
 
   if (error) {
     return (
@@ -149,39 +160,65 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
         <div className="p-6 border rounded-lg border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950">
           <h4 className="font-medium text-foreground mb-3 flex items-center gap-2">
             <Download className="h-4 w-4" />
-            Generated Files
+            Results Ready
           </h4>
-          <div className="space-y-2">
-            {getOutputFiles().map((file) => (
-              <div key={file.name} className="flex items-center justify-between p-2 bg-background rounded border">
-                <div>
-                  <p className="text-sm font-medium">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{file.type}</p>
-                </div>
+          <div className="text-center p-4">
+            {downloadingFiles ? (
+              <div className="space-y-2">
+                <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                <p className="text-sm text-muted-foreground">
+                  Downloading all files automatically...
+                </p>
+              </div>
+            ) : filesDownloaded ? (
+              <div className="space-y-2">
+                <CheckCircle className="h-6 w-6 text-green-500 mx-auto" />
+                <p className="text-sm text-foreground font-medium">
+                  All files downloaded successfully!
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Check your Downloads folder for the generated files
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Files are ready! Download didn't start automatically.
+                </p>
                 <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => handleDownload(file.name)}
-                  disabled={downloadingFile !== null}
+                  onClick={handleManualDownload}
+                  disabled={downloadingFiles}
+                  className="w-full"
                 >
-                  {downloadingFile === file.name ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                  {downloadingFiles ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   ) : (
-                    'Download'
+                    <Download className="h-4 w-4 mr-2" />
                   )}
+                  Download All Files
                 </Button>
               </div>
-            ))}
+            )}
           </div>
-          <p className="text-xs text-muted-foreground mt-3">
-            Files are saved in: {job.output_dir}
+          <p className="text-xs text-muted-foreground mt-3 text-center">
+            Files generated in: {job.output_dir}
           </p>
         </div>
       )}
 
-      <Button onClick={onReset} variant="outline" className="w-full">
-        Process Another File
-      </Button>
+      <div className="flex gap-2">
+        <Button 
+          onClick={handleVisualize} 
+          className="flex-1" 
+          disabled={job?.status !== 'completed'}
+        >
+          <Eye className="h-4 w-4 mr-2" />
+          Visualize 3D Models
+        </Button>
+        <Button onClick={onReset} variant="outline" className="flex-1">
+          Process Another File
+        </Button>
+      </div>
     </div>
   );
 }
