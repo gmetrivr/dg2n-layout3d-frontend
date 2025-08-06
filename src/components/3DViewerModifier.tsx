@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, Suspense, Component } from 'react';
+import { useState, useEffect, Suspense, Component, useRef, useMemo, useCallback } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, Grid, Text } from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
@@ -40,9 +40,9 @@ function LocationSphere({ location, color = "#ff6b6b", onClick, selectedLocation
       {/* Red bounding box when selected */}
       {selectedLocation && 
        selectedLocation.blockName === location.blockName &&
-       selectedLocation.posX === location.posX &&
-       selectedLocation.posY === location.posY &&
-       selectedLocation.posZ === location.posZ && (
+       Math.abs(selectedLocation.posX - location.posX) < 0.001 &&
+       Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
+       Math.abs(selectedLocation.posZ - location.posZ) < 0.001 && (
         <lineSegments renderOrder={999}>
           <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
           <lineBasicMaterial color="red" />
@@ -57,16 +57,22 @@ interface LocationGLBProps {
   onError?: (blockName: string, url: string) => void;
   onClick?: (location: LocationData) => void;
   selectedLocation?: LocationData | null;
+  editMode?: boolean;
+  onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
+  movedFixtures?: Map<string, { originalPosition: [number, number, number], newPosition: [number, number, number] }>;
+  rotatedFixtures?: Map<string, { originalRotation: [number, number, number], rotationOffset: number }>;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
 }
 
-function LocationGLB({ location, onError, onClick, selectedLocation }: LocationGLBProps) {
+function LocationGLB({ location, onError, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
   const isSelected = selectedLocation && 
     selectedLocation.blockName === location.blockName &&
-    selectedLocation.posX === location.posX &&
-    selectedLocation.posY === location.posY &&
-    selectedLocation.posZ === location.posZ;
+    Math.abs(selectedLocation.posX - location.posX) < 0.001 &&
+    Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
+    Math.abs(selectedLocation.posZ - location.posZ) < 0.001;
   
   try {
     const { scene } = useGLTF(location.glbUrl!);
@@ -92,46 +98,123 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
       }
     }, [scene]); // Only depends on scene, not selection state
     
-    // Convert degrees to radians for Three.js rotation
-    const rotationX = (location.rotationX * Math.PI) / 180;
-    const rotationY = (location.rotationY * Math.PI) / 180;
-    const rotationZ = (location.rotationZ * Math.PI) / 180;
+    const groupRef = useRef<THREE.Group>(null);
+    
+    // Memoize expensive calculations and lookups
+    const memoizedData = useMemo(() => {
+      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      const movedData = movedFixtures?.get(key);
+      const rotatedData = rotatedFixtures?.get(key);
+      
+      const currentPosition = movedData 
+        ? [movedData.newPosition[0], movedData.newPosition[2], -movedData.newPosition[1]] 
+        : [location.posX, location.posZ, -location.posY];
+      
+      const rotationX = (location.rotationX * Math.PI) / 180;
+      const rotationY = (location.rotationY * Math.PI) / 180;
+      const rotationZ = (location.rotationZ * Math.PI) / 180;
+      
+      const additionalYRotation = rotatedData ? (rotatedData.rotationOffset * Math.PI) / 180 : 0;
+      
+      return {
+        key,
+        movedData,
+        rotatedData,
+        currentPosition: currentPosition as [number, number, number],
+        rotationX,
+        rotationY,
+        rotationZ,
+        additionalYRotation
+      };
+    }, [location, movedFixtures, rotatedFixtures]);
+    
+    const { key, movedData, rotatedData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    
+    const handleTransformChange = () => {
+      if (groupRef.current && onPositionChange) {
+        const newPosition = groupRef.current.position;
+        onPositionChange(location, [newPosition.x, -newPosition.z, newPosition.y]);
+      }
+    };
     
     return (
-      <group position={[location.posX, location.posZ, -location.posY]}>
-        <primitive 
-          object={scene.clone()} 
-          rotation={[rotationX, rotationZ, rotationY]}
-          scale={[1, 1, 1]}
-        />
-        {/* Transparent bounding box for clicking */}
-        <mesh
-          onClick={() => onClick?.(location)}
-          position={boundingBox.center as [number,number,number]}
-        >
-          <boxGeometry args={boundingBox.size as [number,number,number]} />
-          <meshBasicMaterial transparent opacity={0} />
-        </mesh>
+      <>
+        <group ref={groupRef} position={currentPosition as [number, number, number]}>
+          {additionalYRotation !== 0 ? (
+            <group rotation={[0, additionalYRotation, 0]}>
+              <primitive 
+                object={scene.clone()} 
+                rotation={[rotationX, rotationZ, rotationY]}
+                scale={[1, 1, 1]}
+              />
+            </group>
+          ) : (
+            <primitive 
+              object={scene.clone()} 
+              rotation={[rotationX, rotationZ, rotationY]}
+              scale={[1, 1, 1]}
+            />
+          )}
+          {/* Transparent bounding box for clicking */}
+          <mesh
+            onClick={() => onClick?.(location)}
+            position={boundingBox.center as [number,number,number]}
+          >
+            <boxGeometry args={boundingBox.size as [number,number,number]} />
+            <meshBasicMaterial transparent opacity={0} />
+          </mesh>
+          
+          {/* Orange edge outline for moved/rotated fixtures - use calculated bounding box */}
+          {(movedData || rotatedData) && !isSelected && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={998}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="orange" />
+            </lineSegments>
+          )}
+          
+          {/* Red edge outline when selected - use calculated bounding box */}
+          {isSelected && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="red" />
+            </lineSegments>
+          )}
+        </group>
         
-        {/* Red edge outline when selected - use calculated bounding box */}
-        {isSelected && (
-          <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
-            <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
-            <lineBasicMaterial color="red" />
-          </lineSegments>
+        {/* Transform controls for editing mode */}
+        {editMode && isSelected && groupRef.current && (
+          <TransformControls
+            object={groupRef.current}
+            mode="translate"
+            space="world"
+            onObjectChange={handleTransformChange}
+            onMouseDown={onTransformStart}
+            onMouseUp={onTransformEnd}
+          />
         )}
-      </group>
+      </>
     );
   } catch (error) {
     onError?.(location.blockName, location.glbUrl || 'unknown');
     return (
-      <mesh 
-        position={[location.posX, location.posZ, -location.posY]}
-        onClick={() => onClick?.(location)}
-      >
-        <sphereGeometry args={[0.2]} />
-        <meshStandardMaterial color="#ff6b6b" />
-      </mesh>
+      <group position={[location.posX, location.posZ, -location.posY]}>
+        <mesh onClick={() => onClick?.(location)}>
+          <sphereGeometry args={[0.2]} />
+          <meshStandardMaterial color="#ff6b6b" />
+        </mesh>
+        
+        {/* Red bounding box when selected - same logic as LocationSphere */}
+        {selectedLocation && 
+         selectedLocation.blockName === location.blockName &&
+         Math.abs(selectedLocation.posX - location.posX) < 0.001 &&
+         Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
+         Math.abs(selectedLocation.posZ - location.posZ) < 0.001 && (
+          <lineSegments renderOrder={999}>
+            <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
+            <lineBasicMaterial color="red" />
+          </lineSegments>
+        )}
+      </group>
     );
   }
 }
@@ -242,6 +325,10 @@ export function ThreeDViewerModifier() {
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
+  const [editMode, setEditMode] = useState(false);
+  const [movedFixtures, setMovedFixtures] = useState<Map<string, { originalPosition: [number, number, number], newPosition: [number, number, number] }>>(new Map());
+  const [rotatedFixtures, setRotatedFixtures] = useState<Map<string, { originalRotation: [number, number, number], rotationOffset: number }>>(new Map());
+  const [isTransforming, setIsTransforming] = useState(false);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -258,6 +345,86 @@ export function ThreeDViewerModifier() {
       return newSet;
     });
   };
+
+  const handlePositionChange = useCallback((location: LocationData, newPosition: [number, number, number]) => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    setMovedFixtures(prev => {
+      // Only create new Map if the value actually changed
+      const existing = prev.get(key);
+      const newValue = {
+        originalPosition: [location.posX, location.posY, location.posZ] as [number, number, number],
+        newPosition: newPosition
+      };
+      
+      // Check if position actually changed to avoid unnecessary updates
+      if (existing && 
+          existing.newPosition[0] === newPosition[0] &&
+          existing.newPosition[1] === newPosition[1] &&
+          existing.newPosition[2] === newPosition[2]) {
+        return prev; // Return same reference to prevent re-renders
+      }
+      
+      const newMap = new Map(prev);
+      newMap.set(key, newValue);
+      return newMap;
+    });
+  }, []);
+
+  const handleRotateFixture = useCallback((degrees: number) => {
+    if (!selectedLocation) return;
+    
+    const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+    setRotatedFixtures(prev => {
+      const existing = prev.get(key);
+      const currentOffset = existing?.rotationOffset || 0;
+      let newOffset = currentOffset + degrees;
+      
+      // Normalize rotation to 0-359 range
+      newOffset = ((newOffset % 360) + 360) % 360;
+      
+      // If rotation is back to 0 (or effectively 0), remove the entry entirely
+      if (newOffset === 0 || Math.abs(newOffset - 360) < 0.001) {
+        if (!prev.has(key)) return prev; // Already doesn't exist
+        const newMap = new Map(prev);
+        newMap.delete(key);
+        return newMap;
+      }
+      
+      // Only create new Map if the value actually changed
+      if (existing && existing.rotationOffset === newOffset) {
+        return prev; // Return same reference to prevent re-renders
+      }
+      
+      const newMap = new Map(prev);
+      newMap.set(key, {
+        originalRotation: [selectedLocation.rotationX, selectedLocation.rotationY, selectedLocation.rotationZ],
+        rotationOffset: newOffset
+      });
+      return newMap;
+    });
+  }, [selectedLocation]);
+
+  const handleResetPosition = useCallback((location: LocationData) => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    
+    setMovedFixtures(prev => {
+      if (!prev.has(key)) return prev; // No change needed
+      const newMap = new Map(prev);
+      newMap.delete(key);
+      return newMap;
+    });
+    
+    setRotatedFixtures(prev => {
+      if (!prev.has(key)) return prev; // No change needed
+      const newMap = new Map(prev);
+      newMap.delete(key);
+      return newMap;
+    });
+    
+    // Force re-render by clearing and re-setting selection
+    setSelectedLocation(null);
+    setTimeout(() => setSelectedLocation(location), 10);
+  }, []);
 
   // Log summary of failed GLBs once
   useEffect(() => {
@@ -526,6 +693,50 @@ export function ThreeDViewerModifier() {
 
       {/* 3D Canvas */}
       <div className="flex-1 relative">
+        {/* Edit Mode Toggle Button - positioned over the canvas */}
+        <div className="absolute top-4 left-4 z-50">
+          <div className="flex flex-col gap-2">
+            <Button 
+              variant="outline"
+              size="sm"
+              onClick={() => setEditMode(!editMode)}
+              className={`backdrop-blur-sm border shadow-lg ${
+                editMode 
+                  ? "bg-green-600/90 text-white border-green-500 hover:bg-green-700/90" 
+                  : "bg-background/90 hover:bg-background/80"
+              }`}
+            >
+              Edit Mode: {editMode ? "ON" : "OFF"}
+            </Button>
+            {editMode && (
+              <div className="flex flex-col gap-2">
+                {selectedLocation && selectedLocation.glbUrl && (
+                  <div className="flex gap-1 w-full">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRotateFixture(-90)}
+                      className="bg-background/90 backdrop-blur-sm text-xs px-2 py-1 h-auto flex-1"
+                    >
+                      Rotate -90°
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRotateFixture(90)}
+                      className="bg-background/90 backdrop-blur-sm text-xs px-2 py-1 h-auto flex-1"
+                    >
+                      Rotate +90°
+                    </Button>
+                  </div>
+                )}
+                <div className="text-yellow-400 text-xs max-w-[200px]">
+                  This is a feature preview. Edit changes are not saved.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         <Canvas
           camera={{ position: cameraPosition, fov: 50 }}
           shadows
@@ -579,6 +790,14 @@ export function ThreeDViewerModifier() {
                     onClick={setSelectedLocation}
                     selectedLocation={selectedLocation}
                     onError={handleGLBError}
+                    editMode={editMode}
+                    onPositionChange={editMode ? handlePositionChange : undefined}
+                    movedFixtures={movedFixtures}
+                    rotatedFixtures={rotatedFixtures}
+                    {...(editMode && {
+                      onTransformStart: () => setIsTransforming(true),
+                      onTransformEnd: () => setIsTransforming(false)
+                    })}
                   />
                 ) : (
                   <LocationSphere 
@@ -600,30 +819,66 @@ export function ThreeDViewerModifier() {
             dampingFactor={0.05}
             rotateSpeed={0.5}
             zoomSpeed={0.5}
+            enabled={!isTransforming}
           />
         </Canvas>
         
         {/* Location Info Overlay */}
-        {selectedLocation && (
-          <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-sm">Location Info</h3>
-              <button 
-                onClick={() => setSelectedLocation(null)}
-                className="text-muted-foreground hover:text-foreground text-xs"
-              >
-                ✕
-              </button>
+        {selectedLocation && (() => {
+          const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+          const movedData = movedFixtures.get(key);
+          const rotatedData = rotatedFixtures.get(key);
+          const hasMoved = movedData !== undefined;
+          const hasRotated = rotatedData !== undefined;
+          const hasChanges = hasMoved || hasRotated;
+          
+          return (
+            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-sm">Location Info</h3>
+                <button 
+                  onClick={() => setSelectedLocation(null)}
+                  className="text-muted-foreground hover:text-foreground text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-1 text-xs">
+                <div><span className="font-medium">Block:</span> {selectedLocation.blockName}</div>
+                <div><span className="font-medium">Brand:</span> {selectedLocation.brand}</div>
+                <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
+                <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
+                  <span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
+                </div>
+                {hasMoved && movedData && (
+                  <div style={{ color: '#22c55e' }}>
+                    <span className="font-medium">New Position:</span> ({movedData.newPosition[0].toFixed(2)}, {movedData.newPosition[1].toFixed(2)}, {movedData.newPosition[2].toFixed(2)})
+                  </div>
+                )}
+                <div style={{ color: hasRotated ? '#ef4444' : 'inherit' }}>
+                  <span className="font-medium">Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
+                </div>
+                {hasRotated && rotatedData && (
+                  <div style={{ color: '#22c55e' }}>
+                    <span className="font-medium">New Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {((selectedLocation.rotationY + rotatedData.rotationOffset) % 360).toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
+                  </div>
+                )}
+              </div>
+              {hasChanges && (
+                <div className="mt-3 pt-2 border-t border-border">
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => handleResetPosition(selectedLocation)}
+                    className="w-full text-xs"
+                  >
+                    Reset
+                  </Button>
+                </div>
+              )}
             </div>
-            <div className="space-y-1 text-xs">
-              <div><span className="font-medium">Block:</span> {selectedLocation.blockName}</div>
-              <div><span className="font-medium">Brand:</span> {selectedLocation.brand}</div>
-              <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
-              <div><span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})</div>
-              <div><span className="font-medium">Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)</div>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
