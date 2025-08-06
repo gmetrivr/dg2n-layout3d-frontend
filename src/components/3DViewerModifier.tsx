@@ -8,6 +8,29 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { apiService, type JobStatus } from '../services/api';
 import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
 
+interface LocationData {
+  blockName: string;
+  floorIndex: number;
+  posX: number;
+  posY: number;
+  posZ: number;
+  brand: string;
+}
+
+interface LocationSphereProps {
+  location: LocationData;
+  color?: string;
+}
+
+function LocationSphere({ location, color = "#ff6b6b" }: LocationSphereProps) {
+  return (
+    <mesh position={[location.posX, location.posZ, -location.posY]}>
+      <sphereGeometry args={[0.2]} />
+      <meshStandardMaterial color={color} />
+    </mesh>
+  );
+}
+
 interface GLBModelProps {
   file: ExtractedFile;
 }
@@ -87,6 +110,8 @@ export function ThreeDViewerModifier() {
   const [glbFiles, setGlbFiles] = useState<ExtractedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ExtractedFile | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [locationData, setLocationData] = useState<LocationData[]>([]);
+  const [showSpheres, setShowSpheres] = useState<boolean>(true);
 
   useEffect(() => {
     const fetchAndExtractFiles = async () => {
@@ -137,6 +162,52 @@ export function ThreeDViewerModifier() {
       cleanupExtractedFiles(extractedFiles);
     };
   }, [jobId]);
+
+  // Load and parse CSV data from extracted files
+  useEffect(() => {
+    const loadLocationData = async () => {
+      if (extractedFiles.length === 0) return;
+      
+      try {
+        // Find the location-master.csv file in extracted files
+        const csvFile = extractedFiles.find(file => 
+          file.name.toLowerCase().includes('location-master.csv') ||
+          file.name.toLowerCase().includes('location_master.csv')
+        );
+        
+        if (!csvFile) {
+          console.warn('location-master.csv not found in extracted files');
+          return;
+        }
+        
+        const response = await fetch(csvFile.url);
+        const csvText = await response.text();
+        const lines = csvText.split('\n').filter(line => line.trim());
+        
+        const data: LocationData[] = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',');
+          if (values.length >= 8) {
+            data.push({
+              blockName: values[0],
+              floorIndex: parseInt(values[1]),
+              posX: parseFloat(values[5]) || 0,
+              posY: parseFloat(values[6]) || 0,
+              posZ: parseFloat(values[7]) || 0,
+              brand: values[8] || 'unknown'
+            });
+          }
+        }
+        
+        setLocationData(data);
+        
+      } catch (err) {
+        console.error('Failed to load location data:', err);
+      }
+    };
+
+    loadLocationData();
+  }, [extractedFiles]);
 
   if (loading || extracting) {
     return (
@@ -217,6 +288,17 @@ export function ThreeDViewerModifier() {
                 ))}
               </Select>
             </div>
+            
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="showSpheres" 
+                checked={showSpheres}
+                onChange={(e) => setShowSpheres(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <label htmlFor="showSpheres" className="text-sm font-medium">Show Locations</label>
+            </div>
           </div>
         </div>
       </header>
@@ -258,6 +340,23 @@ export function ThreeDViewerModifier() {
               )}
             </Suspense>
           </ModelErrorBoundary>
+          
+          {/* Render location spheres for currently selected floor */}
+          {showSpheres && selectedFile && locationData.length > 0 && (() => {
+            // Extract floor index from selected GLB file name
+            const floorMatch = selectedFile.name.match(/floor[_-]?(\d+)/i) || selectedFile.name.match(/(\d+)/i);
+            const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+            
+            return locationData
+              .filter(location => location.floorIndex === currentFloor)
+              .map((location, index) => (
+                <LocationSphere 
+                  key={`${location.blockName}-${index}`} 
+                  location={location}
+                  color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
+                />
+              ));
+          })()}
           
           <OrbitControls 
             enablePan={true} 
