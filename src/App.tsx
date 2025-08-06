@@ -10,7 +10,7 @@ function App() {
     <Router>
       <div className="dark bg-background min-h-screen text-foreground">
         <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-6">
+          <div className="px-5 py-6">
             <div className="flex items-center justify-between">
               <Link to="/">
                 <img 

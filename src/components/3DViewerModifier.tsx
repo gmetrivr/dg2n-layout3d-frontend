@@ -14,7 +14,11 @@ interface LocationData {
   posX: number;
   posY: number;
   posZ: number;
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
   brand: string;
+  glbUrl?: string;
 }
 
 interface LocationSphereProps {
@@ -29,6 +33,40 @@ function LocationSphere({ location, color = "#ff6b6b" }: LocationSphereProps) {
       <meshStandardMaterial color={color} />
     </mesh>
   );
+}
+
+interface LocationGLBProps {
+  location: LocationData;
+  onError?: () => void;
+}
+
+function LocationGLB({ location, onError }: LocationGLBProps) {
+  try {
+    const { scene } = useGLTF(location.glbUrl!);
+    
+    // Convert degrees to radians for Three.js rotation
+    const rotationX = (location.rotationX * Math.PI) / 180;
+    const rotationY = (location.rotationY * Math.PI) / 180;
+    const rotationZ = (location.rotationZ * Math.PI) / 180;
+    
+    return (
+      <primitive 
+        object={scene.clone()} 
+        position={[location.posX, location.posZ, -location.posY]}
+        rotation={[rotationX, rotationZ, rotationY]}
+        scale={[1, 1, 1]}
+      />
+    );
+  } catch (error) {
+    console.warn(`Failed to load GLB for ${location.blockName}:`, error);
+    onError?.();
+    return (
+      <mesh position={[location.posX, location.posZ, -location.posY]}>
+        <sphereGeometry args={[0.2]} />
+        <meshStandardMaterial color="#ff6b6b" />
+      </mesh>
+    );
+  }
 }
 
 interface GLBModelProps {
@@ -187,18 +225,25 @@ export function ThreeDViewerModifier() {
         const data: LocationData[] = [];
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',');
-          if (values.length >= 8) {
-            data.push({
+          
+          if (values.length >= 12) {
+            const rawUrl = values[1]?.trim();
+            const glbUrl = rawUrl && rawUrl !== 'NA' ? rawUrl : undefined;
+            const locationItem = {
               blockName: values[0],
-              floorIndex: parseInt(values[1]),
-              posX: parseFloat(values[5]) || 0,
-              posY: parseFloat(values[6]) || 0,
-              posZ: parseFloat(values[7]) || 0,
-              brand: values[8] || 'unknown'
-            });
+              floorIndex: parseInt(values[2]),
+              posX: parseFloat(values[6]) || 0,
+              posY: parseFloat(values[7]) || 0,
+              posZ: parseFloat(values[8]) || 0,
+              rotationX: parseFloat(values[9]) || 0,
+              rotationY: parseFloat(values[10]) || 0,
+              rotationZ: parseFloat(values[11]) || 0,
+              brand: values[12] || 'unknown',
+              glbUrl: glbUrl
+            };
+            data.push(locationItem);
           }
         }
-        
         setLocationData(data);
         
       } catch (err) {
@@ -253,7 +298,7 @@ export function ThreeDViewerModifier() {
   return (
     <div className="h-screen flex flex-col">
       {/* Top Bar */}
-      <header className="bg-background border-b border-border p-4">
+      <header className="bg-background border-b border-border px-5 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={() => window.history.back()}>
@@ -341,7 +386,7 @@ export function ThreeDViewerModifier() {
             </Suspense>
           </ModelErrorBoundary>
           
-          {/* Render location spheres for currently selected floor */}
+          {/* Render location objects (GLBs or spheres) for currently selected floor */}
           {showSpheres && selectedFile && locationData.length > 0 && (() => {
             // Extract floor index from selected GLB file name
             const floorMatch = selectedFile.name.match(/floor[_-]?(\d+)/i) || selectedFile.name.match(/(\d+)/i);
@@ -350,11 +395,18 @@ export function ThreeDViewerModifier() {
             return locationData
               .filter(location => location.floorIndex === currentFloor)
               .map((location, index) => (
-                <LocationSphere 
-                  key={`${location.blockName}-${index}`} 
-                  location={location}
-                  color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
-                />
+                location.glbUrl ? (
+                  <LocationGLB 
+                    key={`${location.blockName}-${index}`} 
+                    location={location}
+                  />
+                ) : (
+                  <LocationSphere 
+                    key={`${location.blockName}-${index}`} 
+                    location={location}
+                    color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
+                  />
+                )
               ));
           })()}
           
