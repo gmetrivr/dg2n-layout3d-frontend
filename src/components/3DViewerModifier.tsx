@@ -128,7 +128,7 @@ function LocationGLB({ location, onError, onClick, selectedLocation, editMode = 
       };
     }, [location, movedFixtures, rotatedFixtures]);
     
-    const { key, movedData, rotatedData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    const { movedData, rotatedData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
     
     const handleTransformChange = () => {
       if (groupRef.current && onPositionChange) {
