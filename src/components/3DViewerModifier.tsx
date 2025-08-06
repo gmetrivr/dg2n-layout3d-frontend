@@ -1,7 +1,8 @@
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect, Suspense, Component } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, Grid, Text } from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment, Grid, Text, Edges } from '@react-three/drei';
+import * as THREE from 'three';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -24,25 +25,67 @@ interface LocationData {
 interface LocationSphereProps {
   location: LocationData;
   color?: string;
+  onClick?: (location: LocationData) => void;
+  selectedLocation?: LocationData | null;
 }
 
-function LocationSphere({ location, color = "#ff6b6b" }: LocationSphereProps) {
+function LocationSphere({ location, color = "#ff6b6b", onClick, selectedLocation }: LocationSphereProps) {
   return (
-    <mesh position={[location.posX, location.posZ, -location.posY]}>
-      <sphereGeometry args={[0.2]} />
-      <meshStandardMaterial color={color} />
-    </mesh>
+    <group position={[location.posX, location.posZ, -location.posY]}>
+      <mesh onClick={() => onClick?.(location)}>
+        <sphereGeometry args={[0.2]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      
+      {/* Red bounding box when selected */}
+      {selectedLocation && 
+       selectedLocation.blockName === location.blockName &&
+       selectedLocation.posX === location.posX &&
+       selectedLocation.posY === location.posY &&
+       selectedLocation.posZ === location.posZ && (
+        <lineSegments renderOrder={999}>
+          <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
+          <lineBasicMaterial color="red" />
+        </lineSegments>
+      )}
+    </group>
   );
 }
 
 interface LocationGLBProps {
   location: LocationData;
   onError?: () => void;
+  onClick?: (location: LocationData) => void;
+  selectedLocation?: LocationData | null;
 }
 
-function LocationGLB({ location, onError }: LocationGLBProps) {
+function LocationGLB({ location, onError, onClick, selectedLocation }: LocationGLBProps) {
+  const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
+  
   try {
     const { scene } = useGLTF(location.glbUrl!);
+    
+    // Calculate bounding box after applying rotation
+    useEffect(() => {
+      if (scene) {
+        const clonedScene = scene.clone();
+        // Apply rotation to the cloned scene
+        clonedScene.rotation.set(
+          (location.rotationX * Math.PI) / 180,
+          (location.rotationZ * Math.PI) / 180,  // Note: swapped Y and Z
+          (location.rotationY * Math.PI) / 180
+        );
+        clonedScene.updateMatrixWorld(true);
+        
+        const box = new THREE.Box3().setFromObject(clonedScene);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        setBoundingBox({ 
+          size: [size.x, size.y, size.z], 
+          center: [center.x, center.y, center.z] 
+        });
+      }
+    }, [scene, location.rotationX, location.rotationY, location.rotationZ]);
     
     // Convert degrees to radians for Three.js rotation
     const rotationX = (location.rotationX * Math.PI) / 180;
@@ -50,18 +93,42 @@ function LocationGLB({ location, onError }: LocationGLBProps) {
     const rotationZ = (location.rotationZ * Math.PI) / 180;
     
     return (
-      <primitive 
-        object={scene.clone()} 
-        position={[location.posX, location.posZ, -location.posY]}
-        rotation={[rotationX, rotationZ, rotationY]}
-        scale={[1, 1, 1]}
-      />
+      <group position={[location.posX, location.posZ, -location.posY]}>
+        <primitive 
+          object={scene.clone()} 
+          rotation={[rotationX, rotationZ, rotationY]}
+          scale={[1, 1, 1]}
+        />
+        {/* Transparent bounding box for clicking */}
+        <mesh
+          onClick={() => onClick?.(location)}
+          position={boundingBox.center}
+        >
+          <boxGeometry args={boundingBox.size} />
+          <meshBasicMaterial transparent opacity={0} />
+        </mesh>
+        
+        {/* Red edge outline when selected */}
+        {selectedLocation && 
+         selectedLocation.blockName === location.blockName &&
+         selectedLocation.posX === location.posX &&
+         selectedLocation.posY === location.posY &&
+         selectedLocation.posZ === location.posZ && (
+          <lineSegments position={boundingBox.center} renderOrder={999}>
+            <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+            <lineBasicMaterial color="red" />
+          </lineSegments>
+        )}
+      </group>
     );
   } catch (error) {
     console.warn(`Failed to load GLB for ${location.blockName}:`, error);
     onError?.();
     return (
-      <mesh position={[location.posX, location.posZ, -location.posY]}>
+      <mesh 
+        position={[location.posX, location.posZ, -location.posY]}
+        onClick={() => onClick?.(location)}
+      >
         <sphereGeometry args={[0.2]} />
         <meshStandardMaterial color="#ff6b6b" />
       </mesh>
@@ -75,6 +142,17 @@ interface GLBModelProps {
 
 function GLBModel({ file }: GLBModelProps) {
   const gltf = useGLTF(file.url);
+  
+  useEffect(() => {
+    if (gltf?.scene) {
+      // Make all meshes in the floor GLB non-interactive
+      gltf.scene.traverse((child: any) => {
+        if (child.isMesh) {
+          child.userData.interactive = false;
+        }
+      });
+    }
+  }, [gltf]);
   
   if (!gltf?.scene) {
     return null;
@@ -150,11 +228,48 @@ export function ThreeDViewerModifier() {
   const [extracting, setExtracting] = useState(false);
   const [locationData, setLocationData] = useState<LocationData[]>([]);
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
+
+  const handleFileUpload = async (file: File) => {
+    console.log('File upload started:', file.name, file.size);
+    
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      setError('Please upload a ZIP file');
+      return;
+    }
+
+    setUploadedFile(file);
+    setExtracting(true);
+    setError(null);
+    console.log('Starting extraction...');
+
+    try {
+      const files = await extractZipFiles(file);
+      console.log('Extracted files:', files.length, files);
+      setExtractedFiles(files);
+
+      const glbFiles = files.filter(file => file.name.toLowerCase().endsWith('.glb'));
+      console.log('GLB files found:', glbFiles.length, glbFiles);
+      setGlbFiles(glbFiles);
+      
+      if (glbFiles.length > 0) {
+        setSelectedFile(glbFiles[0]);
+        console.log('Selected first GLB file:', glbFiles[0].name);
+      }
+    } catch (err) {
+      console.error('Failed to extract zip file:', err);
+      setError('Failed to extract ZIP file');
+    } finally {
+      setExtracting(false);
+      setLoading(false);
+      console.log('Upload process finished');
+    }
+  };
 
   useEffect(() => {
     const fetchAndExtractFiles = async () => {
       if (!jobId) {
-        setError('No job ID provided');
         setLoading(false);
         return;
       }
@@ -267,11 +382,45 @@ export function ThreeDViewerModifier() {
     );
   }
 
-  if (error || !jobId) {
+  if (!jobId && extractedFiles.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="p-6 border border-muted rounded-lg text-center max-w-md">
+          <h2 className="text-lg font-semibold mb-4">Upload ZIP File</h2>
+          <p className="text-muted-foreground mb-6">Upload a processed ZIP file to view 3D models</p>
+          
+          <div className="border-2 border-dashed border-muted rounded-lg p-8 mb-4 hover:border-primary/50 transition-colors cursor-pointer">
+            <input
+              type="file"
+              accept=".zip"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileUpload(file);
+              }}
+              className="hidden"
+              id="zip-upload"
+            />
+            <label htmlFor="zip-upload" className="cursor-pointer flex flex-col items-center space-y-2">
+              <div className="text-4xl text-muted-foreground">📁</div>
+              <div className="text-sm font-medium">Click to upload ZIP file</div>
+              <div className="text-xs text-muted-foreground">Or drag and drop</div>
+            </label>
+          </div>
+          
+          <Button variant="outline" onClick={() => window.history.back()}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Go Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="p-6 border border-destructive/20 bg-destructive/5 rounded-lg">
-          <p className="text-destructive mb-4">{error || 'No job ID provided'}</p>
+          <p className="text-destructive mb-4">{error}</p>
           <Button variant="outline" onClick={() => window.history.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Go Back
@@ -349,11 +498,12 @@ export function ThreeDViewerModifier() {
       </header>
 
       {/* 3D Canvas */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <Canvas
           camera={{ position: [10, 10, 10], fov: 50 }}
           shadows
           className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
+          onPointerMissed={() => setSelectedLocation(null)}
         >
           <ambientLight intensity={0.4} />
           <directionalLight 
@@ -399,12 +549,16 @@ export function ThreeDViewerModifier() {
                   <LocationGLB 
                     key={`${location.blockName}-${index}`} 
                     location={location}
+                    onClick={setSelectedLocation}
+                    selectedLocation={selectedLocation}
                   />
                 ) : (
                   <LocationSphere 
                     key={`${location.blockName}-${index}`} 
                     location={location}
                     color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
+                    onClick={setSelectedLocation}
+                    selectedLocation={selectedLocation}
                   />
                 )
               ));
@@ -419,6 +573,28 @@ export function ThreeDViewerModifier() {
             zoomSpeed={0.5}
           />
         </Canvas>
+        
+        {/* Location Info Overlay */}
+        {selectedLocation && (
+          <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-sm">Location Info</h3>
+              <button 
+                onClick={() => setSelectedLocation(null)}
+                className="text-muted-foreground hover:text-foreground text-xs"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-1 text-xs">
+              <div><span className="font-medium">Block:</span> {selectedLocation.blockName}</div>
+              <div><span className="font-medium">Brand:</span> {selectedLocation.brand}</div>
+              <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
+              <div><span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})</div>
+              <div><span className="font-medium">Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)</div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
