@@ -16,30 +16,41 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
   const [error, setError] = useState<string | null>(null);
   const [downloadingFiles, setDownloadingFiles] = useState<boolean>(false);
   const [filesDownloaded, setFilesDownloaded] = useState<boolean>(false);
+  const [retryCount, setRetryCount] = useState<number>(0);
+  const [timeRemaining, setTimeRemaining] = useState<number>(150); // 2.5 minutes in seconds
+
+  // Reset timer when jobId changes (new job)
+  useEffect(() => {
+    setTimeRemaining(150);
+    setJob(null);
+    setLoading(true);
+  }, [jobId]);
 
   useEffect(() => {
     const fetchJobStatus = async () => {
       try {
         const jobData = await apiService.getJobStatus(jobId);
         const wasProcessing = job?.status === 'processing' || job?.status === 'pending';
+        
+        // Reset timer when job status changes to pending/processing for the first time
+        if (!job && (jobData.status === 'pending' || jobData.status === 'processing')) {
+          setTimeRemaining(150); // Reset to 2.5 minutes
+        }
+        
         setJob(jobData);
         setError(null);
+        setRetryCount(0);
         
-        // Auto-download files when job completes
-        if (wasProcessing && jobData.status === 'completed' && !filesDownloaded) {
-          setDownloadingFiles(true);
-          try {
-            await apiService.downloadJobZip(jobData.job_id);
-            setFilesDownloaded(true);
-          } catch (err) {
-            console.error('Auto-download failed:', err);
-            setError('Files are ready but auto-download failed. Use the download button below.');
-          } finally {
-            setDownloadingFiles(false);
-          }
-        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch job status');
+        const maxRetries = 3;
+        if (retryCount < maxRetries) {
+          const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+          }, delay);
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to fetch job status');
+        }
       } finally {
         setLoading(false);
       }
@@ -47,15 +58,28 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
 
     fetchJobStatus();
     
-    // Poll every 2 seconds if job is still processing
+    // Progressive polling: 15s during processing, 2s otherwise
     const interval = setInterval(() => {
       if (job?.status === 'pending' || job?.status === 'processing') {
         fetchJobStatus();
       }
-    }, 2000);
+    }, job?.status === 'processing' ? 15000 : 2000);
 
     return () => clearInterval(interval);
-  }, [jobId, job?.status, filesDownloaded]);
+  }, [jobId, job?.status, filesDownloaded, retryCount]);
+
+  // Countdown timer - starts immediately and runs until job completes
+  useEffect(() => {
+    if (job?.status === 'completed' || job?.status === 'failed') {
+      return; // Don't run timer for completed/failed jobs
+    }
+
+    const timer = setInterval(() => {
+      setTimeRemaining(prev => prev - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [job?.status]);
 
   const handleManualDownload = async () => {
     if (!job?.job_id) return;
@@ -90,8 +114,21 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
     }
   };
 
+  const formatTime = (seconds: number) => {
+    const isNegative = seconds < 0;
+    const absSeconds = Math.abs(seconds);
+    const mins = Math.floor(absSeconds / 60);
+    const secs = absSeconds % 60;
+    const formattedTime = `${mins}:${secs.toString().padStart(2, '0')}`;
+    return isNegative ? `+${formattedTime}` : formattedTime;
+  };
+
+  const getTimeColor = (seconds: number) => {
+    return seconds < 0 ? 'text-yellow-500' : 'text-muted-foreground';
+  };
+
   const getStatusText = () => {
-    if (loading) return 'Loading...';
+    if (loading) return 'Processing...';
     
     switch (job?.status) {
       case 'pending':
@@ -106,6 +143,8 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
         return 'Unknown status';
     }
   };
+
+  const showTimer = loading || job?.status === 'pending' || job?.status === 'processing';
 
 
   if (error) {
@@ -130,7 +169,12 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
           {getStatusIcon()}
           <div>
             <h3 className="font-medium text-foreground">{getStatusText()}</h3>
-            <p className="text-sm text-muted-foreground">Job ID: {jobId.slice(0, 8)}...</p>
+            {showTimer && (
+              <p className={`text-sm ${getTimeColor(timeRemaining)}`}>
+                Est. {formatTime(timeRemaining)}
+              </p>
+            )}
+            <p className="text-sm text-muted-foreground">Job ID: {jobId}</p>
           </div>
         </div>
 
@@ -162,29 +206,28 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
             <Download className="h-4 w-4" />
             Results Ready
           </h4>
-          <div className="text-center p-4">
-            {downloadingFiles ? (
-              <div className="space-y-2">
-                <Loader2 className="h-6 w-6 animate-spin mx-auto" />
-                <p className="text-sm text-muted-foreground">
-                  Downloading all files automatically...
-                </p>
-              </div>
-            ) : filesDownloaded ? (
-              <div className="space-y-2">
-                <CheckCircle className="h-6 w-6 text-green-500 mx-auto" />
-                <p className="text-sm text-foreground font-medium">
-                  All files downloaded successfully!
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Check your Downloads folder for the generated files
-                </p>
+          <div className="text-center p-4 space-y-3">
+            {filesDownloaded ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <CheckCircle className="h-6 w-6 text-green-500 mx-auto" />
+                  <p className="text-sm text-foreground font-medium">
+                    All files downloaded successfully!
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Check your Downloads folder for the generated files
+                  </p>
+                </div>
+                <Button 
+                  onClick={handleVisualize} 
+                  className="w-full"
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  Visualize 3D Models
+                </Button>
               </div>
             ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Files are ready! Download didn't start automatically.
-                </p>
+              <div className="space-y-3">
                 <Button 
                   onClick={handleManualDownload}
                   disabled={downloadingFiles}
@@ -197,28 +240,25 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
                   )}
                   Download All Files
                 </Button>
+                <Button 
+                  onClick={handleVisualize} 
+                  className="w-full"
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  Visualize 3D Models
+                </Button>
               </div>
             )}
           </div>
-          <p className="text-xs text-muted-foreground mt-3 text-center">
-            Files generated in: {job.output_dir}
-          </p>
         </div>
       )}
 
-      <div className="flex gap-2">
-        <Button 
-          onClick={handleVisualize} 
-          className="flex-1" 
-          disabled={job?.status !== 'completed'}
-        >
-          <Eye className="h-4 w-4 mr-2" />
-          Visualize 3D Models
-        </Button>
-        <Button onClick={onReset} variant="outline" className="flex-1">
+      {job?.status === 'completed' && (
+        <Button onClick={onReset} variant="outline" className="w-full">
           Process Another File
         </Button>
-      </div>
+      )}
+
     </div>
   );
 }

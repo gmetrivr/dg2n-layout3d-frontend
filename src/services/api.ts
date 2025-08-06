@@ -38,13 +38,22 @@ export const apiService = {
   },
 
   async getJobStatus(jobId: string): Promise<JobStatus> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     
-    if (!response.ok) {
-      throw new Error(`Failed to get job status: ${response.statusText}`);
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+        signal: controller.signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to get job status: ${response.statusText}`);
+      }
 
-    return response.json();
+      return response.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   async getAllJobs(): Promise<JobStatus[]> {
@@ -58,49 +67,75 @@ export const apiService = {
   },
 
   async downloadFile(jobId: string, fileName: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/download/${jobId}/${fileName}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
     
-    if (!response.ok) {
-      throw new Error(`Failed to download file: ${response.statusText}`);
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/download/${jobId}/${fileName}`, {
+        signal: controller.signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.statusText}`);
+      }
 
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
   
   async downloadJobZip(jobId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
     
-    if (!response.ok) {
-      throw new Error(`Failed to download ZIP: ${response.statusText}`);
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`, {
+        signal: controller.signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download ZIP: ${response.statusText}`);
+      }
 
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${jobId}_output.zip`;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${jobId}_output.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 
   async fetchJobFilesAsZip(jobId: string): Promise<Blob> {
-    // Use the new backend ZIP endpoint
-    const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
     
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ZIP: ${response.statusText}`);
-    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`, {
+        signal: controller.signal
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch ZIP: ${response.statusText}`);
+      }
 
-    return response.blob();
+      return response.blob();
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 };
