@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect, Suspense, Component } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, Grid, Text, Edges } from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment, Grid, Text} from '@react-three/drei';
 import * as THREE from 'three';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
@@ -102,9 +102,9 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
         {/* Transparent bounding box for clicking */}
         <mesh
           onClick={() => onClick?.(location)}
-          position={boundingBox.center}
+          position={boundingBox.center as [number,number,number]}
         >
-          <boxGeometry args={boundingBox.size} />
+          <boxGeometry args={boundingBox.size as [number,number,number]} />
           <meshBasicMaterial transparent opacity={0} />
         </mesh>
         
@@ -114,7 +114,7 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
          selectedLocation.posX === location.posX &&
          selectedLocation.posY === location.posY &&
          selectedLocation.posZ === location.posZ && (
-          <lineSegments position={boundingBox.center} renderOrder={999}>
+          <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
             <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
             <lineBasicMaterial color="red" />
           </lineSegments>
@@ -228,7 +228,7 @@ export function ThreeDViewerModifier() {
   const [extracting, setExtracting] = useState(false);
   const [locationData, setLocationData] = useState<LocationData[]>([]);
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
 
   const handleFileUpload = async (file: File) => {
@@ -239,7 +239,7 @@ export function ThreeDViewerModifier() {
       return;
     }
 
-    setUploadedFile(file);
+    //setUploadedFile(file);
     setExtracting(true);
     setError(null);
     console.log('Starting extraction...');
