@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect, Suspense, Component } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, Grid, Text} from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment, Grid, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
@@ -54,25 +54,30 @@ function LocationSphere({ location, color = "#ff6b6b", onClick, selectedLocation
 
 interface LocationGLBProps {
   location: LocationData;
-  onError?: () => void;
+  onError?: (blockName: string, url: string) => void;
   onClick?: (location: LocationData) => void;
   selectedLocation?: LocationData | null;
 }
 
 function LocationGLB({ location, onError, onClick, selectedLocation }: LocationGLBProps) {
+  // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
+  const isSelected = selectedLocation && 
+    selectedLocation.blockName === location.blockName &&
+    selectedLocation.posX === location.posX &&
+    selectedLocation.posY === location.posY &&
+    selectedLocation.posZ === location.posZ;
   
   try {
     const { scene } = useGLTF(location.glbUrl!);
     
-    // Calculate bounding box after applying rotation
+    // Calculate bounding box once when scene loads
     useEffect(() => {
       if (scene) {
         const clonedScene = scene.clone();
-        // Apply rotation to the cloned scene
         clonedScene.rotation.set(
           (location.rotationX * Math.PI) / 180,
-          (location.rotationZ * Math.PI) / 180,  // Note: swapped Y and Z
+          (location.rotationZ * Math.PI) / 180,
           (location.rotationY * Math.PI) / 180
         );
         clonedScene.updateMatrixWorld(true);
@@ -85,7 +90,7 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
           center: [center.x, center.y, center.z] 
         });
       }
-    }, [scene, location.rotationX, location.rotationY, location.rotationZ]);
+    }, [scene]); // Only depends on scene, not selection state
     
     // Convert degrees to radians for Three.js rotation
     const rotationX = (location.rotationX * Math.PI) / 180;
@@ -108,12 +113,8 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
           <meshBasicMaterial transparent opacity={0} />
         </mesh>
         
-        {/* Red edge outline when selected */}
-        {selectedLocation && 
-         selectedLocation.blockName === location.blockName &&
-         selectedLocation.posX === location.posX &&
-         selectedLocation.posY === location.posY &&
-         selectedLocation.posZ === location.posZ && (
+        {/* Red edge outline when selected - use calculated bounding box */}
+        {isSelected && (
           <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
             <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
             <lineBasicMaterial color="red" />
@@ -122,8 +123,7 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
       </group>
     );
   } catch (error) {
-    console.warn(`Failed to load GLB for ${location.blockName}:`, error);
-    onError?.();
+    onError?.(location.blockName, location.glbUrl || 'unknown');
     return (
       <mesh 
         position={[location.posX, location.posZ, -location.posY]}
@@ -138,9 +138,10 @@ function LocationGLB({ location, onError, onClick, selectedLocation }: LocationG
 
 interface GLBModelProps {
   file: ExtractedFile;
+  onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
 }
 
-function GLBModel({ file }: GLBModelProps) {
+function GLBModel({ file, onBoundsCalculated }: GLBModelProps) {
   const gltf = useGLTF(file.url);
   
   useEffect(() => {
@@ -151,8 +152,16 @@ function GLBModel({ file }: GLBModelProps) {
           child.userData.interactive = false;
         }
       });
+      
+      // Calculate bounding box once for camera positioning
+      if (onBoundsCalculated) {
+        const box = new THREE.Box3().setFromObject(gltf.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        onBoundsCalculated([center.x, center.y, center.z], [size.x, size.y, size.z]);
+      }
     }
-  }, [gltf]);
+  }, [gltf, onBoundsCalculated]);
   
   if (!gltf?.scene) {
     return null;
@@ -230,32 +239,51 @@ export function ThreeDViewerModifier() {
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
+  const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
+  const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
+  const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
+
+  const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
+    // Position camera to view the entire model
+    const maxDimension = Math.max(...size);
+    const distance = maxDimension * 1.5; // Adjust multiplier as needed
+    setCameraPosition([center[0] + distance, center[1] + distance, center[2] + distance]);
+    setOrbitTarget(center); // Set orbit target to the model center
+  };
+
+  const handleGLBError = (blockName: string, url: string) => {
+    setFailedGLBs(prev => {
+      const newSet = new Set(prev);
+      newSet.add(`${blockName} (${url})`);
+      return newSet;
+    });
+  };
+
+  // Log summary of failed GLBs once
+  useEffect(() => {
+    if (failedGLBs.size > 0) {
+      console.warn(`Failed to load ${failedGLBs.size} GLB fixture(s):`, Array.from(failedGLBs));
+    }
+  }, [failedGLBs]);
 
   const handleFileUpload = async (file: File) => {
-    console.log('File upload started:', file.name, file.size);
-    
     if (!file.name.toLowerCase().endsWith('.zip')) {
       setError('Please upload a ZIP file');
       return;
     }
 
-    //setUploadedFile(file);
     setExtracting(true);
     setError(null);
-    console.log('Starting extraction...');
 
     try {
       const files = await extractZipFiles(file);
-      console.log('Extracted files:', files.length, files);
       setExtractedFiles(files);
 
       const glbFiles = files.filter(file => file.name.toLowerCase().endsWith('.glb'));
-      console.log('GLB files found:', glbFiles.length, glbFiles);
       setGlbFiles(glbFiles);
       
       if (glbFiles.length > 0) {
         setSelectedFile(glbFiles[0]);
-        console.log('Selected first GLB file:', glbFiles[0].name);
       }
     } catch (err) {
       console.error('Failed to extract zip file:', err);
@@ -263,7 +291,6 @@ export function ThreeDViewerModifier() {
     } finally {
       setExtracting(false);
       setLoading(false);
-      console.log('Upload process finished');
     }
   };
 
@@ -500,7 +527,7 @@ export function ThreeDViewerModifier() {
       {/* 3D Canvas */}
       <div className="flex-1 relative">
         <Canvas
-          camera={{ position: [10, 10, 10], fov: 50 }}
+          camera={{ position: cameraPosition, fov: 50 }}
           shadows
           className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
           onPointerMissed={() => setSelectedLocation(null)}
@@ -531,7 +558,7 @@ export function ThreeDViewerModifier() {
           <ModelErrorBoundary fallback={<ErrorFallback />}>
             <Suspense fallback={<LoadingFallback />}>
               {selectedFile && (
-                <GLBModel file={selectedFile} />
+                <GLBModel file={selectedFile} onBoundsCalculated={handleBoundsCalculated} />
               )}
             </Suspense>
           </ModelErrorBoundary>
@@ -551,6 +578,7 @@ export function ThreeDViewerModifier() {
                     location={location}
                     onClick={setSelectedLocation}
                     selectedLocation={selectedLocation}
+                    onError={handleGLBError}
                   />
                 ) : (
                   <LocationSphere 
@@ -565,6 +593,7 @@ export function ThreeDViewerModifier() {
           })()}
           
           <OrbitControls 
+            target={orbitTarget}
             enablePan={true} 
             enableZoom={true} 
             enableRotate={true} 
