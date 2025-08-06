@@ -30,7 +30,6 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
     const fetchJobStatus = async () => {
       try {
         const jobData = await apiService.getJobStatus(jobId);
-        const wasProcessing = job?.status === 'processing' || job?.status === 'pending';
         
         // Reset timer when job status changes to pending/processing for the first time
         if (!job && (jobData.status === 'pending' || jobData.status === 'processing')) {
