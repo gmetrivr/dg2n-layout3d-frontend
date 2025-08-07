@@ -127,7 +127,7 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
   };
 
   const getStatusText = () => {
-    if (loading) return 'Processing...';
+    if (loading || !job) return 'Processing...';
     
     switch (job?.status) {
       case 'pending':
@@ -139,7 +139,7 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
       case 'failed':
         return 'Processing failed';
       default:
-        return 'Unknown status';
+        return 'Processing...';
     }
   };
 
