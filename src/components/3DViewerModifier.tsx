@@ -337,6 +337,10 @@ function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloo
         if (child.isMesh && child.name.startsWith('floorplate_')) {
           child.userData.interactive = true;
           
+          // Recompute bounding box for this mesh after loading
+          child.geometry.computeBoundingBox();
+          child.geometry.computeBoundingSphere();
+          
           // Find the CSV data for this mesh
           let surfaceData = null;
           let brand = 'unknown';
