@@ -16,7 +16,7 @@ export function Home() {
         </div>
 
         <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-          {/* CAD to 3D Card */}
+          {/* CAD to 3D Cards */}
           <Link
             to="/cad-to-3d"
             className="group relative overflow-hidden rounded-2xl bg-card border border-border p-8 transition-all duration-300 hover:shadow-xl hover:shadow-primary/10 hover:border-primary/50"
