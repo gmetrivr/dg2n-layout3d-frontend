@@ -1,9 +1,11 @@
-import { useState, useEffect, Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { useState, useEffect, Suspense, useMemo } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF } from '@react-three/drei';
-import * as THREE from 'three';
+import { BoxHelper } from "three";
 import { Button } from "@/shadcn/components/ui/button";
 import { ArrowLeft } from 'lucide-react';
+import { DoubleSide, Mesh, MeshBasicMaterial } from "three";
+import { SkeletonUtils } from "three-stdlib";
 
 interface MeshInfo {
   name: string | null;
@@ -121,12 +123,26 @@ function GLBAnalyzer({ file }: { file: File }) {
   );
 }
 
+function getRandomColor(): string {
+  // Generate a random number between 0 and 0xFFFFFF (16777215)
+  const randomNum = Math.floor(Math.random() * 0xffffff);
+
+  // Convert to hexadecimal and pad with zeros if needed
+  const hexColor = `#${randomNum.toString(16).padStart(6, "0")}`;
+
+  return hexColor;
+}
+
+function getRandomNumber(min: number, max: number): number {
+  // Ensure min is inclusive and max is exclusive
+  return Math.random() * (max - min) + min;
+}
+
 function GLBScene({ 
   url, 
   onMeshesFound, 
-  onMeshClick, 
+  // onMeshClick,
   clickedMeshId,
-  useBboxClickable 
 }: { 
   url: string; 
   onMeshesFound: (meshes: MeshInfo[]) => void;
@@ -136,61 +152,105 @@ function GLBScene({
 }) {
   const gltf = useGLTF(url);
 
-  useEffect(() => {
-    if (!gltf?.scene) return;
-    const foundMeshes: MeshInfo[] = [];
-    
-    gltf.scene.traverse((child: any) => {
+  const meshes = useMemo(() => {
+    if (!gltf?.scene) return [];
+    const cloned = SkeletonUtils.clone(gltf.scene);
+    const foundMeshes: Mesh[] = [];
+
+    cloned.traverse((child: any) => {
       if (child.isMesh) {
-        const meshId = child.userData.meshId ?? child.uuid;
-        child.userData.meshId = meshId;
-        
-        // Store original material once
-        if (!child.userData.origMat && child.material) {
-          child.userData.origMat = child.material.clone?.() ?? child.material;
-        }
-        
-        foundMeshes.push({
-          name: child.name || null,
-          type: child.type,
-          hasGeometry: !!child.geometry,
-          vertexCount: child.geometry?.attributes?.position?.count || 0,
-          materialCount: Array.isArray(child.material) ? child.material.length : (child.material ? 1 : 0),
-          id: meshId,
-          isClicked: false,
-        });
+        child.material = new MeshBasicMaterial({ color: getRandomColor() });
+        child.material.side = DoubleSide;
+        child.position.y += getRandomNumber(0, 5);
+        foundMeshes.push(child);
       }
     });
-    
-    onMeshesFound(foundMeshes);
-  }, [gltf, onMeshesFound]);
+
+    return foundMeshes;
+  }, [gltf]);
+
+  const threeScene = useThree(s => s.scene)
+
+  useEffect(() => {
+    if(meshes.length === 0) {
+      return
+    }
+    const boxHelpers: BoxHelper[] = [];
+    for(const o of meshes) {
+      o.geometry.computeBoundingBox();
+      const box = new BoxHelper(o);
+      threeScene.add(box);
+    }
+
+    return () => {
+      for(const b of boxHelpers) {
+        threeScene.remove(b);
+      }
+    };
+  }, [meshes, threeScene]);
+
+  // useEffect(() => {
+  //   if (!gltf?.scene) return;
+  //   const foundMeshes: MeshInfo[] = [];
+  //
+  //   gltf.scene.traverse((child: any) => {
+  //     if (child.isMesh) {
+  //       const meshId = child.userData.meshId ?? child.uuid;
+  //       child.userData.meshId = meshId;
+  //
+  //       // Store original material once
+  //       if (!child.userData.origMat && child.material) {
+  //         child.userData.origMat = child.material.clone?.() ?? child.material;
+  //       }
+  //
+  //       foundMeshes.push({
+  //         name: child.name || null,
+  //         type: child.type,
+  //         hasGeometry: !!child.geometry,
+  //         vertexCount: child.geometry?.attributes?.position?.count || 0,
+  //         materialCount: Array.isArray(child.material) ? child.material.length : (child.material ? 1 : 0),
+  //         id: meshId,
+  //         isClicked: false,
+  //       });
+  //     }
+  //   });
+  //
+  //   onMeshesFound(foundMeshes);
+  // }, [gltf, onMeshesFound]);
 
   // Highlight clicked mesh by swapping material (restore others)
-  useEffect(() => {
-    if (!gltf?.scene) return;
-    gltf.scene.traverse((child: any) => {
-      if (!child.isMesh) return;
-      const isHit = child.userData.meshId === clickedMeshId;
-      if (isHit) {
-        // Use fresh material to avoid mutating shared ones
-        child.material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-      } else if (child.userData.origMat) {
-        child.material = child.userData.origMat;
-      }
-    });
-  }, [gltf, clickedMeshId]);
+  // useEffect(() => {
+  //   if (!gltf?.scene) return;
+  //   gltf.scene.traverse((child: any) => {
+  //     if (!child.isMesh) return;
+  //     const isHit = child.userData.meshId === clickedMeshId;
+  //     if (isHit) {
+  //       // Use fresh material to avoid mutating shared ones
+  //       child.material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  //     } else if (child.userData.origMat) {
+  //       child.material = child.userData.origMat;
+  //     }
+  //   });
+  // }, [gltf, clickedMeshId]);
 
   const handleClick = (e: any) => {
+    e.stopPropagation();
     console.log('CLICK DETECTED! Hit object:', e.object, 'MeshId:', e.object.userData.meshId);
-    // e.stopPropagation();
-    const hit = e.object; // This is the actual intersected mesh
-    const id = hit.userData.meshId ?? hit.uuid;
-    onMeshClick(id);
+    // const hit = e.object; // This is the actual intersected mesh
+    // const id = hit.userData.meshId ?? hit.uuid;
+    // onMeshClick(id);
   };
 
   return (
+    <group>
+      {
+        meshes.map((mesh, i) => (
+          <primitive key={mesh.uuid + i} object={mesh} onClick={handleClick} renderOrder={i} />
+        ))
+      }
+    </group>
     // Events on the root primitive will fire with the actual child in e.object
-    <primitive object={gltf.scene} onClick={handleClick} />
+    // <primitive object={gltf.scene} onClick={handleClick} />
   );
 }
 
