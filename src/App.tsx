@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { Home } from './components/Home';
 import { CadTo3D } from './components/CadTo3D';
 import { ThreeDViewerModifier } from './components/3DViewerModifier';
+import { GLBMeshDebugger } from './components/GLBMeshDebugger';
 import dg2nLogo from './assets/dg2n_logo_wb.png';
 import './App.css';
 
@@ -10,7 +11,7 @@ function App() {
     <Router>
       <div className="dark bg-background min-h-screen text-foreground">
         <header className="border-b border-border">
-          <div className="px-5 py-6">
+          <div className="px-5 py-3">
             <div className="flex items-center justify-between">
               <Link to="/">
                 <img 
@@ -32,6 +33,12 @@ function App() {
                 >
                   3D Viewer Modifier
                 </Link>
+                <Link 
+                  to="/glb-debug" 
+                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  GLB Debug
+                </Link>
               </nav>
             </div>
           </div>
@@ -41,6 +48,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/cad-to-3d" element={<CadTo3D />} />
           <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
+          <Route path="/glb-debug" element={<GLBMeshDebugger />} />
         </Routes>
 
         <footer className="border-t border-border mt-auto">
