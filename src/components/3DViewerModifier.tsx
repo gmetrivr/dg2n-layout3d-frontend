@@ -65,7 +65,7 @@ interface LocationGLBProps {
   onTransformEnd?: () => void;
 }
 
-function LocationGLB({ location, onError, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
+function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -254,21 +254,21 @@ function getBrandColor(brand: string): number {
     return 0x808080; // Gray for arch
   }
   
-  // For other brands, use a better color variety
-  const predefinedColors = [
-    0x00ff00, // Green
-    0x0000ff, // Blue  
-    0xff00ff, // Magenta
-    0xffff00, // Yellow
-    0x00ffff, // Cyan
-    0xffa500, // Orange
-    0x800080, // Purple
-    0xffc0cb, // Pink
-    0xa52a2a, // Brown
-    0x90ee90, // Light Green
-    0x87ceeb, // Sky Blue
-    0xdda0dd, // Plum
-  ];
+  // // For other brands, use a better color variety
+  // const predefinedColors = [
+  //   0x00ff00, // Green
+  //   0x0000ff, // Blue
+  //   0xff00ff, // Magenta
+  //   0xffff00, // Yellow
+  //   0x00ffff, // Cyan
+  //   0xffa500, // Orange
+  //   0x800080, // Purple
+  //   0xffc0cb, // Pink
+  //   0xa52a2a, // Brown
+  //   0x90ee90, // Light Green
+  //   0x87ceeb, // Sky Blue
+  //   0xdda0dd, // Plum
+  // ];
   
   // Better hash function to reduce collisions
   let hash = 5381; // djb2 hash initial value
@@ -1180,7 +1180,7 @@ export function ThreeDViewerModifier() {
           {showSpheres && (selectedFloorFile || selectedFile) && locationData.length > 0 && (() => {
             // Extract floor index from the logical floor selection (not the actual GLB being rendered)
             const fileForFloorExtraction = selectedFloorFile || selectedFile;
-            const floorMatch = fileForFloorExtraction.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction.name.match(/(\d+)/i);
+            const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
             const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
             
             return locationData
