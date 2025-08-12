@@ -3,6 +3,8 @@ import { useState, useEffect, Suspense, Component, useRef, useMemo, useCallback 
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
+import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -524,6 +526,7 @@ export function ThreeDViewerModifier() {
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -620,6 +623,117 @@ export function ThreeDViewerModifier() {
     setSelectedLocation(null);
     setTimeout(() => setSelectedLocation(location), 10);
   }, []);
+
+  const handleDownloadGLB = useCallback(async () => {
+    if (!selectedFile || isExporting) return;
+    
+    setIsExporting(true);
+    
+    let dracoLoader: DRACOLoader | null = null;
+    
+    try {
+      // Create a new scene to combine all GLB models
+      const exportScene = new THREE.Scene();
+      
+      // Load the floor model using GLTFLoader directly
+      const loader = new GLTFLoader();
+      
+      // Set up DRACO loader for compressed GLBs
+      dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      loader.setDRACOLoader(dracoLoader);
+      
+      // Add the floor model
+      const floorGLTF = await new Promise<GLTF>((resolve, reject) => {
+        loader.load(selectedFile.url, resolve, undefined, reject);
+      });
+      const floorModel = floorGLTF.scene.clone();
+      exportScene.add(floorModel);
+      
+      // Get current floor index for filtering fixtures
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+      
+      // Add all fixture GLBs for the current floor
+      const currentFloorLocations = locationData.filter(location => 
+        location.floorIndex === currentFloor && location.glbUrl
+      );
+      
+      for (const location of currentFloorLocations) {
+        try {
+          const fixtureGLTF = await new Promise<GLTF>((resolve, reject) => {
+            loader.load(location.glbUrl!, resolve, undefined, reject);
+          });
+          const fixtureModel = fixtureGLTF.scene.clone();
+          
+          // Apply positioning and rotation
+          const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+          const movedData = movedFixtures.get(key);
+          const rotatedData = rotatedFixtures.get(key);
+          
+          // Position
+          if (movedData) {
+            fixtureModel.position.set(
+              movedData.newPosition[0],
+              movedData.newPosition[2], 
+              -movedData.newPosition[1]
+            );
+          } else {
+            fixtureModel.position.set(location.posX, location.posZ, -location.posY);
+          }
+          
+          // Rotation
+          fixtureModel.rotation.set(
+            (location.rotationX * Math.PI) / 180,
+            (location.rotationZ * Math.PI) / 180,
+            (location.rotationY * Math.PI) / 180
+          );
+          
+          if (rotatedData) {
+            fixtureModel.rotateY((rotatedData.rotationOffset * Math.PI) / 180);
+          }
+          
+          exportScene.add(fixtureModel);
+        } catch (error) {
+          console.warn(`Failed to load fixture GLB for export: ${location.blockName}`, error);
+        }
+      }
+      
+      // Export the combined scene as GLB
+      const exporter = new GLTFExporter();
+      
+      const result = await new Promise<ArrayBuffer>((resolve, reject) => {
+        exporter.parse(
+          exportScene,
+          (gltf) => resolve(gltf as ArrayBuffer),
+          (error) => reject(error),
+          { binary: true }
+        );
+      });
+      
+      // Create and download the file
+      const blob = new Blob([result], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `floor-${currentFloor}-combined.glb`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+    } catch (error) {
+      console.error('Failed to export GLB:', error);
+      alert('Failed to export GLB file');
+    } finally {
+      // Cleanup DRACO loader
+      if (dracoLoader) {
+        dracoLoader.dispose();
+      }
+      setIsExporting(false);
+    }
+  }, [selectedFile, selectedFloorFile, locationData, movedFixtures, rotatedFixtures, isExporting]);
 
   // Log summary of failed GLBs once
   useEffect(() => {
@@ -1090,6 +1204,24 @@ export function ThreeDViewerModifier() {
                 This is a feature preview. Edit changes are not saved.
               </div>
             )}
+            
+            {/* Download GLB Button */}
+            <div className="border-t border-border pt-2">
+              <button
+                onClick={handleDownloadGLB}
+                disabled={isExporting || !selectedFile}
+                className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isExporting ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Exporting...
+                  </span>
+                ) : (
+                  'Download GLB'
+                )}
+              </button>
+            </div>
             
             {/* Job Info */}
             {jobId && (
