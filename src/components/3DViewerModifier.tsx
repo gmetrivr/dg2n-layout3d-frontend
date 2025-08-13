@@ -10,6 +10,7 @@ import { Select } from "../components/ui/select";
 import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
 import { apiService, type JobStatus } from '../services/api';
 import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
+import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
 
 interface LocationData {
@@ -196,6 +197,7 @@ function LocationGLB({ location, onClick, selectedLocation, editMode = false, on
             object={groupRef.current}
             mode="translate"
             space="world"
+            showY={false}
             onObjectChange={handleTransformChange}
             onMouseDown={onTransformStart}
             onMouseUp={onTransformEnd}
@@ -537,6 +539,7 @@ export function ThreeDViewerModifier() {
   const [isExporting, setIsExporting] = useState(false);
   const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
   const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [isExportingZip, setIsExportingZip] = useState(false);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -762,6 +765,229 @@ export function ThreeDViewerModifier() {
       setIsExporting(false);
     }
   }, [selectedFile, selectedFloorFile, locationData, movedFixtures, rotatedFixtures, isExporting]);
+
+  const handleDownloadModifiedZip = useCallback(async () => {
+    if (isExportingZip) return;
+    
+    setIsExportingZip(true);
+    
+    try {
+      const zip = new JSZip();
+      
+      
+      // Add all original files except the CSVs that need to be modified
+      for (const file of extractedFiles) {
+        if (file.name.toLowerCase().includes('location-master.csv') || 
+            file.name.toLowerCase().includes('floor-plates-all.csv')) {
+          continue; // Skip these, we'll add modified versions
+        }
+        zip.file(file.name, file.blob);
+      }
+      
+      // Create modified location-master.csv
+      await createModifiedLocationMasterCSV(zip);
+      
+      // Create modified floor-plates-all.csv if there are floor plate changes
+      if (modifiedFloorPlates.size > 0) {
+        await createModifiedFloorPlatesCSV(zip);
+      } else {
+        // Add original floor-plates-all.csv
+        const originalFloorPlatesFile = extractedFiles.find(file => 
+          file.name.toLowerCase().includes('floor-plates-all.csv')
+        );
+        if (originalFloorPlatesFile) {
+          zip.file(originalFloorPlatesFile.name, originalFloorPlatesFile.blob);
+        }
+      }
+      
+      // Generate and download the ZIP
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `modified-layout-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+    } catch (error) {
+      console.error('Failed to create modified ZIP:', error);
+      alert('Failed to create modified ZIP file');
+    } finally {
+      setIsExportingZip(false);
+    }
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, isExportingZip]);
+
+  const createModifiedLocationMasterCSV = async (zip: JSZip) => {
+    // Find original location-master.csv
+    const originalFile = extractedFiles.find(file => 
+      file.name.toLowerCase().includes('location-master.csv')
+    );
+    
+    if (!originalFile) {
+      console.warn('Original location-master.csv not found');
+      return;
+    }
+    
+    // Read original CSV content
+    const response = await fetch(originalFile.url);
+    const csvText = await response.text();
+    const lines = csvText.split('\n');
+    
+    
+    if (lines.length === 0) return;
+    
+    // Keep header
+    const modifiedLines = [lines[0]];
+    
+    // Process each data line
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Always keep empty lines and lines that don't parse correctly
+      if (!line.trim()) {
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      const values = line.split(',');
+      
+      // Always keep the line, even if it doesn't have enough columns
+      if (values.length < 12) {
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      // Try to parse the position data
+      let blockName, posX, posY, posZ, rotationZ;
+      try {
+        blockName = values[0];
+        posX = parseFloat(values[6]) || 0;
+        posY = parseFloat(values[7]) || 0;
+        posZ = parseFloat(values[8]) || 0;
+        rotationZ = parseFloat(values[11]) || 0;
+      } catch (error) {
+        // If parsing fails, keep the original line
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      // Check if this location has been moved or rotated
+      const key = `${blockName}-${posX}-${posY}-${posZ}`;
+      
+      // Try exact match first
+      let movedData = movedFixtures.get(key);
+      let rotatedData = rotatedFixtures.get(key);
+      
+      // If no exact match, try finding by approximate position match
+      if (!movedData && !rotatedData) {
+        for (const [mapKey, data] of movedFixtures.entries()) {
+          const [mapBlockName, mapPosX, mapPosY, mapPosZ] = mapKey.split('-');
+          if (mapBlockName === blockName &&
+              Math.abs(parseFloat(mapPosX) - posX) < 0.0001 &&
+              Math.abs(parseFloat(mapPosY) - posY) < 0.0001 &&
+              Math.abs(parseFloat(mapPosZ) - posZ) < 0.0001) {
+            movedData = data;
+            break;
+          }
+        }
+        
+        for (const [mapKey, data] of rotatedFixtures.entries()) {
+          const [mapBlockName, mapPosX, mapPosY, mapPosZ] = mapKey.split('-');
+          if (mapBlockName === blockName &&
+              Math.abs(parseFloat(mapPosX) - posX) < 0.0001 &&
+              Math.abs(parseFloat(mapPosY) - posY) < 0.0001 &&
+              Math.abs(parseFloat(mapPosZ) - posZ) < 0.0001) {
+            rotatedData = data;
+            break;
+          }
+        }
+      }
+      
+      // Update position if moved
+      if (movedData) {
+        values[6] = movedData.newPosition[0].toFixed(12);
+        values[7] = movedData.newPosition[1].toFixed(12);
+        values[8] = movedData.newPosition[2].toFixed(1);
+      }
+      
+      // Update rotation if rotated
+      if (rotatedData) {
+        const newRotationZ = rotationZ + rotatedData.rotationOffset;
+        values[11] = newRotationZ.toFixed(1);
+      }
+      
+      modifiedLines.push(values.join(','));
+    }
+    
+    // Add modified CSV to zip - preserve original file structure
+    const modifiedCSV = modifiedLines.join('\n');
+    zip.file(originalFile.name, modifiedCSV);
+  };
+
+  const createModifiedFloorPlatesCSV = async (zip: JSZip) => {
+    // Find original floor-plates-all.csv
+    const originalFile = extractedFiles.find(file => 
+      file.name.toLowerCase().includes('floor-plates-all.csv')
+    );
+    
+    if (!originalFile) {
+      console.warn('Original floor-plates-all.csv not found');
+      return;
+    }
+    
+    // Read original CSV content
+    const response = await fetch(originalFile.url);
+    const csvText = await response.text();
+    const lines = csvText.split('\n');
+    
+    if (lines.length === 0) return;
+    
+    // Keep header
+    const modifiedLines = [lines[0]];
+    
+    // Process each data line
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Always keep empty lines
+      if (!line.trim()) {
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      const values = line.split(',');
+      
+      // Always keep the line, even if it doesn't have enough columns
+      if (values.length < 12) {
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      // Try to update brand if this floor plate was modified
+      try {
+        const meshName = values[11]; // meshName is at index 11
+        
+        // Check if this floor plate has been modified
+        const modifiedData = modifiedFloorPlates.get(meshName);
+        if (modifiedData && modifiedData.brand !== values[2]) {
+          // Update brand (index 2)
+          values[2] = modifiedData.brand;
+        }
+      } catch (error) {
+        // If parsing fails, keep the original line
+        modifiedLines.push(line);
+        continue;
+      }
+      
+      modifiedLines.push(values.join(','));
+    }
+    
+    // Add modified CSV to zip
+    const modifiedCSV = modifiedLines.join('\n');
+    zip.file(originalFile.name, modifiedCSV);
+  };
 
   // Log summary of failed GLBs once
   useEffect(() => {
@@ -1233,8 +1459,8 @@ export function ThreeDViewerModifier() {
               </div>
             )}
             
-            {/* Download GLB Button */}
-            <div className="border-t border-border pt-2">
+            {/* Download Buttons */}
+            <div className="border-t border-border pt-2 space-y-2">
               <button
                 onClick={handleDownloadGLB}
                 disabled={isExporting || !selectedFile}
@@ -1249,6 +1475,25 @@ export function ThreeDViewerModifier() {
                   'Download GLB'
                 )}
               </button>
+              
+              <button
+                onClick={handleDownloadModifiedZip}
+                disabled={isExportingZip || extractedFiles.length === 0}
+                className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
+              >
+                {isExportingZip ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Creating ZIP...
+                  </span>
+                ) : (
+                  'Download Edited ZIP'
+                )}
+              </button>
+              
+              <div className="text-xs text-muted-foreground">
+                Downloads all original files with edited CSV values updated in place.
+              </div>
             </div>
             
             {/* Job Info */}
