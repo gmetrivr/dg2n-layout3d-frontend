@@ -22,6 +22,35 @@ export interface UploadResponse {
   total_files: number;
 }
 
+export interface BrandCategory {
+  prefix: string;
+  description: string;
+  items: string[];
+}
+
+export interface BrandCategoriesResponse {
+  brands: string[]; // Legacy flat list for backward compatibility
+  categories: {
+    brands: {
+      private_label: BrandCategory;
+      external: BrandCategory;
+    };
+    areas: {
+      general: BrandCategory;
+      architectural: BrandCategory;
+      other: BrandCategory;
+    };
+    aliases?: Record<string, string>;
+    summary: {
+      total_private_labels: number;
+      total_external_brands: number;
+      total_general_areas: number;
+      total_architectural_areas: number;
+      total_other_areas: number;
+    };
+  };
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -171,5 +200,15 @@ export const apiService = {
 
     const data = await response.json();
     return data.brands || [];
+  },
+
+  async getBrandCategories(): Promise<BrandCategoriesResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/brands`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get brand categories: ${response.statusText}`);
+    }
+
+    return response.json();
   }
 };

@@ -9,7 +9,7 @@ import {
   DialogClose 
 } from "@/shadcn/components/ui/dialog";
 import { Tag, Check, Loader2 } from 'lucide-react';
-import { apiService } from '../services/api';
+import { apiService, type BrandCategoriesResponse } from '../services/api';
 
 interface BrandSelectionModalProps {
   open: boolean;
@@ -25,6 +25,7 @@ export function BrandSelectionModal({
   onBrandSelect
 }: BrandSelectionModalProps) {
   const [brands, setBrands] = useState<string[]>([]);
+  const [brandCategories, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<string>(currentBrand);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,19 +41,21 @@ export function BrandSelectionModal({
         setLoading(true);
         setError(null);
         try {
-          const brandsList = await apiService.getBrands();
-          // Sort with special brands at bottom
-          const specialBrands = ['ARCH', 'OTHER-AREA', 'UNASSIGNED'];
-          const regularBrands = brandsList.filter(brand => 
-            !specialBrands.includes(brand.toUpperCase())
-          ).sort();
-          const bottomBrands = brandsList.filter(brand => 
-            specialBrands.includes(brand.toUpperCase())
-          ).sort();
-          setBrands([...regularBrands, ...bottomBrands]);
+          const categoriesData = await apiService.getBrandCategories();
+          setBrandCategories(categoriesData);
+          setBrands(categoriesData.brands || []);
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Failed to load brands');
-          console.error('Failed to fetch brands:', err);
+          console.warn('Failed to fetch brand categories, falling back to flat list:', err);
+          
+          // Fallback to flat brands list
+          try {
+            const brandsList = await apiService.getBrands();
+            setBrands(brandsList);
+            setBrandCategories(null); // No categories available
+          } catch (fallbackErr) {
+            setError(fallbackErr instanceof Error ? fallbackErr.message : 'Failed to load brands');
+            console.error('Both category and fallback APIs failed:', fallbackErr);
+          }
         } finally {
           setLoading(false);
         }
@@ -68,6 +71,31 @@ export function BrandSelectionModal({
   };
 
   const hasChanges = selectedBrand !== currentBrand;
+
+  const renderBrandButton = (brand: string) => {
+    const isSelected = selectedBrand === brand;
+    const isCurrent = currentBrand === brand;
+    
+    return (
+      <button
+        key={brand}
+        onClick={() => setSelectedBrand(brand)}
+        className={`
+          flex items-center justify-between p-2 rounded-lg border text-left transition-colors text-xs
+          ${isSelected 
+            ? 'border-primary bg-primary/10 text-primary' 
+            : 'border-border hover:border-primary/50 hover:bg-accent'
+          }
+          ${isCurrent && !isSelected ? 'border-muted-foreground/30 bg-muted/50' : ''}
+        `}
+      >
+        <span className="font-medium truncate">{brand}</span>
+        {isSelected && (
+          <Check className="h-3 w-3 text-primary flex-shrink-0 ml-1" />
+        )}
+      </button>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,31 +138,81 @@ export function BrandSelectionModal({
                 Current Brand: <span className="text-primary">{currentBrand}</span>
               </div>
               
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 max-h-80 overflow-y-auto">
-                {brands.map((brand) => {
-                  const isSelected = selectedBrand === brand;
-                  const isCurrent = currentBrand === brand;
-                  
-                  return (
-                    <button
-                      key={brand}
-                      onClick={() => setSelectedBrand(brand)}
-                      className={`
-                        flex items-center justify-between p-3 rounded-lg border text-left transition-colors
-                        ${isSelected 
-                          ? 'border-primary bg-primary/10 text-primary' 
-                          : 'border-border hover:border-primary/50 hover:bg-accent'
-                        }
-                        ${isCurrent && !isSelected ? 'border-muted-foreground/30 bg-muted/50' : ''}
-                      `}
-                    >
-                      <span className="text-sm font-medium truncate">{brand}</span>
-                      {isSelected && (
-                        <Check className="h-4 w-4 text-primary flex-shrink-0 ml-2" />
-                      )}
-                    </button>
-                  );
-                })}
+              <div className="max-h-96 overflow-y-auto space-y-4">
+                {brandCategories ? (
+                  // Organized by categories
+                  <>
+                    {/* Private Label Brands */}
+                    {brandCategories.categories.brands.private_label.items.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#4169e1' }}></div>
+                          {brandCategories.categories.brands.private_label.description}
+                        </h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                          {brandCategories.categories.brands.private_label.items.map(renderBrandButton)}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* External Brands */}
+                    {brandCategories.categories.brands.external.items.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#32cd32' }}></div>
+                          {brandCategories.categories.brands.external.description}
+                        </h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                          {brandCategories.categories.brands.external.items.map(renderBrandButton)}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* General Areas */}
+                    {brandCategories.categories.areas.general.items.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ffa500' }}></div>
+                          {brandCategories.categories.areas.general.description}
+                        </h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                          {brandCategories.categories.areas.general.items.map(renderBrandButton)}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Architectural Areas */}
+                    {brandCategories.categories.areas.architectural.items.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#808080' }}></div>
+                          {brandCategories.categories.areas.architectural.description}
+                        </h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                          {brandCategories.categories.areas.architectural.items.map(renderBrandButton)}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Other/Unassigned */}
+                    {brandCategories.categories.areas.other.items.length > 0 && (
+                      <div>
+                        <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ff0000' }}></div>
+                          {brandCategories.categories.areas.other.description}
+                        </h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                          {brandCategories.categories.areas.other.items.map(renderBrandButton)}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  // Fallback: flat list
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                    {brands.map(renderBrandButton)}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -8,7 +8,7 @@ import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
 import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
-import { apiService, type JobStatus } from '../services/api';
+import { apiService, type JobStatus, type BrandCategoriesResponse } from '../services/api';
 import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
@@ -87,27 +87,6 @@ function LocationGLB({ location, onClick, selectedLocation, editMode = false, on
     return null;
   }
     
-    // Calculate bounding box once when scene loads
-    useEffect(() => {
-      if (scene) {
-        const clonedScene = scene.clone();
-        clonedScene.rotation.set(
-          (location.rotationX * Math.PI) / 180,
-          (location.rotationZ * Math.PI) / 180,
-          (location.rotationY * Math.PI) / 180
-        );
-        clonedScene.updateMatrixWorld(true);
-        
-        const box = new THREE.Box3().setFromObject(clonedScene);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-        setBoundingBox({ 
-          size: [size.x, size.y, size.z], 
-          center: [center.x, center.y, center.z] 
-        });
-      }
-    }, [scene]); // Only depends on scene, not selection state
-    
     const groupRef = useRef<THREE.Group>(null);
     
     // Memoize expensive calculations and lookups
@@ -139,6 +118,35 @@ function LocationGLB({ location, onClick, selectedLocation, editMode = false, on
     }, [location, movedFixtures, rotatedFixtures]);
     
     const { movedData, rotatedData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    
+    // Calculate bounding box when scene loads or rotation changes
+    useEffect(() => {
+      if (scene) {
+        const clonedScene = scene.clone();
+        
+        // Apply base rotation
+        clonedScene.rotation.set(
+          (location.rotationX * Math.PI) / 180,
+          (location.rotationZ * Math.PI) / 180,
+          (location.rotationY * Math.PI) / 180
+        );
+        
+        // Apply additional Y rotation if present
+        if (additionalYRotation !== 0) {
+          clonedScene.rotateY(additionalYRotation);
+        }
+        
+        clonedScene.updateMatrixWorld(true);
+        
+        const box = new THREE.Box3().setFromObject(clonedScene);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        setBoundingBox({ 
+          size: [size.x, size.y, size.z], 
+          center: [center.x, center.y, center.z] 
+        });
+      }
+    }, [scene, additionalYRotation]); // Now depends on both scene and rotation changes
     
     const handleTransformChange = () => {
       if (groupRef.current && onPositionChange) {
@@ -248,68 +256,90 @@ function GLBModel({ file, onBoundsCalculated }: GLBModelProps) {
   return <primitive object={gltf.scene.clone()} />;
 }
 
+// Helper function to get brand category
+function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' | 'legacy' {
+  if (!brand) return 'oth';
+  
+  const normalizedBrand = brand.toLowerCase().trim();
+  
+  // Handle empty or unassigned cases
+  if (normalizedBrand === '' || 
+      normalizedBrand === 'unknown' || 
+      normalizedBrand === 'unassigned' ||
+      normalizedBrand === 'na' ||
+      normalizedBrand === 'null' ||
+      normalizedBrand === 'undefined') {
+    return 'oth';
+  }
+  
+  // Handle prefixed brands
+  if (normalizedBrand.startsWith('pvl-')) return 'pvl';
+  if (normalizedBrand.startsWith('ext-')) return 'ext';
+  if (normalizedBrand.startsWith('gen-')) return 'gen';
+  if (normalizedBrand.startsWith('arx-')) return 'arx';
+  if (normalizedBrand.startsWith('oth-')) return 'oth';
+  
+  // Handle legacy arch
+  if (normalizedBrand === 'arch') return 'arx';
+  
+  // Everything else is legacy brand
+  return 'legacy';
+}
+
+// Helper functions for backward compatibility (kept for potential future use)
+// function isUnassignedBrand(brand: string): boolean {
+//   return getBrandCategory(brand) === 'oth';
+// }
+
+// function isArchBrand(brand: string): boolean {
+//   return getBrandCategory(brand) === 'arx';
+// }
+
 // Generate consistent colors for brands
 function getBrandColor(brand: string): number {
-  // Special cases first
-  if (!brand || brand === 'unknown' || brand === 'unassigned') {
-    return 0xff0000; // Red for unassigned
+  const category = getBrandCategory(brand);
+  
+  switch (category) {
+    case 'oth': return 0xff0000; // Red for unassigned/OTH-
+    case 'arx': return 0x808080; // Gray for arch/ARX-
+    case 'pvl': return 0x4169e1; // Royal Blue for Private Label
+    case 'ext': return 0x32cd32; // Lime Green for External brands
+    case 'gen': return 0xffa500; // Orange for General retail
+    case 'legacy':
+    default:
+      // For legacy brands without prefixes, use hash-based colors
+      let hash = 5381; // djb2 hash initial value
+      for (let i = 0; i < brand.length; i++) {
+        hash = ((hash << 5) + hash) + brand.charCodeAt(i); // hash * 33 + c
+      }
+      
+      // Use a diverse color palette for legacy brands
+      const legacyColors = [
+        0x00ff00, // Green
+        0x0000ff, // Blue  
+        0xff00ff, // Magenta
+        0xffff00, // Yellow
+        0x00ffff, // Cyan
+        0x800080, // Purple
+        0xffc0cb, // Pink
+        0xa52a2a, // Brown
+        0x90ee90, // Light Green
+        0x87ceeb, // Sky Blue
+        0xdda0dd, // Plum
+        0xff6347, // Tomato
+        0xda70d6, // Orchid
+        0xff1493, // Deep Pink
+        0x00ced1, // Dark Turquoise
+        0xffd700, // Gold
+        0x9370db, // Medium Purple
+        0x20b2aa, // Light Sea Green
+        0xff4500, // Orange Red
+        0x7b68ee, // Medium Slate Blue
+        0x48d1cc, // Medium Turquoise
+      ];
+      
+      return legacyColors[Math.abs(hash) % legacyColors.length];
   }
-  
-  if (brand.toLowerCase() === 'arch') {
-    return 0x808080; // Gray for arch
-  }
-  
-  // // For other brands, use a better color variety
-  // const predefinedColors = [
-  //   0x00ff00, // Green
-  //   0x0000ff, // Blue
-  //   0xff00ff, // Magenta
-  //   0xffff00, // Yellow
-  //   0x00ffff, // Cyan
-  //   0xffa500, // Orange
-  //   0x800080, // Purple
-  //   0xffc0cb, // Pink
-  //   0xa52a2a, // Brown
-  //   0x90ee90, // Light Green
-  //   0x87ceeb, // Sky Blue
-  //   0xdda0dd, // Plum
-  // ];
-  
-  // Better hash function to reduce collisions
-  let hash = 5381; // djb2 hash initial value
-  for (let i = 0; i < brand.length; i++) {
-    hash = ((hash << 5) + hash) + brand.charCodeAt(i); // hash * 33 + c
-  }
-  
-  // Use a larger color palette to reduce collisions
-  const expandedColors = [
-    0x00ff00, // Green
-    0x0000ff, // Blue  
-    0xff00ff, // Magenta
-    0xffff00, // Yellow
-    0x00ffff, // Cyan
-    0xffa500, // Orange
-    0x800080, // Purple
-    0xffc0cb, // Pink
-    0xa52a2a, // Brown
-    0x90ee90, // Light Green
-    0x87ceeb, // Sky Blue
-    0xdda0dd, // Plum
-    0x32cd32, // Lime Green
-    0xff6347, // Tomato
-    0x4169e1, // Royal Blue
-    0xda70d6, // Orchid
-    0xff1493, // Deep Pink
-    0x00ced1, // Dark Turquoise
-    0xffd700, // Gold
-    0x9370db, // Medium Purple
-    0x20b2aa, // Light Sea Green
-    0xff4500, // Orange Red
-    0x7b68ee, // Medium Slate Blue
-    0x48d1cc, // Medium Turquoise
-  ];
-  
-  return expandedColors[Math.abs(hash) % expandedColors.length];
 }
 
 interface ShatteredFloorModelProps {
@@ -540,6 +570,7 @@ export function ThreeDViewerModifier() {
   const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -778,6 +809,7 @@ export function ThreeDViewerModifier() {
       // Add all original files except the CSVs that need to be modified
       for (const file of extractedFiles) {
         if (file.name.toLowerCase().includes('location-master.csv') || 
+            file.name.toLowerCase().includes('floor-plate-master.csv') ||
             file.name.toLowerCase().includes('floor-plates-all.csv')) {
           continue; // Skip these, we'll add modified versions
         }
@@ -787,12 +819,13 @@ export function ThreeDViewerModifier() {
       // Create modified location-master.csv
       await createModifiedLocationMasterCSV(zip);
       
-      // Create modified floor-plates-all.csv if there are floor plate changes
+      // Create modified floor plates CSV if there are floor plate changes
       if (modifiedFloorPlates.size > 0) {
         await createModifiedFloorPlatesCSV(zip);
       } else {
-        // Add original floor-plates-all.csv
+        // Add original floor plates CSV
         const originalFloorPlatesFile = extractedFiles.find(file => 
+          file.name.toLowerCase().includes('floor-plate-master.csv') ||
           file.name.toLowerCase().includes('floor-plates-all.csv')
         );
         if (originalFloorPlatesFile) {
@@ -929,13 +962,14 @@ export function ThreeDViewerModifier() {
   };
 
   const createModifiedFloorPlatesCSV = async (zip: JSZip) => {
-    // Find original floor-plates-all.csv
+    // Find original floor plates CSV
     const originalFile = extractedFiles.find(file => 
+      file.name.toLowerCase().includes('floor-plate-master.csv') ||
       file.name.toLowerCase().includes('floor-plates-all.csv')
     );
     
     if (!originalFile) {
-      console.warn('Original floor-plates-all.csv not found');
+      console.warn('Original floor plates CSV not found');
       return;
     }
     
@@ -1091,6 +1125,21 @@ export function ThreeDViewerModifier() {
     };
   }, [jobId]);
 
+  // Fetch brand categories from API
+  useEffect(() => {
+    const fetchBrandCategories = async () => {
+      try {
+        const categories = await apiService.getBrandCategories();
+        setBrandCategories(categories);
+      } catch (error) {
+        console.warn('Failed to fetch brand categories:', error);
+        // Fall back to legacy behavior if API fails
+      }
+    };
+
+    fetchBrandCategories();
+  }, []);
+
   // Load and parse CSV data from extracted files
   useEffect(() => {
     const loadLocationData = async () => {
@@ -1145,14 +1194,14 @@ export function ThreeDViewerModifier() {
       if (extractedFiles.length === 0) return;
       
       try {
-        // Find the floor-plates-all.csv file in extracted files
+        // Find the floor plates CSV file in extracted files
         const csvFile = extractedFiles.find(file => 
-          file.name.toLowerCase().includes('floor-plates-all.csv') ||
-          file.name.toLowerCase().includes('floor_plates_all.csv')
+          file.name.toLowerCase().includes('floor-plate-master.csv') ||
+          file.name.toLowerCase().includes('floor-plates-all.csv')
         );
         
         if (!csvFile) {
-          console.warn('floor-plates-all.csv not found in extracted files');
+          console.warn('floor plates CSV file not found in extracted files');
           return;
         }
         
@@ -1162,7 +1211,7 @@ export function ThreeDViewerModifier() {
         
         const floorData: Record<string, Record<string, any[]>> = {};
         
-        lines.forEach(line => {
+        lines.forEach((line) => {
           const [floorIndex, surfaceId, brand, area, centX, centY, centZ,
                  minX, minY, maxX, maxY, meshName, layerSource] = line.split(',');
           
@@ -1422,37 +1471,119 @@ export function ThreeDViewerModifier() {
             )}
             
             {/* Floor Plates Controls */}
-            {editFloorplatesMode && (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="showWireframe" 
-                    checked={showWireframe}
-                    onChange={(e) => setShowWireframe(e.target.checked)}
-                    className="w-4 h-4"
-                  />
-                  <label htmlFor="showWireframe" className="text-sm font-medium">Wireframe</label>
-                </div>
+            {editFloorplatesMode && (() => {
+              // Calculate counts for current floor
+              const fileForFloorExtraction = selectedFloorFile || selectedFile;
+              const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]plates[_-](\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+              const currentFloor = floorMatch ? floorMatch[1] : '0';
+              const currentFloorPlatesData = floorPlatesData[currentFloor] || {};
+              
+              // Count all brand categories, considering modifications
+              const categoryCounts = {
+                pvl: 0,
+                ext: 0,
+                gen: 0,
+                arx: 0,
+                oth: 0,
+                legacy: 0
+              };
+              
+              // Count from original data
+              Object.entries(currentFloorPlatesData).forEach(([brand, plates]) => {
+                const category = getBrandCategory(brand);
+                categoryCounts[category] += plates.length;
+              });
+              
+              // Adjust counts based on modifications (only for current floor)
+              modifiedFloorPlates.forEach((modifiedData, key) => {
+                // Check if this modification belongs to a floor plate in the current floor
+                // by checking if the mesh name exists in the current floor data
+                let isCurrentFloorPlate = false;
+                Object.values(currentFloorPlatesData).forEach(plates => {
+                  if (plates.some(plate => plate.meshName === key || `${plate.surfaceId}-${plate.brand}` === key)) {
+                    isCurrentFloorPlate = true;
+                  }
+                });
                 
-                <div className="border-t border-border pt-2">
-                  <label className="text-sm font-medium">Colors:</label>
-                  <div className="flex flex-col gap-1 text-xs mt-1">
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ff0000' }}></div>
-                      <span>Unassigned</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded" style={{ backgroundColor: '#808080' }}></div>
-                      <span>Arch</span>
-                    </div>
-                    <div className="text-muted-foreground">
-                      Other brands get unique colors
+                if (!isCurrentFloorPlate) return;
+                
+                const originalBrand = modifiedData.originalBrand || modifiedData.brand;
+                const newBrand = modifiedData.brand;
+                
+                // Remove from original count
+                const originalCategory = getBrandCategory(originalBrand);
+                categoryCounts[originalCategory]--;
+                
+                // Add to new count
+                const newCategory = getBrandCategory(newBrand);
+                categoryCounts[newCategory]++;
+              });
+              
+              return (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="showWireframe" 
+                      checked={showWireframe}
+                      onChange={(e) => setShowWireframe(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <label htmlFor="showWireframe" className="text-sm font-medium">Wireframe</label>
+                  </div>
+                  
+                  <div className="border-t border-border pt-2">
+                    <label className="text-sm font-medium">Categories:</label>
+                    <div className="flex flex-col gap-1 text-xs mt-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#4169e1' }}></div>
+                          <span>PVL- (Private Label)</span>
+                        </div>
+                        <span className="text-muted-foreground">({categoryCounts.pvl})</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#32cd32' }}></div>
+                          <span>EXT- (External)</span>
+                        </div>
+                        <span className="text-muted-foreground">({categoryCounts.ext})</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ffa500' }}></div>
+                          <span>GEN- (General)</span>
+                        </div>
+                        <span className="text-muted-foreground">({categoryCounts.gen})</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#808080' }}></div>
+                          <span>ARX- (Architectural)</span>
+                        </div>
+                        <span className="text-muted-foreground">({categoryCounts.arx})</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ff0000' }}></div>
+                          <span>OTH- (Unassigned)</span>
+                        </div>
+                        <span className="text-muted-foreground">({categoryCounts.oth})</span>
+                      </div>
+                      {categoryCounts.legacy > 0 && (
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 rounded" style={{ backgroundColor: '#cccccc' }}></div>
+                            <span>Legacy (No prefix)</span>
+                          </div>
+                          <span className="text-muted-foreground">({categoryCounts.legacy})</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
             
             {/* Warning for any edit mode */}
             {(editMode || editFloorplatesMode) && (
@@ -1480,7 +1611,7 @@ export function ThreeDViewerModifier() {
               
               <button
                 onClick={handleDownloadModifiedZip}
-                disabled={isExportingZip || extractedFiles.length === 0}
+                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0)}
                 className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
               >
                 {isExportingZip ? (
