@@ -21,9 +21,10 @@ export interface UploadResponse {
 }
 
 export const apiService = {
-  async uploadDwgFile(file: File): Promise<UploadResponse> {
+  async uploadDwgFile(file: File, pipelineVersion: string = '01'): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append('files', file);
+    formData.append('pipeline_version', pipelineVersion);
 
     const response = await fetch(`${API_BASE_URL}/upload`, {
       method: 'POST',

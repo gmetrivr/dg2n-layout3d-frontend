@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Button } from "@/shadcn/components/ui/button";
 import { Upload, FileText, AlertCircle } from 'lucide-react';
 import { apiService } from '../services/api';
@@ -12,6 +12,23 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pipelineVersion, setPipelineVersion] = useState<string>('01');
+
+  // Parse URL parameters and get pipeline version
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlPipeline = urlParams.get('pipeline');
+    
+    if (urlPipeline && /^[0-9]{2}$/.test(urlPipeline)) {
+      setPipelineVersion(urlPipeline);
+    } else {
+      // Get default from localStorage or use '01'
+      const storedDefault = localStorage.getItem('defaultPipeline');
+      if (storedDefault && /^[0-9]{2}$/.test(storedDefault)) {
+        setPipelineVersion(storedDefault);
+      }
+    }
+  }, []);
 
   const validateFile = (file: File): boolean => {
     if (!file.name.toLowerCase().endsWith('.dwg')) {
@@ -59,7 +76,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
     setError(null);
 
     try {
-      const response = await apiService.uploadDwgFile(selectedFile);
+      const response = await apiService.uploadDwgFile(selectedFile, pipelineVersion);
       onUploadSuccess(response.job_id);
       setSelectedFile(null);
     } catch (err) {
@@ -68,6 +85,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
       setIsUploading(false);
     }
   };
+
 
   return (
     <div className="w-full max-w-md mx-auto">
