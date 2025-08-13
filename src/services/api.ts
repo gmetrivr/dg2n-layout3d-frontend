@@ -1,3 +1,5 @@
+import type { ToleranceOverrides } from '../types/tolerance';
+
 const API_BASE_URL = import.meta.env.MODE==="production"?'https://ec2-prod-rhino.dg2n.com':"http://localhost:8081";
 
 export interface JobStatus {
@@ -21,10 +23,19 @@ export interface UploadResponse {
 }
 
 export const apiService = {
-  async uploadDwgFile(file: File, pipelineVersion: string = '01'): Promise<UploadResponse> {
+  async uploadDwgFile(
+    file: File, 
+    pipelineVersion: string = '01', 
+    toleranceOverrides: ToleranceOverrides = {}
+  ): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append('files', file);
     formData.append('pipeline_version', pipelineVersion);
+    
+    // Add tolerance overrides if any are provided
+    if (Object.keys(toleranceOverrides).length > 0) {
+      formData.append('tolerance_overrides', JSON.stringify(toleranceOverrides));
+    }
 
     const response = await fetch(`${API_BASE_URL}/upload`, {
       method: 'POST',
@@ -32,7 +43,8 @@ export const apiService = {
     });
 
     if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Upload failed: ${response.statusText}${errorText ? ` - ${errorText}` : ''}`);
     }
 
     return response.json();
@@ -138,5 +150,15 @@ export const apiService = {
     } finally {
       clearTimeout(timeoutId);
     }
+  },
+
+  async getToleranceDefaults(pipelineVersion: string): Promise<{ pipeline_version: string; default_tolerances: Record<string, number> }> {
+    const response = await fetch(`${API_BASE_URL}/config/tolerances/${pipelineVersion}`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get tolerance defaults: ${response.statusText}`);
+    }
+
+    return response.json();
   }
 };

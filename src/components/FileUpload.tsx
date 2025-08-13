@@ -1,7 +1,9 @@
 import { useState, useCallback } from 'react';
 import { Button } from "@/shadcn/components/ui/button";
-import { Upload, FileText, AlertCircle } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Settings } from 'lucide-react';
 import { apiService } from '../services/api';
+import { ToleranceOverrideModal } from './ToleranceOverrideModal';
+import type { ToleranceOverrides } from '../types/tolerance';
 
 interface FileUploadProps {
   onUploadSuccess: (jobId: string) => void;
@@ -13,6 +15,8 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pipelineVersion, setPipelineVersion] = useState<string>('01');
+  const [toleranceOverrides, setToleranceOverrides] = useState<ToleranceOverrides>({});
+  const [showToleranceModal, setShowToleranceModal] = useState(false);
 
   const validateFile = (file: File): boolean => {
     if (!file.name.toLowerCase().endsWith('.dwg')) {
@@ -60,9 +64,10 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
     setError(null);
 
     try {
-      const response = await apiService.uploadDwgFile(selectedFile, pipelineVersion);
+      const response = await apiService.uploadDwgFile(selectedFile, pipelineVersion, toleranceOverrides);
       onUploadSuccess(response.job_id);
       setSelectedFile(null);
+      setToleranceOverrides({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -104,9 +109,26 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
                   disabled={isUploading}
                 >
                   <option value="01">01-Default (Recommended)</option>
-                  <option value="02">02-Tolerance+</option>
                 </select>
               </div>
+              
+              <div className="flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowToleranceModal(true)}
+                  disabled={isUploading}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Settings className="h-3 w-3" />
+                  Advanced Settings
+                  {Object.keys(toleranceOverrides).length > 0 && (
+                    <span className="bg-primary text-primary-foreground text-xs px-1.5 py-0.5 rounded-full ml-1">
+                      {Object.keys(toleranceOverrides).length}
+                    </span>
+                  )}
+                </Button>
+              </div>
+
               <div className="flex gap-2 justify-center">
                 <Button
                   onClick={handleUpload}
@@ -117,7 +139,10 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => setSelectedFile(null)}
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setToleranceOverrides({});
+                  }}
                   disabled={isUploading}
                 >
                   Remove
@@ -159,6 +184,14 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
           <p className="text-sm">{error}</p>
         </div>
       )}
+
+      <ToleranceOverrideModal
+        open={showToleranceModal}
+        onOpenChange={setShowToleranceModal}
+        pipelineVersion={pipelineVersion}
+        currentOverrides={toleranceOverrides}
+        onApply={setToleranceOverrides}
+      />
     </div>
   );
 }
