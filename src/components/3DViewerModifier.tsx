@@ -7,9 +7,10 @@ import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
 import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { Select } from "../components/ui/select";
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
 import { apiService, type JobStatus } from '../services/api';
 import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
+import { BrandSelectionModal } from './BrandSelectionModal';
 
 interface LocationData {
   blockName: string;
@@ -315,9 +316,10 @@ interface ShatteredFloorModelProps {
   onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
   onFloorPlateClick?: (plateData: any) => void;
   showWireframe?: boolean;
+  modifiedFloorPlates?: Map<string, any>;
 }
 
-function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloorPlateClick, showWireframe = false }: ShatteredFloorModelProps) {
+function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloorPlateClick, showWireframe = false, modifiedFloorPlates }: ShatteredFloorModelProps) {
   const gltf = useGLTF(file.url);
   const [floorPlateMeshes, setFloorPlateMeshes] = useState<any[]>([]);
   
@@ -379,6 +381,12 @@ function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloo
             };
           }
           
+          // Check for modified brand
+          const modifiedData = modifiedFloorPlates?.get(child.name);
+          if (modifiedData) {
+            child.userData = { ...child.userData, ...modifiedData };
+          }
+          
           // Apply brand color
           const brandColor = brandColorMap.get(child.userData.brand) || getBrandColor(child.userData.brand);
           
@@ -406,7 +414,7 @@ function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloo
         onBoundsCalculated([center.x, center.y, center.z], [size.x, size.y, size.z]);
       }
     }
-  }, [gltf, floorPlatesData, onBoundsCalculated]);
+  }, [gltf, floorPlatesData, onBoundsCalculated, modifiedFloorPlates]);
   
   // Cleanup function to clear cache when component unmounts
   useEffect(() => {
@@ -527,6 +535,8 @@ export function ThreeDViewerModifier() {
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -623,6 +633,24 @@ export function ThreeDViewerModifier() {
     setSelectedLocation(null);
     setTimeout(() => setSelectedLocation(location), 10);
   }, []);
+
+  const handleBrandChange = useCallback((newBrand: string) => {
+    if (!selectedFloorPlate) return;
+    
+    const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
+    setModifiedFloorPlates(prev => {
+      const newMap = new Map(prev);
+      newMap.set(key, {
+        ...selectedFloorPlate,
+        brand: newBrand,
+        originalBrand: selectedFloorPlate.originalBrand || selectedFloorPlate.brand
+      });
+      return newMap;
+    });
+    
+    // Update selected floor plate immediately
+    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
+  }, [selectedFloorPlate]);
 
   const handleDownloadGLB = useCallback(async () => {
     if (!selectedFile || isExporting) return;
@@ -1292,6 +1320,7 @@ export function ThreeDViewerModifier() {
                       onBoundsCalculated={handleBoundsCalculated}
                       onFloorPlateClick={(plateData) => setSelectedFloorPlate(plateData)}
                       showWireframe={showWireframe}
+                      modifiedFloorPlates={modifiedFloorPlates}
                     />
                   );
                 }
@@ -1416,19 +1445,42 @@ export function ThreeDViewerModifier() {
         })()}
         
         {/* Floor Plate Info Overlay */}
-        {selectedFloorPlate && editFloorplatesMode && (
-          <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-sm">Floor Plate Info</h3>
-              <button 
-                onClick={() => setSelectedFloorPlate(null)}
-                className="text-muted-foreground hover:text-foreground text-xs"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="space-y-1 text-xs">
-              <div><span className="font-medium">Brand:</span> {selectedFloorPlate.brand || 'Unknown'}</div>
+        {selectedFloorPlate && editFloorplatesMode && (() => {
+          const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
+          const modifiedData = modifiedFloorPlates.get(key);
+          const hasBrandChanged = modifiedData !== undefined;
+          const originalBrand = modifiedData?.originalBrand || selectedFloorPlate.brand;
+          const currentBrand = selectedFloorPlate.brand;
+          
+          return (
+            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-sm">Floor Plate Info</h3>
+                <button 
+                  onClick={() => setSelectedFloorPlate(null)}
+                  className="text-muted-foreground hover:text-foreground text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <div style={{ color: hasBrandChanged ? '#ef4444' : 'inherit' }}>
+                    <span className="font-medium">Brand:</span> {hasBrandChanged ? originalBrand : (currentBrand || 'Unknown')}
+                  </div>
+                  <button
+                    onClick={() => setBrandModalOpen(true)}
+                    className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title="Change brand"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </div>
+                {hasBrandChanged && (
+                  <div style={{ color: '#22c55e' }}>
+                    <span className="font-medium">New Brand:</span> {currentBrand}
+                  </div>
+                )}
               <div><span className="font-medium">Surface ID:</span> {selectedFloorPlate.surfaceId || 'Unknown'}</div>
               <div><span className="font-medium">Area:</span> {selectedFloorPlate.area ? `${selectedFloorPlate.area.toFixed(2)} sqm` : 'Unknown'}</div>
               {selectedFloorPlate.centroid && (
@@ -1445,9 +1497,40 @@ export function ThreeDViewerModifier() {
                 <div><span className="font-medium">Layer:</span> {selectedFloorPlate.layerSource}</div>
               )}
             </div>
+            {hasBrandChanged && (
+              <div className="mt-3 pt-2 border-t border-border">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => {
+                    const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
+                    setModifiedFloorPlates(prev => {
+                      const newMap = new Map(prev);
+                      newMap.delete(key);
+                      return newMap;
+                    });
+                    // Reset to original brand
+                    const originalBrand = modifiedData?.originalBrand || selectedFloorPlate.brand;
+                    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
+                  }}
+                  className="w-full text-xs"
+                >
+                  Reset
+                </Button>
+              </div>
+            )}
           </div>
-        )}
+        );
+        })()}
       </div>
+
+      {/* Brand Selection Modal */}
+      <BrandSelectionModal
+        open={brandModalOpen}
+        onOpenChange={setBrandModalOpen}
+        currentBrand={selectedFloorPlate?.brand || ''}
+        onBrandSelect={handleBrandChange}
+      />
     </div>
   );
 }

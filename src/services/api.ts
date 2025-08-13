@@ -160,5 +160,16 @@ export const apiService = {
     }
 
     return response.json();
+  },
+
+  async getBrands(): Promise<string[]> {
+    const response = await fetch(`${API_BASE_URL}/api/brands`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get brands: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.brands || [];
   }
 };
