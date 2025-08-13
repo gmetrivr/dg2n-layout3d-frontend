@@ -103,7 +103,8 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
                   className="w-full p-2 border rounded bg-background text-foreground"
                   disabled={isUploading}
                 >
-                  <option value="01">Pipeline 01 (Default)</option>
+                  <option value="01">01-Default (Recommended)</option>
+                  <option value="02">02-Tolerance+</option>
                 </select>
               </div>
               <div className="flex gap-2 justify-center">
