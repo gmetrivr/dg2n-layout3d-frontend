@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Button } from "@/shadcn/components/ui/button";
 import { Upload, FileText, AlertCircle } from 'lucide-react';
 import { apiService } from '../services/api';
@@ -13,22 +13,6 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pipelineVersion, setPipelineVersion] = useState<string>('01');
-
-  // Parse URL parameters and get pipeline version
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlPipeline = urlParams.get('pipeline');
-    
-    if (urlPipeline && /^[0-9]{2}$/.test(urlPipeline)) {
-      setPipelineVersion(urlPipeline);
-    } else {
-      // Get default from localStorage or use '01'
-      const storedDefault = localStorage.getItem('defaultPipeline');
-      if (storedDefault && /^[0-9]{2}$/.test(storedDefault)) {
-        setPipelineVersion(storedDefault);
-      }
-    }
-  }, []);
 
   const validateFile = (file: File): boolean => {
     if (!file.name.toLowerCase().endsWith('.dwg')) {
@@ -108,21 +92,36 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
                 {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
               </p>
             </div>
-            <div className="flex gap-2 justify-center">
-              <Button
-                onClick={handleUpload}
-                disabled={isUploading}
-                className="px-6"
-              >
-                {isUploading ? 'Uploading...' : 'Process File'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setSelectedFile(null)}
-                disabled={isUploading}
-              >
-                Remove
-              </Button>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Pick a Pipeline:
+                </label>
+                <select
+                  value={pipelineVersion}
+                  onChange={(e) => setPipelineVersion(e.target.value)}
+                  className="w-full p-2 border rounded bg-background text-foreground"
+                  disabled={isUploading}
+                >
+                  <option value="01">Pipeline 01 (Default)</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-center">
+                <Button
+                  onClick={handleUpload}
+                  disabled={isUploading}
+                  className="px-6"
+                >
+                  {isUploading ? 'Uploading...' : 'Process File'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setSelectedFile(null)}
+                  disabled={isUploading}
+                >
+                  Remove
+                </Button>
+              </div>
             </div>
           </div>
         ) : (
