@@ -805,7 +805,9 @@ export function ThreeDViewerModifier() {
       const url = URL.createObjectURL(content);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `modified-layout-${new Date().toISOString().slice(0, 10)}.zip`;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const jobIdPrefix = jobId ? `${jobId}-` : '';
+      link.download = `${jobIdPrefix}layout-${dateStr}-modified.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
