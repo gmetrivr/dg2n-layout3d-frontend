@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, Suspense, Component, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, Suspense, Component, useRef, useMemo, useCallback, memo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -12,6 +12,7 @@ import { apiService, type JobStatus, type BrandCategoriesResponse } from '../ser
 import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
+import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
 
 interface LocationData {
   blockName: string;
@@ -24,6 +25,7 @@ interface LocationData {
   rotationZ: number;
   brand: string;
   glbUrl?: string; // Will be populated from API
+  _updateTimestamp?: number; // Used to force re-renders when GLB URL changes
 }
 
 interface LocationSphereProps {
@@ -69,7 +71,7 @@ interface LocationGLBProps {
   onTransformEnd?: () => void;
 }
 
-function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -79,7 +81,25 @@ function LocationGLB({ location, onClick, selectedLocation, editMode = false, on
     Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
     Math.abs(selectedLocation.posZ - location.posZ) < 0.001;
   
-  const gltfResult = useGLTF(location.glbUrl!);
+  // Handle GLB URL changes (for fixture type changes) - force reload
+  const [currentGlbUrl, setCurrentGlbUrl] = useState<string | undefined>(location.glbUrl);
+  const prevGlbUrl = useRef(location.glbUrl);
+  
+  useEffect(() => {
+    if (prevGlbUrl.current !== location.glbUrl && prevGlbUrl.current) {
+      // Clear old cache and force reload
+      useGLTF.clear(prevGlbUrl.current);
+      setCurrentGlbUrl(undefined); // Force unmount
+      setTimeout(() => setCurrentGlbUrl(location.glbUrl), 10); // Remount with new URL
+    } else if (!currentGlbUrl) {
+      setCurrentGlbUrl(location.glbUrl);
+    }
+    prevGlbUrl.current = location.glbUrl;
+  }, [location.glbUrl, currentGlbUrl]);
+  
+  if (!currentGlbUrl) return null; // Don't render during URL transition
+  
+  const gltfResult = useGLTF(currentGlbUrl);
   const scene = gltfResult?.scene;
   
   // If no scene loaded yet, return null (let Suspense handle loading)
@@ -213,7 +233,33 @@ function LocationGLB({ location, onClick, selectedLocation, editMode = false, on
         )}
       </>
     );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison function to prevent unnecessary re-renders
+  const prevKey = `${prevProps.location.blockName}-${prevProps.location.posX}-${prevProps.location.posY}-${prevProps.location.posZ}`;
+  const nextKey = `${nextProps.location.blockName}-${nextProps.location.posX}-${nextProps.location.posY}-${nextProps.location.posZ}`;
+  
+  // Check if the specific fixture data changed
+  const prevMovedData = prevProps.movedFixtures?.get(prevKey);
+  const nextMovedData = nextProps.movedFixtures?.get(nextKey);
+  const prevRotatedData = prevProps.rotatedFixtures?.get(prevKey);
+  const nextRotatedData = nextProps.rotatedFixtures?.get(nextKey);
+  
+  return (
+    prevProps.location.blockName === nextProps.location.blockName &&
+    prevProps.location.posX === nextProps.location.posX &&
+    prevProps.location.posY === nextProps.location.posY &&
+    prevProps.location.posZ === nextProps.location.posZ &&
+    prevProps.location.rotationX === nextProps.location.rotationX &&
+    prevProps.location.rotationY === nextProps.location.rotationY &&
+    prevProps.location.rotationZ === nextProps.location.rotationZ &&
+    prevProps.location.glbUrl === nextProps.location.glbUrl &&
+    prevProps.location._updateTimestamp === nextProps.location._updateTimestamp &&
+    prevProps.editMode === nextProps.editMode &&
+    prevProps.selectedLocation === nextProps.selectedLocation &&
+    JSON.stringify(prevMovedData) === JSON.stringify(nextMovedData) &&
+    JSON.stringify(prevRotatedData) === JSON.stringify(nextRotatedData)
+  );
+});
 
 interface GLBModelProps {
   file: ExtractedFile;
@@ -569,7 +615,9 @@ export function ThreeDViewerModifier() {
   const [isExporting, setIsExporting] = useState(false);
   const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
   const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [modifiedFixtures, setModifiedFixtures] = useState<Map<string, { originalType: string, newType: string, newGlbUrl: string }>>(new Map());
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
@@ -743,6 +791,83 @@ export function ThreeDViewerModifier() {
     setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
   }, [selectedFloorPlate]);
 
+  const handleFixtureTypeChange = useCallback(async (newType: string) => {
+    if (!selectedLocation) return;
+    
+    try {
+      // Get new GLB URL for the fixture type
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType);
+      const newGlbUrl = fixtureTypeInfo.glb_url;
+      
+      // Clear the old GLB from Three.js cache to ensure fresh loading
+      const { useGLTF } = await import('@react-three/drei');
+      if (selectedLocation.glbUrl) {
+        // Clear old GLB from cache
+        useGLTF.clear(selectedLocation.glbUrl);
+      }
+      // Preload new GLB
+      useGLTF.preload(newGlbUrl);
+      
+      // Small delay to ensure cache clearing takes effect
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const originalType = fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown';
+      const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+      
+      // Store the modification
+      setModifiedFixtures(prev => {
+        const newMap = new Map(prev);
+        newMap.set(key, { 
+          originalType, 
+          newType, 
+          newGlbUrl 
+        });
+        return newMap;
+      });
+      
+      // Update the fixture cache with new GLB URL
+      setFixtureCache(prev => {
+        const newCache = new Map(prev);
+        // Use "dg2n" as block name for modified fixtures
+        newCache.set("dg2n", newGlbUrl);
+        return newCache;
+      });
+      
+      // Update the fixture type map
+      setFixtureTypeMap(prev => {
+        const newMap = new Map(prev);
+        newMap.set("dg2n", newType);
+        return newMap;
+      });
+      
+      // Update location data with new GLB URL and dg2n block name
+      setLocationData(prev => 
+        prev.map(loc => {
+          if (loc.blockName === selectedLocation.blockName &&
+              Math.abs(loc.posX - selectedLocation.posX) < 0.001 &&
+              Math.abs(loc.posY - selectedLocation.posY) < 0.001 &&
+              Math.abs(loc.posZ - selectedLocation.posZ) < 0.001) {
+            // Create a completely new object to force re-render
+            return { 
+              ...loc, 
+              blockName: "dg2n", 
+              glbUrl: newGlbUrl,
+              _updateTimestamp: Date.now() // Force React to see this as a new object
+            };
+          }
+          return loc;
+        })
+      );
+      
+      // Update selected location
+      setSelectedLocation(prev => prev ? { ...prev, blockName: "dg2n", glbUrl: newGlbUrl } : null);
+      
+    } catch (error) {
+      console.error('Failed to change fixture type:', error);
+      // Could add error toast here
+    }
+  }, [selectedLocation, fixtureTypeMap]);
+
   const handleDownloadGLB = useCallback(async () => {
     if (!selectedFile || isExporting) return;
     
@@ -909,7 +1034,7 @@ export function ThreeDViewerModifier() {
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, isExportingZip]);
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, isExportingZip]);
 
   const createModifiedLocationMasterCSV = async (zip: JSZip) => {
     // Find original location-master.csv
@@ -1008,6 +1133,12 @@ export function ThreeDViewerModifier() {
       if (rotatedData) {
         const newRotationZ = rotationZ + rotatedData.rotationOffset;
         values[10] = newRotationZ.toFixed(1);
+      }
+      
+      // Update block name if fixture type was changed
+      const modifiedFixtureData = modifiedFixtures.get(key);
+      if (modifiedFixtureData) {
+        values[0] = "dg2n"; // Use dg2n as block name for modified fixtures
       }
       
       modifiedLines.push(values.join(','));
@@ -1290,7 +1421,26 @@ export function ThreeDViewerModifier() {
           return location;
         });
         
-        setLocationData(dataWithGLBs);
+        // Preserve any modified fixtures when setting new location data
+        setLocationData(prev => {
+          const newData = [...dataWithGLBs];
+          
+          // Find and preserve modified fixtures (those with _updateTimestamp)
+          prev.forEach(prevLocation => {
+            if (prevLocation._updateTimestamp) {
+              const index = newData.findIndex(loc => 
+                Math.abs(loc.posX - prevLocation.posX) < 0.001 &&
+                Math.abs(loc.posY - prevLocation.posY) < 0.001 &&
+                Math.abs(loc.posZ - prevLocation.posZ) < 0.001
+              );
+              if (index !== -1) {
+                newData[index] = prevLocation; // Keep the modified version
+              }
+            }
+          });
+          
+          return newData;
+        });
         
       } catch (err) {
         console.error('Failed to load location data:', err);
@@ -1594,32 +1744,6 @@ export function ThreeDViewerModifier() {
               </Select>
             </div>
             
-            {/* Edit Controls */}
-            {editMode && (
-              <div className="flex flex-col gap-2">
-                {selectedLocation && selectedLocation.glbUrl && (
-                  <div className="flex gap-1 w-full">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRotateFixture(-90)}
-                      className="text-xs px-2 py-1 h-auto flex-1"
-                    >
-                      Rotate -90°
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRotateFixture(90)}
-                      className="text-xs px-2 py-1 h-auto flex-1"
-                    >
-                      Rotate +90°
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-            
             {/* Floor Plates Controls */}
             {editFloorplatesMode && (() => {
               // Calculate counts for current floor
@@ -1762,7 +1886,7 @@ export function ThreeDViewerModifier() {
               
               <button
                 onClick={handleDownloadModifiedZip}
-                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0)}
+                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0 && modifiedFixtures.size === 0)}
                 className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
               >
                 {isExportingZip ? (
@@ -1886,7 +2010,7 @@ export function ThreeDViewerModifier() {
               .map((location, index) => (
                 location.glbUrl ? (
                   <LocationGLB 
-                    key={`${location.blockName}-${index}`} 
+                    key={`${location.blockName}-${location.posX.toFixed(6)}-${location.posY.toFixed(6)}-${location.posZ.toFixed(6)}-${location._updateTimestamp || index}`} 
                     location={location}
                     onClick={editFloorplatesMode ? undefined : setSelectedLocation}
                     selectedLocation={editFloorplatesMode ? null : selectedLocation}
@@ -1934,7 +2058,7 @@ export function ThreeDViewerModifier() {
           const hasChanges = hasMoved || hasRotated;
           
           return (
-            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
+            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-sm">Location Info</h3>
                 <button 
@@ -1946,6 +2070,18 @@ export function ThreeDViewerModifier() {
               </div>
               <div className="space-y-1 text-xs">
                 <div><span className="font-medium">Block:</span> {selectedLocation.blockName}</div>
+                <div className="flex items-center justify-between">
+                  <span><span className="font-medium">Type:</span> {fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown'}</span>
+                  {editMode && (
+                    <button
+                      onClick={() => setFixtureTypeModalOpen(true)}
+                      className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors ml-2"
+                      title="Change fixture type"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
                 <div><span className="font-medium">Brand:</span> {selectedLocation.brand}</div>
                 <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
                 <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
@@ -1965,8 +2101,30 @@ export function ThreeDViewerModifier() {
                   </div>
                 )}
               </div>
-              {hasChanges && (
+              {editMode && (
                 <div className="mt-3 pt-2 border-t border-border">
+                  <div className="flex gap-1 mb-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRotateFixture(-90)}
+                      className="text-xs px-2 py-1 h-auto flex-1"
+                    >
+                      Rotate -90°
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRotateFixture(90)}
+                      className="text-xs px-2 py-1 h-auto flex-1"
+                    >
+                      Rotate +90°
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {hasChanges && (
+                <div className={`${editMode ? '' : 'mt-3 pt-2 border-t border-border'}`}>
                   <Button 
                     size="sm" 
                     variant="outline" 
@@ -1990,7 +2148,7 @@ export function ThreeDViewerModifier() {
           const currentBrand = selectedFloorPlate.brand;
           
           return (
-            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-xs">
+            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-sm">Floor Plate Info</h3>
                 <button 
@@ -2067,6 +2225,15 @@ export function ThreeDViewerModifier() {
         onOpenChange={setBrandModalOpen}
         currentBrand={selectedFloorPlate?.brand || ''}
         onBrandSelect={handleBrandChange}
+      />
+      
+      {/* Fixture Type Selection Modal */}
+      <FixtureTypeSelectionModal
+        open={fixtureTypeModalOpen}
+        onOpenChange={setFixtureTypeModalOpen}
+        currentType={selectedLocation ? (fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown') : ''}
+        availableTypes={fixtureTypes}
+        onTypeSelect={handleFixtureTypeChange}
       />
     </div>
   );
