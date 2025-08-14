@@ -23,7 +23,7 @@ interface LocationData {
   rotationY: number;
   rotationZ: number;
   brand: string;
-  glbUrl?: string;
+  glbUrl?: string; // Will be populated from API
 }
 
 interface LocationSphereProps {
@@ -571,6 +571,63 @@ export function ThreeDViewerModifier() {
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
+  const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
+  const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
+  const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
+  const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
+
+  // Function to load fixture GLBs in batch from API
+  const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
+    const urlMap = new Map<string, string>();
+    
+    // Filter out already cached blocks
+    const uncachedBlocks = blockNames.filter(name => !fixtureCache.has(name));
+    
+    if (uncachedBlocks.length === 0) {
+      // All blocks are cached, return cached URLs
+      blockNames.forEach(name => {
+        const cachedUrl = fixtureCache.get(name);
+        if (cachedUrl) {
+          urlMap.set(name, cachedUrl);
+        }
+      });
+      return urlMap;
+    }
+
+    try {
+      const fixtureBlocks = await apiService.getFixtureBlocks(uncachedBlocks);
+      
+      // Update cache and build URL map, also store fixture types
+      const newCacheEntries = new Map(fixtureCache);
+      const newTypeMap = new Map(fixtureTypeMap);
+      fixtureBlocks.forEach(block => {
+        if (block.glb_url) {
+          newCacheEntries.set(block.block_name, block.glb_url);
+          urlMap.set(block.block_name, block.glb_url);
+          // Store the fixture type for filtering
+          if (block.fixture_type) {
+            newTypeMap.set(block.block_name, block.fixture_type);
+          }
+        }
+      });
+      
+      setFixtureTypeMap(newTypeMap);
+      
+      // Add previously cached URLs to the result
+      blockNames.forEach(name => {
+        if (fixtureCache.has(name)) {
+          const cachedUrl = fixtureCache.get(name)!;
+          urlMap.set(name, cachedUrl);
+        }
+      });
+      
+      setFixtureCache(newCacheEntries);
+      return urlMap;
+    } catch (error) {
+      console.warn('Failed to load fixture GLBs:', error);
+      return urlMap;
+    }
+  }, [fixtureCache, fixtureTypeMap]);
 
   const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -894,14 +951,14 @@ export function ThreeDViewerModifier() {
         continue;
       }
       
-      // Try to parse the position data
+      // Try to parse the position data (using new CSV format indices)
       let blockName, posX, posY, posZ, rotationZ;
       try {
         blockName = values[0];
-        posX = parseFloat(values[6]) || 0;
-        posY = parseFloat(values[7]) || 0;
-        posZ = parseFloat(values[8]) || 0;
-        rotationZ = parseFloat(values[11]) || 0;
+        posX = parseFloat(values[5]) || 0;  // Pos X at index 5
+        posY = parseFloat(values[6]) || 0;  // Pos Y at index 6  
+        posZ = parseFloat(values[7]) || 0;  // Pos Z at index 7
+        rotationZ = parseFloat(values[10]) || 0;  // Rotation Z at index 10
       } catch (error) {
         // If parsing fails, keep the original line
         modifiedLines.push(line);
@@ -942,15 +999,15 @@ export function ThreeDViewerModifier() {
       
       // Update position if moved
       if (movedData) {
-        values[6] = movedData.newPosition[0].toFixed(12);
-        values[7] = movedData.newPosition[1].toFixed(12);
-        values[8] = movedData.newPosition[2].toFixed(1);
+        values[5] = movedData.newPosition[0].toFixed(12);
+        values[6] = movedData.newPosition[1].toFixed(12);
+        values[7] = movedData.newPosition[2].toFixed(1);
       }
       
       // Update rotation if rotated
       if (rotatedData) {
         const newRotationZ = rotationZ + rotatedData.rotationOffset;
-        values[11] = newRotationZ.toFixed(1);
+        values[10] = newRotationZ.toFixed(1);
       }
       
       modifiedLines.push(values.join(','));
@@ -1077,10 +1134,10 @@ export function ThreeDViewerModifier() {
       }
 
       try {
-        // First verify job is completed
+        // First verify job exists and is completed
         const jobData = await apiService.getJobStatus(jobId);
         if (jobData.status !== 'completed') {
-          setError('Job is not completed yet');
+          setError(`Job is not completed yet. Status: ${jobData.status}`);
           setLoading(false);
           return;
         }
@@ -1110,7 +1167,18 @@ export function ThreeDViewerModifier() {
         }
         
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load job files');
+        console.error('Failed to load job:', err);
+        if (err instanceof Error) {
+          if (err.message.includes('404') || err.message.includes('Not Found')) {
+            setError(`Job '${jobId}' not found. It may have expired or been deleted.`);
+          } else if (err.message.includes('Failed to get job status')) {
+            setError(`Unable to access job '${jobId}'. Please check if the job exists and try again.`);
+          } else {
+            setError(`Failed to load job files: ${err.message}`);
+          }
+        } else {
+          setError('Failed to load job files. Please try again.');
+        }
       } finally {
         setLoading(false);
         setExtracting(false);
@@ -1122,6 +1190,7 @@ export function ThreeDViewerModifier() {
     // Cleanup on unmount
     return () => {
       cleanupExtractedFiles(extractedFiles);
+      // Note: No need to cleanup fixture cache URLs since they're direct URLs from API, not blob URLs
     };
   }, [jobId]);
 
@@ -1140,6 +1209,16 @@ export function ThreeDViewerModifier() {
     fetchBrandCategories();
   }, []);
 
+  // Extract fixture types from API response data
+  useEffect(() => {
+    // Extract unique fixture types from the fixture data we got from API
+    if (fixtureTypeMap.size > 0) {
+      const types = new Set(fixtureTypeMap.values());
+      setFixtureTypes(Array.from(types));
+    }
+  }, [fixtureTypeMap]);
+
+
   // Load and parse CSV data from extracted files
   useEffect(() => {
     const loadLocationData = async () => {
@@ -1154,10 +1233,21 @@ export function ThreeDViewerModifier() {
         
         if (!csvFile) {
           console.warn('location-master.csv not found in extracted files');
+          console.log('Available files:', extractedFiles.map(f => f.name));
+          return;
+        }
+        
+        // Verify the CSV file URL is valid
+        if (!csvFile.url || csvFile.url === '') {
+          console.warn('Invalid CSV file URL');
           return;
         }
         
         const response = await fetch(csvFile.url);
+        if (!response.ok) {
+          console.warn(`Failed to fetch CSV file: ${response.status} ${response.statusText}`);
+          return;
+        }
         const csvText = await response.text();
         const lines = csvText.split('\n').filter(line => line.trim());
         
@@ -1166,27 +1256,46 @@ export function ThreeDViewerModifier() {
           const values = lines[i].split(',');
           
           if (values.length >= 12) {
-            const rawUrl = values[1]?.trim();
-            const glbUrl = rawUrl && rawUrl !== 'NA' ? rawUrl : undefined;
             const locationItem = {
-              blockName: values[0],
-              floorIndex: parseInt(values[2]),
-              posX: parseFloat(values[6]) || 0,
-              posY: parseFloat(values[7]) || 0,
-              posZ: parseFloat(values[8]) || 0,
-              rotationX: parseFloat(values[9]) || 0,
-              rotationY: parseFloat(values[10]) || 0,
-              rotationZ: parseFloat(values[11]) || 0,
-              brand: values[12] || 'unknown',
-              glbUrl: glbUrl
+              blockName: values[0].trim(),
+              floorIndex: parseInt(values[1]) || 0,
+              posX: parseFloat(values[5]) || 0,
+              posY: parseFloat(values[6]) || 0,
+              posZ: parseFloat(values[7]) || 0,
+              rotationX: parseFloat(values[8]) || 0,
+              rotationY: parseFloat(values[9]) || 0,
+              rotationZ: parseFloat(values[10]) || 0,
+              brand: values[11]?.trim() || 'unknown',
+              glbUrl: undefined // Will be loaded via API
             };
             data.push(locationItem);
           }
         }
-        setLocationData(data);
+        
+        // Load GLB URLs for fixtures that have block names (batch API call)
+        const blockNames = data
+          .filter(location => location.blockName && location.blockName.trim() !== '')
+          .map(location => location.blockName);
+        
+        let glbUrlMap = new Map<string, string>();
+        if (blockNames.length > 0) {
+          glbUrlMap = await loadFixtureGLBs(blockNames);
+        }
+        
+        // Apply GLB URLs to location data
+        const dataWithGLBs = data.map(location => {
+          if (location.blockName && glbUrlMap.has(location.blockName)) {
+            return { ...location, glbUrl: glbUrlMap.get(location.blockName) };
+          }
+          return location;
+        });
+        
+        setLocationData(dataWithGLBs);
         
       } catch (err) {
         console.error('Failed to load location data:', err);
+        // Set empty location data so the component continues to work
+        setLocationData([]);
       }
     };
 
@@ -1202,10 +1311,21 @@ export function ThreeDViewerModifier() {
         
         if (!csvFile) {
           console.warn('floor plates CSV file not found in extracted files');
+          console.log('Available files:', extractedFiles.map(f => f.name));
+          return;
+        }
+        
+        // Verify the CSV file URL is valid
+        if (!csvFile.url || csvFile.url === '') {
+          console.warn('Invalid floor plates CSV file URL');
           return;
         }
         
         const response = await fetch(csvFile.url);
+        if (!response.ok) {
+          console.warn(`Failed to fetch floor plates CSV file: ${response.status} ${response.statusText}`);
+          return;
+        }
         const csvText = await response.text();
         const lines = csvText.split('\n').slice(1).filter(line => line.trim()); // Skip header
         
@@ -1235,12 +1355,14 @@ export function ThreeDViewerModifier() {
         
       } catch (err) {
         console.error('Failed to load floor plates data:', err);
+        // Set empty floor plates data so the component continues to work
+        setFloorPlatesData({});
       }
     };
 
     loadLocationData();
     loadFloorPlatesData();
-  }, [extractedFiles]);
+  }, [extractedFiles, loadFixtureGLBs]);
 
   if (loading || extracting) {
     return (
@@ -1292,12 +1414,21 @@ export function ThreeDViewerModifier() {
   if (error) {
     return (
       <div className="h-screen flex items-center justify-center">
-        <div className="p-6 border border-destructive/20 bg-destructive/5 rounded-lg">
+        <div className="p-6 border border-destructive/20 bg-destructive/5 rounded-lg max-w-md text-center">
+          <h2 className="text-lg font-semibold mb-2 text-destructive">Error Loading Job</h2>
           <p className="text-destructive mb-4">{error}</p>
-          <Button variant="outline" onClick={() => window.history.back()}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Go Back
-          </Button>
+          {jobId && (
+            <p className="text-sm text-muted-foreground mb-4">Job ID: {jobId}</p>
+          )}
+          <div className="flex gap-2 justify-center">
+            <Button variant="outline" onClick={() => window.history.back()}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Go Back
+            </Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              Try Again
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -1372,6 +1503,25 @@ export function ThreeDViewerModifier() {
               />
               <label htmlFor="showSpheres" className="text-sm font-medium">Show Fixtures</label>
             </div>
+            
+            {/* Fixture Type Filter */}
+            {fixtureTypes.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Fixture Type:</label>
+                <Select 
+                  value={selectedFixtureType} 
+                  onChange={(e) => setSelectedFixtureType(e.target.value)}
+                  className="w-48"
+                >
+                  <option value="all">All Types</option>
+                  {fixtureTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             
             {/* Horizontal Separator */}
             <div className="border-t border-border"></div>
@@ -1592,6 +1742,7 @@ export function ThreeDViewerModifier() {
               </div>
             )}
             
+            
             {/* Download Buttons */}
             <div className="border-t border-border pt-2 space-y-2">
               <button
@@ -1724,6 +1875,14 @@ export function ThreeDViewerModifier() {
             
             return locationData
               .filter(location => location.floorIndex === currentFloor)
+              .filter(location => {
+                // Apply fixture type filter if not "all"
+                if (selectedFixtureType === 'all') return true;
+                
+                // Use actual fixture type from API response
+                const fixtureType = fixtureTypeMap.get(location.blockName);
+                return fixtureType === selectedFixtureType;
+              })
               .map((location, index) => (
                 location.glbUrl ? (
                   <LocationGLB 

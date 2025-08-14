@@ -51,6 +51,17 @@ export interface BrandCategoriesResponse {
   };
 }
 
+export interface FixtureBlock {
+  block_name: string;
+  fixture_type: string;
+  glb_url: string;
+}
+
+export interface FixtureTypeInfo {
+  fixture_type: string;
+  glb_url: string;
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -207,6 +218,33 @@ export const apiService = {
     
     if (!response.ok) {
       throw new Error(`Failed to get brand categories: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // Fixture API endpoints
+  async getFixtureBlocks(blockNames: string[]): Promise<FixtureBlock[]> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/blocks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(blockNames),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get fixture blocks: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getFixtureTypeUrl(fixtureType: string): Promise<FixtureTypeInfo> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/url`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get fixture type URL: ${response.statusText}`);
     }
 
     return response.json();
