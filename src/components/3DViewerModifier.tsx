@@ -618,6 +618,7 @@ export function ThreeDViewerModifier() {
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [modifiedFixtures, setModifiedFixtures] = useState<Map<string, { originalType: string, newType: string, newGlbUrl: string }>>(new Map());
+  const [modifiedFixtureBrands, setModifiedFixtureBrands] = useState<Map<string, { originalBrand: string, newBrand: string }>>(new Map());
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
@@ -768,6 +769,19 @@ export function ThreeDViewerModifier() {
       return newMap;
     });
     
+    // Reset brand changes
+    setModifiedFixtureBrands(prev => {
+      if (!prev.has(key)) return prev; // No change needed
+      const newMap = new Map(prev);
+      const originalBrand = newMap.get(key)?.originalBrand;
+      newMap.delete(key);
+      // Reset selected location brand to original
+      if (originalBrand) {
+        setSelectedLocation((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
+      }
+      return newMap;
+    });
+    
     // Force re-render by clearing and re-setting selection
     setSelectedLocation(null);
     setTimeout(() => setSelectedLocation(location), 10);
@@ -790,6 +804,23 @@ export function ThreeDViewerModifier() {
     // Update selected floor plate immediately
     setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
   }, [selectedFloorPlate]);
+
+  const handleFixtureBrandChange = useCallback((newBrand: string) => {
+    if (!selectedLocation) return;
+    
+    const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+    setModifiedFixtureBrands(prev => {
+      const newMap = new Map(prev);
+      newMap.set(key, {
+        originalBrand: selectedLocation.brand,
+        newBrand: newBrand
+      });
+      return newMap;
+    });
+    
+    // Update selected location immediately
+    setSelectedLocation((prev: any) => prev ? { ...prev, brand: newBrand } : null);
+  }, [selectedLocation]);
 
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
     if (!selectedLocation) return;
@@ -1034,7 +1065,7 @@ export function ThreeDViewerModifier() {
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, isExportingZip]);
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, isExportingZip]);
 
   const createModifiedLocationMasterCSV = async (zip: JSZip) => {
     // Find original location-master.csv
@@ -1096,9 +1127,10 @@ export function ThreeDViewerModifier() {
       // Try exact match first
       let movedData = movedFixtures.get(key);
       let rotatedData = rotatedFixtures.get(key);
+      let brandData = modifiedFixtureBrands.get(key);
       
       // If no exact match, try finding by approximate position match
-      if (!movedData && !rotatedData) {
+      if (!movedData && !rotatedData && !brandData) {
         for (const [mapKey, data] of movedFixtures.entries()) {
           const [mapBlockName, mapPosX, mapPosY, mapPosZ] = mapKey.split('-');
           if (mapBlockName === blockName &&
@@ -1117,6 +1149,17 @@ export function ThreeDViewerModifier() {
               Math.abs(parseFloat(mapPosY) - posY) < 0.0001 &&
               Math.abs(parseFloat(mapPosZ) - posZ) < 0.0001) {
             rotatedData = data;
+            break;
+          }
+        }
+        
+        for (const [mapKey, data] of modifiedFixtureBrands.entries()) {
+          const [mapBlockName, mapPosX, mapPosY, mapPosZ] = mapKey.split('-');
+          if (mapBlockName === blockName &&
+              Math.abs(parseFloat(mapPosX) - posX) < 0.0001 &&
+              Math.abs(parseFloat(mapPosY) - posY) < 0.0001 &&
+              Math.abs(parseFloat(mapPosZ) - posZ) < 0.0001) {
+            brandData = data;
             break;
           }
         }
@@ -1139,6 +1182,14 @@ export function ThreeDViewerModifier() {
       const modifiedFixtureData = modifiedFixtures.get(key);
       if (modifiedFixtureData) {
         values[0] = "dg2n"; // Use dg2n as block name for modified fixtures
+      }
+      
+      // Update brand if fixture brand was changed
+      if (brandData) {
+        // Brand is typically at index 1 in the CSV, but let's check if we need to find it
+        if (values.length > 1) {
+          values[1] = brandData.newBrand;
+        }
       }
       
       modifiedLines.push(values.join(','));
@@ -1886,7 +1937,7 @@ export function ThreeDViewerModifier() {
               
               <button
                 onClick={handleDownloadModifiedZip}
-                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0 && modifiedFixtures.size === 0)}
+                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0 && modifiedFixtures.size === 0 && modifiedFixtureBrands.size === 0)}
                 className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
               >
                 {isExportingZip ? (
@@ -2053,9 +2104,11 @@ export function ThreeDViewerModifier() {
           const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
           const movedData = movedFixtures.get(key);
           const rotatedData = rotatedFixtures.get(key);
+          const brandData = modifiedFixtureBrands.get(key);
           const hasMoved = movedData !== undefined;
           const hasRotated = rotatedData !== undefined;
-          const hasChanges = hasMoved || hasRotated;
+          const hasBrandChanged = brandData !== undefined;
+          const hasChanges = hasMoved || hasRotated || hasBrandChanged;
           
           return (
             <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
@@ -2082,7 +2135,25 @@ export function ThreeDViewerModifier() {
                     </button>
                   )}
                 </div>
-                <div><span className="font-medium">Brand:</span> {selectedLocation.brand}</div>
+                <div className="flex items-center justify-between">
+                  <div style={{ color: hasBrandChanged ? '#ef4444' : 'inherit' }}>
+                    <span className="font-medium">Brand:</span> {hasBrandChanged ? brandData?.originalBrand : selectedLocation.brand}
+                  </div>
+                  {editMode && (
+                    <button
+                      onClick={() => setBrandModalOpen(true)}
+                      className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                      title="Change brand"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                {hasBrandChanged && (
+                  <div style={{ color: '#22c55e' }}>
+                    <span className="font-medium">New Brand:</span> {selectedLocation.brand}
+                  </div>
+                )}
                 <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
                 <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
                   <span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
@@ -2223,8 +2294,8 @@ export function ThreeDViewerModifier() {
       <BrandSelectionModal
         open={brandModalOpen}
         onOpenChange={setBrandModalOpen}
-        currentBrand={selectedFloorPlate?.brand || ''}
-        onBrandSelect={handleBrandChange}
+        currentBrand={selectedFloorPlate?.brand || selectedLocation?.brand || ''}
+        onBrandSelect={selectedFloorPlate ? handleBrandChange : handleFixtureBrandChange}
       />
       
       {/* Fixture Type Selection Modal */}
