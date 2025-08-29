@@ -1,4 +1,4 @@
-import { Pencil } from 'lucide-react';
+import { Pencil, Copy } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 
 interface LocationData {
@@ -52,6 +52,7 @@ interface RightInfoPanelProps {
   onRotateFixture: (angle: number) => void;
   onResetLocation: (location: LocationData) => void;
   onResetFloorPlate: (plateData: FloorPlateData, modifiedData: any) => void;
+  onDuplicateFixture?: (location: LocationData) => void;
 }
 
 export function RightInfoPanel({
@@ -71,6 +72,7 @@ export function RightInfoPanel({
   onRotateFixture,
   onResetLocation,
   onResetFloorPlate,
+  onDuplicateFixture,
 }: RightInfoPanelProps) {
   
   // Location Info Panel
@@ -166,6 +168,17 @@ export function RightInfoPanel({
                 Rotate +90°
               </Button>
             </div>
+            {onDuplicateFixture && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onDuplicateFixture(selectedLocation)}
+                className="w-full text-xs flex items-center justify-center gap-1"
+              >
+                <Copy className="h-3 w-3" />
+                Duplicate
+              </Button>
+            )}
           </div>
         )}
         {hasChanges && (

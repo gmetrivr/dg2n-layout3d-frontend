@@ -34,6 +34,7 @@ interface LeftControlPanelProps {
   rotatedFixtures: Map<string, any>;
   modifiedFixtures: Map<string, any>;
   modifiedFixtureBrands: Map<string, any>;
+  locationData: any[]; // For detecting duplicated fixtures
   
   // Job info
   jobId?: string | null;
@@ -68,6 +69,7 @@ export function LeftControlPanel({
   rotatedFixtures,
   modifiedFixtures,
   modifiedFixtureBrands,
+  locationData,
   jobId,
   onFloorFileChange,
   onShowSpheresChange,
@@ -77,6 +79,20 @@ export function LeftControlPanel({
   onDownloadGLB,
   onDownloadModifiedZip,
 }: LeftControlPanelProps) {
+  // Function to detect if there are duplicated fixtures
+  // Duplicated fixtures are those with _updateTimestamp (added after initial load)
+  const hasDuplicatedFixtures = () => {
+    return locationData.some(location => location._updateTimestamp !== undefined);
+  };
+  
+  // Check if there are any changes that warrant downloading the zip
+  const hasChanges = movedFixtures.size > 0 || 
+                    rotatedFixtures.size > 0 || 
+                    modifiedFloorPlates.size > 0 || 
+                    modifiedFixtures.size > 0 || 
+                    modifiedFixtureBrands.size > 0 ||
+                    hasDuplicatedFixtures();
+
   return (
     <div className="absolute top-4 left-4 z-50">
       <div className="flex flex-col gap-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg">
@@ -293,7 +309,7 @@ export function LeftControlPanel({
           
           <button
             onClick={onDownloadModifiedZip}
-            disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0 && modifiedFixtures.size === 0 && modifiedFixtureBrands.size === 0)}
+            disabled={isExportingZip || extractedFiles.length === 0 || !hasChanges}
             className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
           >
             {isExportingZip ? (

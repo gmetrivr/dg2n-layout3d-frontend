@@ -966,6 +966,23 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedLocation, selectedLocations]);
 
+  const handleDuplicateFixture = useCallback((location: LocationData) => {
+    // Create a duplicate fixture at a slightly offset position (1 unit in X direction)
+    const duplicatedFixture: LocationData = {
+      ...location,
+      posX: location.posX + 1.0, // Offset by 1 unit in X direction
+      blockName: location.blockName, // Keep the same block name initially
+      _updateTimestamp: Date.now() // Force re-render
+    };
+    
+    // Add the duplicated fixture to the location data
+    setLocationData(prev => [...prev, duplicatedFixture]);
+    
+    // Clear current selection and select the new duplicated fixture
+    setSelectedLocation(duplicatedFixture);
+    setSelectedLocations([duplicatedFixture]);
+  }, []);
+
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
     // For now, only support single selection for fixture type changes
     // Multi-selection fixture type changes could be complex due to different GLB URLs
@@ -1222,7 +1239,7 @@ export function ThreeDViewerModifier() {
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, isExportingZip]);
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, locationData, isExportingZip, jobId]);
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -1311,6 +1328,7 @@ export function ThreeDViewerModifier() {
   }, []);
 
   const createModifiedLocationMasterCSV = async (zip: JSZip) => {
+    
     // Find original location-master.csv
     const originalFile = extractedFiles.find(file => 
       file.name.toLowerCase().includes('location-master.csv')
@@ -1331,6 +1349,9 @@ export function ThreeDViewerModifier() {
     
     // Keep header
     const modifiedLines = [lines[0]];
+    
+    // Track processed fixtures to identify duplicates
+    const originalFixtures = new Set<string>();
     
     // Process each data line
     for (let i = 1; i < lines.length; i++) {
@@ -1357,12 +1378,16 @@ export function ThreeDViewerModifier() {
         posX = parseFloat(values[5]) || 0;  // Pos X at index 5
         posY = parseFloat(values[6]) || 0;  // Pos Y at index 6  
         posZ = parseFloat(values[7]) || 0;  // Pos Z at index 7
-        rotationZ = parseFloat(values[10]) || 0;  // Rotation Z at index 10
+        rotationZ = parseFloat(values[10]) || 0; // Rotation Z at index 10
       } catch (error) {
         // If parsing fails, keep the original line
         modifiedLines.push(line);
         continue;
       }
+      
+      // Track original fixtures
+      const originalKey = `${blockName}-${posX}-${posY}-${posZ}`;
+      originalFixtures.add(originalKey);
       
       // Check if this location has been moved or rotated
       const key = `${blockName}-${posX}-${posY}-${posZ}`;
@@ -1410,33 +1435,62 @@ export function ThreeDViewerModifier() {
       
       // Update position if moved
       if (movedData) {
-        values[5] = movedData.newPosition[0].toFixed(12);
-        values[6] = movedData.newPosition[1].toFixed(12);
-        values[7] = movedData.newPosition[2].toFixed(1);
+        values[5] = movedData.newPosition[0].toFixed(12);  // Pos X (m)
+        values[6] = movedData.newPosition[1].toFixed(12);  // Pos Y (m)
+        values[7] = movedData.newPosition[2].toFixed(1);   // Pos Z (m)
       }
       
       // Update rotation if rotated
       if (rotatedData) {
         const newRotationZ = rotationZ + rotatedData.rotationOffset;
-        values[10] = newRotationZ.toFixed(1);
+        values[10] = newRotationZ.toFixed(1); // Rotation Z at index 10
       }
       
       // Update block name if fixture type was changed
       const modifiedFixtureData = modifiedFixtures.get(key);
       if (modifiedFixtureData) {
         values[0] = "dg2n"; // Use dg2n as block name for modified fixtures
+        // Note: Fixture Type column doesn't exist in this CSV structure
       }
       
       // Update brand if fixture brand was changed
       if (brandData) {
-        // Brand is typically at index 1 in the CSV, but let's check if we need to find it
-        if (values.length > 1) {
-          values[1] = brandData.newBrand;
+        // Brand is at index 11 in the CSV structure
+        if (values.length > 11) {
+          values[11] = brandData.newBrand;
         }
       }
       
       modifiedLines.push(values.join(','));
     }
+    
+    // Add any duplicated fixtures that weren't in the original CSV
+    locationData.forEach(location => {
+      const locationKey = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      
+      // If this fixture wasn't in the original CSV, it's a duplicate
+      if (!originalFixtures.has(locationKey)) {
+        // Create CSV line for duplicated fixture using correct 14-column structure
+        const csvLine = [
+          location.blockName,             // 0: Block Name
+          location.floorIndex.toString(), // 1: Floor Index
+          '0',                           // 2: Origin X (m) - default to 0
+          '0',                           // 3: Origin Y (m) - default to 0
+          '0',                           // 4: Origin Z (m) - default to 0
+          location.posX.toFixed(12),     // 5: Pos X (m)
+          location.posY.toFixed(12),     // 6: Pos Y (m)
+          location.posZ.toFixed(1),      // 7: Pos Z (m)
+          location.rotationX.toFixed(1), // 8: Rotation X (deg)
+          location.rotationY.toFixed(1), // 9: Rotation Y (deg)
+          location.rotationZ.toFixed(1), // 10: Rotation Z (deg)
+          location.brand,                // 11: Brand
+          '1',                          // 12: Count - default to 1
+          ''                            // 13: Hierarchy - empty
+        ].join(',');
+        
+        modifiedLines.push(csvLine);
+      }
+    });
     
     // Add modified CSV to zip - preserve original file structure
     const modifiedCSV = modifiedLines.join('\n');
@@ -1680,17 +1734,17 @@ export function ThreeDViewerModifier() {
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',');
           
-          if (values.length >= 12) {
+          if (values.length >= 14) {
             const locationItem = {
               blockName: values[0].trim(),
               floorIndex: parseInt(values[1]) || 0,
-              posX: parseFloat(values[5]) || 0,
-              posY: parseFloat(values[6]) || 0,
-              posZ: parseFloat(values[7]) || 0,
-              rotationX: parseFloat(values[8]) || 0,
-              rotationY: parseFloat(values[9]) || 0,
-              rotationZ: parseFloat(values[10]) || 0,
-              brand: values[11]?.trim() || 'unknown',
+              posX: parseFloat(values[5]) || 0,   // Pos X (m)
+              posY: parseFloat(values[6]) || 0,   // Pos Y (m) 
+              posZ: parseFloat(values[7]) || 0,   // Pos Z (m)
+              rotationX: parseFloat(values[8]) || 0, // Rotation X (deg)
+              rotationY: parseFloat(values[9]) || 0, // Rotation Y (deg)
+              rotationZ: parseFloat(values[10]) || 0, // Rotation Z (deg)
+              brand: values[11]?.trim() || 'unknown', // Brand is at index 11
               glbUrl: undefined // Will be loaded via API
             };
             data.push(locationItem);
@@ -1916,6 +1970,7 @@ export function ThreeDViewerModifier() {
           rotatedFixtures={rotatedFixtures}
           modifiedFixtures={modifiedFixtures}
           modifiedFixtureBrands={modifiedFixtureBrands}
+          locationData={locationData}
           jobId={jobId}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
@@ -2094,6 +2149,7 @@ export function ThreeDViewerModifier() {
             onRotateFixture={handleRotateFixture}
             onResetLocation={handleResetPosition}
             onResetFloorPlate={handleResetFloorPlate}
+            onDuplicateFixture={handleDuplicateFixture}
           />
         )}
       </div>
