@@ -14,6 +14,7 @@ import { BrandSelectionModal } from './BrandSelectionModal';
 import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
 import { LeftControlPanel } from './LeftControlPanel';
 import { RightInfoPanel } from './RightInfoPanel';
+import { MultiRightInfoPanel } from './MultiRightInfoPanel';
 
 interface LocationData {
   blockName: string;
@@ -32,24 +33,27 @@ interface LocationData {
 interface LocationSphereProps {
   location: LocationData;
   color?: string;
-  onClick?: (location: LocationData) => void;
-  selectedLocation?: LocationData | null;
+  onClick?: (location: LocationData, event?: any) => void;
+  isSelected?: boolean;
 }
 
-function LocationSphere({ location, color = "#ff6b6b", onClick, selectedLocation }: LocationSphereProps) {
+function LocationSphere({ location, color = "#ff6b6b", onClick, isSelected }: LocationSphereProps) {
   return (
     <group position={[location.posX, location.posZ, -location.posY]}>
-      <mesh onClick={() => onClick?.(location)}>
+      <mesh onClick={(event) => {
+        event.stopPropagation();
+        onClick?.(location, {
+          shiftKey: event.nativeEvent.shiftKey,
+          metaKey: event.nativeEvent.metaKey,
+          ctrlKey: event.nativeEvent.ctrlKey
+        });
+      }}>
         <sphereGeometry args={[0.2]} />
         <meshStandardMaterial color={color} />
       </mesh>
       
       {/* Red bounding box when selected */}
-      {selectedLocation && 
-       selectedLocation.blockName === location.blockName &&
-       Math.abs(selectedLocation.posX - location.posX) < 0.001 &&
-       Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
-       Math.abs(selectedLocation.posZ - location.posZ) < 0.001 && (
+      {isSelected && (
         <lineSegments renderOrder={999}>
           <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
           <lineBasicMaterial color="red" />
@@ -62,26 +66,23 @@ function LocationSphere({ location, color = "#ff6b6b", onClick, selectedLocation
 interface LocationGLBProps {
   location: LocationData;
   onError?: (blockName: string, url: string) => void;
-  onClick?: (location: LocationData) => void;
-  selectedLocation?: LocationData | null;
+  onClick?: (location: LocationData, event?: any) => void;
+  isSelected?: boolean;
   editMode?: boolean;
+  isSingleSelection?: boolean;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
   movedFixtures?: Map<string, { originalPosition: [number, number, number], newPosition: [number, number, number] }>;
   rotatedFixtures?: Map<string, { originalRotation: [number, number, number], rotationOffset: number }>;
   modifiedFixtureBrands?: Map<string, { originalBrand: string, newBrand: string }>;
+  modifiedFixtures?: Map<string, { originalType: string, newType: string, newGlbUrl: string }>;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, modifiedFixtureBrands, onTransformStart, onTransformEnd }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, isSingleSelection = false, onPositionChange, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
-  const isSelected = selectedLocation && 
-    selectedLocation.blockName === location.blockName &&
-    Math.abs(selectedLocation.posX - location.posX) < 0.001 &&
-    Math.abs(selectedLocation.posY - location.posY) < 0.001 &&
-    Math.abs(selectedLocation.posZ - location.posZ) < 0.001;
   
   // Handle GLB URL changes (for fixture type changes) - force reload
   const [currentGlbUrl, setCurrentGlbUrl] = useState<string | undefined>(location.glbUrl);
@@ -117,6 +118,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
       const movedData = movedFixtures?.get(key);
       const rotatedData = rotatedFixtures?.get(key);
       const brandData = modifiedFixtureBrands?.get(key);
+      const fixtureTypeData = modifiedFixtures?.get(key);
       
       const currentPosition = movedData 
         ? [movedData.newPosition[0], movedData.newPosition[2], -movedData.newPosition[1]] 
@@ -133,15 +135,16 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
         movedData,
         rotatedData,
         brandData,
+        fixtureTypeData,
         currentPosition: currentPosition as [number, number, number],
         rotationX,
         rotationY,
         rotationZ,
         additionalYRotation
       };
-    }, [location, movedFixtures, rotatedFixtures, modifiedFixtureBrands]);
+    }, [location, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures]);
     
-    const { movedData, rotatedData, brandData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    const { movedData, rotatedData, brandData, fixtureTypeData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
     
     // Calculate bounding box when scene loads or rotation changes
     useEffect(() => {
@@ -199,15 +202,22 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
           )}
           {/* Transparent bounding box for clicking */}
           <mesh
-            onClick={() => onClick?.(location)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick?.(location, {
+                shiftKey: event.nativeEvent.shiftKey,
+                metaKey: event.nativeEvent.metaKey,
+                ctrlKey: event.nativeEvent.ctrlKey
+              });
+            }}
             position={boundingBox.center as [number,number,number]}
           >
             <boxGeometry args={boundingBox.size as [number,number,number]} />
             <meshBasicMaterial transparent opacity={0} />
           </mesh>
           
-          {/* Yellow edge outline for brand-modified fixtures - use calculated bounding box */}
-          {brandData && !isSelected && !movedData && !rotatedData && (
+          {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use calculated bounding box */}
+          {(brandData || fixtureTypeData) && !isSelected && !movedData && !rotatedData && (
             <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={997}>
               <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
               <lineBasicMaterial color="yellow" />
@@ -231,8 +241,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
           )}
         </group>
         
-        {/* Transform controls for editing mode */}
-        {editMode && isSelected && groupRef.current && (
+        {/* Transform controls for editing mode - only show for single selection */}
+        {editMode && isSelected && groupRef.current && isSingleSelection && (
           <TransformControls
             object={groupRef.current}
             mode="translate"
@@ -269,10 +279,12 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
     prevProps.location.glbUrl === nextProps.location.glbUrl &&
     prevProps.location._updateTimestamp === nextProps.location._updateTimestamp &&
     prevProps.editMode === nextProps.editMode &&
-    prevProps.selectedLocation === nextProps.selectedLocation &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.isSingleSelection === nextProps.isSingleSelection &&
     JSON.stringify(prevMovedData) === JSON.stringify(nextMovedData) &&
     JSON.stringify(prevRotatedData) === JSON.stringify(nextRotatedData) &&
-    JSON.stringify(prevBrandData) === JSON.stringify(nextBrandData)
+    JSON.stringify(prevBrandData) === JSON.stringify(nextBrandData) &&
+    JSON.stringify(prevProps.modifiedFixtures?.get(prevKey)) === JSON.stringify(nextProps.modifiedFixtures?.get(nextKey))
   );
 });
 
@@ -615,6 +627,7 @@ export function ThreeDViewerModifier() {
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
+  const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
@@ -639,6 +652,76 @@ export function ThreeDViewerModifier() {
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
+
+  // Handle multi-select functionality
+  const handleFixtureClick = useCallback((clickedLocation: LocationData, event?: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => {
+    if (editFloorplatesMode) return;
+    
+    const isMultiSelect = event?.shiftKey || event?.metaKey || event?.ctrlKey;
+    
+    if (isMultiSelect) {
+      setSelectedLocations(prev => {
+        // Include current single selection if we're transitioning from single to multi
+        const currentSelections = prev.length === 0 && selectedLocation ? [selectedLocation] : prev;
+        
+        const isAlreadySelected = currentSelections.some(loc => 
+          loc.blockName === clickedLocation.blockName &&
+          Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
+          Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
+          Math.abs(loc.posZ - clickedLocation.posZ) < 0.001
+        );
+        
+        if (isAlreadySelected) {
+          // Remove from selection
+          const newSelection = currentSelections.filter(loc => !(loc.blockName === clickedLocation.blockName &&
+            Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
+            Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
+            Math.abs(loc.posZ - clickedLocation.posZ) < 0.001));
+          
+          return newSelection;
+        } else {
+          // Add to selection
+          const newSelection = [...currentSelections, clickedLocation];
+          return newSelection;
+        }
+      });
+      
+      // Update selectedLocation based on new selection state
+      setSelectedLocation(null); // Will be updated by useEffect
+    } else {
+      // Single select
+      setSelectedLocations([clickedLocation]);
+      setSelectedLocation(clickedLocation);
+    }
+  }, [editFloorplatesMode, selectedLocation]);
+
+  // Check if a location is selected (check selectedLocations array as single source of truth)
+  const isLocationSelected = useCallback((location: LocationData) => {
+    return selectedLocations.some(loc => 
+      loc.blockName === location.blockName &&
+      Math.abs(loc.posX - location.posX) < 0.001 &&
+      Math.abs(loc.posY - location.posY) < 0.001 &&
+      Math.abs(loc.posZ - location.posZ) < 0.001
+    );
+  }, [selectedLocations]);
+
+  // Clear all selections
+  const clearSelections = useCallback(() => {
+    setSelectedLocation(null);
+    setSelectedLocations([]);
+  }, []);
+  
+  // Sync selectedLocation with selectedLocations array
+  useEffect(() => {
+    if (selectedLocations.length === 1) {
+      setSelectedLocation(selectedLocations[0]);
+    } else if (selectedLocations.length > 1) {
+      setSelectedLocation(null);
+    } else {
+      setSelectedLocation(null);
+    }
+  }, [selectedLocations]);
+
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -767,6 +850,35 @@ export function ThreeDViewerModifier() {
     });
   }, [selectedLocation]);
 
+  const handleMultiRotateFixture = useCallback((degrees: number) => {
+    selectedLocations.forEach(location => {
+      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      setRotatedFixtures(prev => {
+        const existing = prev.get(key);
+        const currentOffset = existing?.rotationOffset || 0;
+        let newOffset = currentOffset + degrees;
+        
+        // Normalize rotation to 0-359 range
+        newOffset = ((newOffset % 360) + 360) % 360;
+        
+        // If rotation is back to 0 (or effectively 0), remove the entry entirely
+        if (newOffset === 0 || Math.abs(newOffset - 360) < 0.001) {
+          if (!prev.has(key)) return prev; // Already doesn't exist
+          const newMap = new Map(prev);
+          newMap.delete(key);
+          return newMap;
+        }
+        
+        const newMap = new Map(prev);
+        newMap.set(key, {
+          originalRotation: [location.rotationX, location.rotationY, location.rotationZ],
+          rotationOffset: newOffset
+        });
+        return newMap;
+      });
+    });
+  }, [selectedLocations]);
+
   const handleResetPosition = useCallback((location: LocationData) => {
     const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
     
@@ -821,24 +933,43 @@ export function ThreeDViewerModifier() {
   }, [selectedFloorPlate]);
 
   const handleFixtureBrandChange = useCallback((newBrand: string) => {
-    if (!selectedLocation) return;
-    
-    const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
-    setModifiedFixtureBrands(prev => {
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        originalBrand: selectedLocation.brand,
-        newBrand: newBrand
+    // Handle multi-selection
+    if (selectedLocations.length > 1) {
+      selectedLocations.forEach(location => {
+        const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+        setModifiedFixtureBrands(prev => {
+          const newMap = new Map(prev);
+          newMap.set(key, {
+            originalBrand: location.brand,
+            newBrand: newBrand
+          });
+          return newMap;
+        });
       });
-      return newMap;
-    });
-    
-    // Update selected location immediately
-    setSelectedLocation((prev: any) => prev ? { ...prev, brand: newBrand } : null);
-  }, [selectedLocation]);
+      
+      // Update selected locations immediately
+      setSelectedLocations(prev => prev.map(loc => ({ ...loc, brand: newBrand })));
+    } else if (selectedLocation) {
+      // Handle single selection
+      const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+      setModifiedFixtureBrands(prev => {
+        const newMap = new Map(prev);
+        newMap.set(key, {
+          originalBrand: selectedLocation.brand,
+          newBrand: newBrand
+        });
+        return newMap;
+      });
+      
+      // Update selected location immediately
+      setSelectedLocation((prev: any) => prev ? { ...prev, brand: newBrand } : null);
+    }
+  }, [selectedLocation, selectedLocations]);
 
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
-    if (!selectedLocation) return;
+    // For now, only support single selection for fixture type changes
+    // Multi-selection fixture type changes could be complex due to different GLB URLs
+    if (!selectedLocation || selectedLocations.length > 1) return;
     
     try {
       // Get new GLB URL for the fixture type
@@ -860,14 +991,25 @@ export function ThreeDViewerModifier() {
       const originalType = fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown';
       const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
       
-      // Store the modification
+      // Store the modification using both original key and new key (dg2n)
       setModifiedFixtures(prev => {
         const newMap = new Map(prev);
+        const newKey = `dg2n-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
+        
+        // Store with original key for backwards compatibility
         newMap.set(key, { 
           originalType, 
           newType, 
           newGlbUrl 
         });
+        
+        // Also store with new key (dg2n blockName) for lookup after blockName change
+        newMap.set(newKey, { 
+          originalType, 
+          newType, 
+          newGlbUrl 
+        });
+        
         return newMap;
       });
       
@@ -1791,6 +1933,7 @@ export function ThreeDViewerModifier() {
             if (editFloorplatesMode) {
               setSelectedFloorPlate(null);
             } else {
+              setSelectedLocations([]);
               setSelectedLocation(null);
             }
           }}
@@ -1877,14 +2020,16 @@ export function ThreeDViewerModifier() {
                   <LocationGLB 
                     key={`${location.blockName}-${location.posX.toFixed(6)}-${location.posY.toFixed(6)}-${location.posZ.toFixed(6)}-${location._updateTimestamp || index}`} 
                     location={location}
-                    onClick={editFloorplatesMode ? undefined : setSelectedLocation}
-                    selectedLocation={editFloorplatesMode ? null : selectedLocation}
+                    onClick={editFloorplatesMode ? undefined : handleFixtureClick}
+                    isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
+                    isSingleSelection={selectedLocations.length === 1}
                     onError={handleGLBError}
                     editMode={editMode}
                     onPositionChange={editMode ? handlePositionChange : undefined}
                     movedFixtures={movedFixtures}
                     rotatedFixtures={rotatedFixtures}
                     modifiedFixtureBrands={modifiedFixtureBrands}
+                    modifiedFixtures={modifiedFixtures}
                     {...(editMode && {
                       onTransformStart: () => setIsTransforming(true),
                       onTransformEnd: () => setIsTransforming(false)
@@ -1895,8 +2040,8 @@ export function ThreeDViewerModifier() {
                     key={`${location.blockName}-${index}`} 
                     location={location}
                     color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
-                    onClick={editFloorplatesMode ? undefined : setSelectedLocation}
-                    selectedLocation={editFloorplatesMode ? null : selectedLocation}
+                    onClick={editFloorplatesMode ? undefined : handleFixtureClick}
+                    isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
                   />
                 )
               ));
@@ -1914,31 +2059,50 @@ export function ThreeDViewerModifier() {
           />
         </Canvas>
         
-        <RightInfoPanel
-          selectedLocation={selectedLocation}
-          selectedFloorPlate={selectedFloorPlate}
-          editMode={editMode}
-          editFloorplatesMode={editFloorplatesMode}
-          movedFixtures={movedFixtures}
-          rotatedFixtures={rotatedFixtures}
-          modifiedFixtureBrands={modifiedFixtureBrands}
-          modifiedFloorPlates={modifiedFloorPlates}
-          fixtureTypeMap={fixtureTypeMap}
-          onCloseLocation={() => setSelectedLocation(null)}
-          onCloseFloorPlate={() => setSelectedFloorPlate(null)}
-          onOpenFixtureTypeModal={() => setFixtureTypeModalOpen(true)}
-          onOpenBrandModal={() => setBrandModalOpen(true)}
-          onRotateFixture={handleRotateFixture}
-          onResetLocation={handleResetPosition}
-          onResetFloorPlate={handleResetFloorPlate}
-        />
+        {/* Show MultiRightInfoPanel when multiple fixtures are selected */}
+        {selectedLocations.length > 1 && !editFloorplatesMode && (
+          <MultiRightInfoPanel
+            selectedLocations={selectedLocations}
+            editMode={editMode}
+            movedFixtures={movedFixtures}
+            rotatedFixtures={rotatedFixtures}
+            modifiedFixtureBrands={modifiedFixtureBrands}
+            fixtureTypeMap={fixtureTypeMap}
+            onClose={clearSelections}
+            onOpenBrandModal={() => setBrandModalOpen(true)}
+            onRotateFixture={handleMultiRotateFixture}
+            onResetLocation={handleResetPosition}
+          />
+        )}
+        
+        {/* Show RightInfoPanel for single selection or floor plates */}
+        {selectedLocations.length <= 1 && (
+          <RightInfoPanel
+            selectedLocation={selectedLocation}
+            selectedFloorPlate={selectedFloorPlate}
+            editMode={editMode}
+            editFloorplatesMode={editFloorplatesMode}
+            movedFixtures={movedFixtures}
+            rotatedFixtures={rotatedFixtures}
+            modifiedFixtureBrands={modifiedFixtureBrands}
+            modifiedFloorPlates={modifiedFloorPlates}
+            fixtureTypeMap={fixtureTypeMap}
+            onCloseLocation={() => setSelectedLocation(null)}
+            onCloseFloorPlate={() => setSelectedFloorPlate(null)}
+            onOpenFixtureTypeModal={() => setFixtureTypeModalOpen(true)}
+            onOpenBrandModal={() => setBrandModalOpen(true)}
+            onRotateFixture={handleRotateFixture}
+            onResetLocation={handleResetPosition}
+            onResetFloorPlate={handleResetFloorPlate}
+          />
+        )}
       </div>
 
       {/* Brand Selection Modal */}
       <BrandSelectionModal
         open={brandModalOpen}
         onOpenChange={setBrandModalOpen}
-        currentBrand={selectedFloorPlate?.brand || selectedLocation?.brand || ''}
+        currentBrand={selectedFloorPlate?.brand || (selectedLocations.length > 1 ? (selectedLocations.every(loc => loc.brand === selectedLocations[0].brand) ? selectedLocations[0].brand : 'Multiple Values') : selectedLocation?.brand) || ''}
         onBrandSelect={selectedFloorPlate ? handleBrandChange : handleFixtureBrandChange}
       />
       
