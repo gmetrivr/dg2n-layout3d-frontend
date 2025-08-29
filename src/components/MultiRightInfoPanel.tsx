@@ -1,5 +1,6 @@
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Check } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
+import { useState } from 'react';
 
 interface LocationData {
   blockName: string;
@@ -56,6 +57,30 @@ export function MultiRightInfoPanel({
   onResetLocation,
   onDeleteFixtures,
 }: MultiRightInfoPanelProps) {
+  const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
+  const [customRotationValue, setCustomRotationValue] = useState('');
+  
+  const handleCustomRotation = () => {
+    const angle = parseFloat(customRotationValue);
+    if (!isNaN(angle)) {
+      onRotateFixture?.(angle);
+      setIsCustomRotationMode(false);
+      setCustomRotationValue('');
+    }
+  };
+
+  const handleCancelCustomRotation = () => {
+    setIsCustomRotationMode(false);
+    setCustomRotationValue('');
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCustomRotation();
+    } else if (e.key === 'Escape') {
+      handleCancelCustomRotation();
+    }
+  };
   
   if (selectedLocations.length === 0) return null;
 
@@ -191,6 +216,38 @@ export function MultiRightInfoPanel({
             >
               Rotate +90°
             </Button>
+          </div>
+          <div className="flex gap-1 mb-2">
+            {!isCustomRotationMode ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsCustomRotationMode(true)}
+                className="text-xs px-2 py-1 h-auto w-full"
+              >
+                Rotate Custom
+              </Button>
+            ) : (
+              <div className="flex gap-1 w-full">
+                <input
+                  type="number"
+                  value={customRotationValue}
+                  onChange={(e) => setCustomRotationValue(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Angle"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCustomRotation}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
           </div>
           {onDeleteFixtures && (
             <Button
