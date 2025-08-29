@@ -6,13 +6,14 @@ import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
 import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
-import { Select } from "../components/ui/select";
-import { ArrowLeft, Loader2, Pencil } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { apiService, type JobStatus, type BrandCategoriesResponse } from '../services/api';
-import { extractZipFiles, getGlbTitle, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
+import { extractZipFiles, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
 import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
+import { LeftControlPanel } from './LeftControlPanel';
+import { RightInfoPanel } from './RightInfoPanel';
 
 interface LocationData {
   blockName: string;
@@ -1067,6 +1068,92 @@ export function ThreeDViewerModifier() {
     }
   }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, isExportingZip]);
 
+  // Event handlers for LeftControlPanel
+  const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
+    setSelectedFloorFile(file);
+    
+    if (file) {
+      // Update selectedFile based on current edit mode
+      if (editFloorplatesMode) {
+        const floorMatch = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? floorMatch[1] : '0';
+        const shatteredFloorFile = glbFiles.find(f => 
+          f.name.includes(`dg2n-shattered-floor-plates-${currentFloor}`)
+        );
+        setSelectedFile(shatteredFloorFile || file);
+      } else {
+        setSelectedFile(file);
+      }
+    }
+  }, [editFloorplatesMode, glbFiles]);
+
+  const handleEditModeChange = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
+    if (mode === "off") {
+      setEditMode(false);
+      setEditFloorplatesMode(false);
+      
+      // Switch back to original floor
+      const baseFile = selectedFloorFile || selectedFile;
+      if (baseFile) {
+        const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? floorMatch[1] : '0';
+        const originalFloorFile = glbFiles.find(file => 
+          file.name.includes(`dg2n-3d-floor-${currentFloor}`)
+        );
+        if (originalFloorFile) {
+          setSelectedFile(originalFloorFile);
+          setSelectedFloorFile(originalFloorFile);
+        }
+      }
+    } else if (mode === "fixtures") {
+      setEditMode(true);
+      setEditFloorplatesMode(false);
+      
+      // Switch back to original floor
+      const baseFile = selectedFloorFile || selectedFile;
+      if (baseFile) {
+        const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? floorMatch[1] : '0';
+        const originalFloorFile = glbFiles.find(file => 
+          file.name.includes(`dg2n-3d-floor-${currentFloor}`)
+        );
+        if (originalFloorFile) {
+          setSelectedFile(originalFloorFile);
+          setSelectedFloorFile(originalFloorFile);
+        }
+      }
+    } else if (mode === "floorplates") {
+      setEditMode(false);
+      setEditFloorplatesMode(true);
+      
+      // Switch to shattered floor
+      const baseFile = selectedFloorFile || selectedFile;
+      if (baseFile) {
+        const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? floorMatch[1] : '0';
+        const shatteredFloorFile = glbFiles.find(file => 
+          file.name.includes(`dg2n-shattered-floor-plates-${currentFloor}`)
+        );
+        if (shatteredFloorFile) {
+          setSelectedFile(shatteredFloorFile);
+        }
+      }
+    }
+  }, [selectedFloorFile, selectedFile, glbFiles]);
+
+  // Event handlers for RightInfoPanel
+  const handleResetFloorPlate = useCallback((plateData: any, modifiedData: any) => {
+    const key = plateData.meshName || `${plateData.surfaceId}-${plateData.brand}`;
+    setModifiedFloorPlates(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(key);
+      return newMap;
+    });
+    // Reset to original brand
+    const originalBrand = modifiedData?.originalBrand || plateData.brand;
+    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
+  }, []);
+
   const createModifiedLocationMasterCSV = async (zip: JSZip) => {
     // Find original location-master.csv
     const originalFile = extractedFiles.find(file => 
@@ -1653,322 +1740,35 @@ export function ThreeDViewerModifier() {
     <div className="h-screen flex flex-col">
       {/* 3D Canvas */}
       <div className="flex-1 relative">
-        {/* Left Side Controls Panel */}
-        <div className="absolute top-4 left-4 z-50">
-          <div className="flex flex-col gap-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg">
-            
-            {/* Model Selector */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Floor:</label>
-              <Select 
-                value={selectedFloorFile?.name || selectedFile?.name || ''} 
-                onChange={(e) => {
-                  const file = glbFiles.find(f => f.name === e.target.value);
-                  setSelectedFloorFile(file || null);
-                  
-                  if (file) {
-                    // Update selectedFile based on current edit mode
-                    if (editFloorplatesMode) {
-                      const floorMatch = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
-                      const currentFloor = floorMatch ? floorMatch[1] : '0';
-                      const shatteredFloorFile = glbFiles.find(f => 
-                        f.name.includes(`dg2n-shattered-floor-plates-${currentFloor}`)
-                      );
-                      setSelectedFile(shatteredFloorFile || file);
-                    } else {
-                      setSelectedFile(file);
-                    }
-                  }
-                }}
-                className="w-48"
-              >
-                {glbFiles
-                  .filter(file => !file.name.includes('dg2n-shattered-floor-plates-'))
-                  .map((file) => (
-                    <option key={file.name} value={file.name}>
-                      {getGlbTitle(file.name)}
-                    </option>
-                  ))
-                }
-              </Select>
-            </div>
-            
-            {/* Show Locations Checkbox */}
-            <div className="flex items-center gap-2">
-              <input 
-                type="checkbox" 
-                id="showSpheres" 
-                checked={showSpheres}
-                onChange={(e) => setShowSpheres(e.target.checked)}
-                className="w-4 h-4"
-              />
-              <label htmlFor="showSpheres" className="text-sm font-medium">Show Fixtures</label>
-            </div>
-            
-            {/* Fixture Type Filter */}
-            {fixtureTypes.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Fixture Type:</label>
-                <Select 
-                  value={selectedFixtureType} 
-                  onChange={(e) => setSelectedFixtureType(e.target.value)}
-                  className="w-48"
-                >
-                  <option value="all">All Types</option>
-                  {fixtureTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
-            
-            {/* Horizontal Separator */}
-            <div className="border-t border-border"></div>
-            
-            {/* Edit Mode Dropdown */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Edit:</label>
-              <Select 
-                value={editFloorplatesMode ? "floorplates" : editMode ? "fixtures" : "off"} 
-                onChange={(e) => {
-                  const newValue = e.target.value;
-                  
-                  if (newValue === "off") {
-                    setEditMode(false);
-                    setEditFloorplatesMode(false);
-                    
-                    // Switch back to original floor
-                    const baseFile = selectedFloorFile || selectedFile;
-                    if (baseFile) {
-                      const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
-                      const currentFloor = floorMatch ? floorMatch[1] : '0';
-                      const originalFloorFile = glbFiles.find(file => 
-                        file.name.includes(`dg2n-3d-floor-${currentFloor}`)
-                      );
-                      if (originalFloorFile) {
-                        setSelectedFile(originalFloorFile);
-                        setSelectedFloorFile(originalFloorFile);
-                      }
-                    }
-                  } else if (newValue === "fixtures") {
-                    setEditMode(true);
-                    setEditFloorplatesMode(false);
-                    
-                    // Switch back to original floor
-                    const baseFile = selectedFloorFile || selectedFile;
-                    if (baseFile) {
-                      const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
-                      const currentFloor = floorMatch ? floorMatch[1] : '0';
-                      const originalFloorFile = glbFiles.find(file => 
-                        file.name.includes(`dg2n-3d-floor-${currentFloor}`)
-                      );
-                      if (originalFloorFile) {
-                        setSelectedFile(originalFloorFile);
-                        setSelectedFloorFile(originalFloorFile);
-                      }
-                    }
-                  } else if (newValue === "floorplates") {
-                    setEditMode(false);
-                    setEditFloorplatesMode(true);
-                    
-                    // Switch to shattered floor
-                    const baseFile = selectedFloorFile || selectedFile;
-                    if (baseFile) {
-                      const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
-                      const currentFloor = floorMatch ? floorMatch[1] : '0';
-                      const shatteredFloorFile = glbFiles.find(file => 
-                        file.name.includes(`dg2n-shattered-floor-plates-${currentFloor}`)
-                      );
-                      if (shatteredFloorFile) {
-                        setSelectedFile(shatteredFloorFile);
-                      }
-                    }
-                  }
-                }}
-                className="w-48"
-              >
-                <option value="off">Off</option>
-                <option value="fixtures">Fixtures</option>
-                <option value="floorplates">Floor Plates</option>
-              </Select>
-            </div>
-            
-            {/* Floor Plates Controls */}
-            {editFloorplatesMode && (() => {
-              // Calculate counts for current floor
-              const fileForFloorExtraction = selectedFloorFile || selectedFile;
-              const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]plates[_-](\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
-              const currentFloor = floorMatch ? floorMatch[1] : '0';
-              const currentFloorPlatesData = floorPlatesData[currentFloor] || {};
-              
-              // Count all brand categories, considering modifications
-              const categoryCounts = {
-                pvl: 0,
-                ext: 0,
-                gen: 0,
-                arx: 0,
-                oth: 0,
-                legacy: 0
-              };
-              
-              // Count from original data
-              Object.entries(currentFloorPlatesData).forEach(([brand, plates]) => {
-                const category = getBrandCategory(brand);
-                categoryCounts[category] += plates.length;
-              });
-              
-              // Adjust counts based on modifications (only for current floor)
-              modifiedFloorPlates.forEach((modifiedData, key) => {
-                // Check if this modification belongs to a floor plate in the current floor
-                // by checking if the mesh name exists in the current floor data
-                let isCurrentFloorPlate = false;
-                Object.values(currentFloorPlatesData).forEach(plates => {
-                  if (plates.some(plate => plate.meshName === key || `${plate.surfaceId}-${plate.brand}` === key)) {
-                    isCurrentFloorPlate = true;
-                  }
-                });
-                
-                if (!isCurrentFloorPlate) return;
-                
-                const originalBrand = modifiedData.originalBrand || modifiedData.brand;
-                const newBrand = modifiedData.brand;
-                
-                // Remove from original count
-                const originalCategory = getBrandCategory(originalBrand);
-                categoryCounts[originalCategory]--;
-                
-                // Add to new count
-                const newCategory = getBrandCategory(newBrand);
-                categoryCounts[newCategory]++;
-              });
-              
-              return (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <input 
-                      type="checkbox" 
-                      id="showWireframe" 
-                      checked={showWireframe}
-                      onChange={(e) => setShowWireframe(e.target.checked)}
-                      className="w-4 h-4"
-                    />
-                    <label htmlFor="showWireframe" className="text-sm font-medium">Wireframe</label>
-                  </div>
-                  
-                  <div className="border-t border-border pt-2">
-                    <label className="text-sm font-medium">Categories:</label>
-                    <div className="flex flex-col gap-1 text-xs mt-1">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#4169e1' }}></div>
-                          <span>PVL- (Private Label)</span>
-                        </div>
-                        <span className="text-muted-foreground">({categoryCounts.pvl})</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#32cd32' }}></div>
-                          <span>EXT- (External)</span>
-                        </div>
-                        <span className="text-muted-foreground">({categoryCounts.ext})</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ffa500' }}></div>
-                          <span>GEN- (General)</span>
-                        </div>
-                        <span className="text-muted-foreground">({categoryCounts.gen})</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#808080' }}></div>
-                          <span>ARX- (Architectural)</span>
-                        </div>
-                        <span className="text-muted-foreground">({categoryCounts.arx})</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ff0000' }}></div>
-                          <span>OTH- (Unassigned)</span>
-                        </div>
-                        <span className="text-muted-foreground">({categoryCounts.oth})</span>
-                      </div>
-                      {categoryCounts.legacy > 0 && (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded" style={{ backgroundColor: '#cccccc' }}></div>
-                            <span>Legacy (No prefix)</span>
-                          </div>
-                          <span className="text-muted-foreground">({categoryCounts.legacy})</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-            
-            {/* Warning for any edit mode */}
-            {(editMode || editFloorplatesMode) && (
-              <div className="text-yellow-400 text-xs max-w-[200px]">
-                This is a feature preview. Edit changes are not saved.
-              </div>
-            )}
-            
-            
-            {/* Download Buttons */}
-            <div className="border-t border-border pt-2 space-y-2">
-              <button
-                onClick={handleDownloadGLB}
-                disabled={isExporting || !selectedFile}
-                className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isExporting ? (
-                  <span className="flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Exporting...
-                  </span>
-                ) : (
-                  'Download GLB'
-                )}
-              </button>
-              
-              <button
-                onClick={handleDownloadModifiedZip}
-                disabled={isExportingZip || extractedFiles.length === 0 || (movedFixtures.size === 0 && rotatedFixtures.size === 0 && modifiedFloorPlates.size === 0 && modifiedFixtures.size === 0 && modifiedFixtureBrands.size === 0)}
-                className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
-              >
-                {isExportingZip ? (
-                  <span className="flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Creating ZIP...
-                  </span>
-                ) : (
-                  'Download Edited ZIP'
-                )}
-              </button>
-              
-              <div className="text-xs text-muted-foreground">
-                Downloads all original files with edited CSV values updated in place.
-              </div>
-            </div>
-            
-            {/* Job Info */}
-            {jobId && (
-              <div className="text-xs text-muted-foreground border-t border-border pt-2">
-                <div>Job: {jobId}</div>
-                <div>{extractedFiles.length} files extracted</div>
-                {selectedFile && (
-                  <div className="truncate max-w-[200px]">
-                    Current: {selectedFile.name}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        <LeftControlPanel
+          glbFiles={glbFiles}
+          selectedFile={selectedFile}
+          selectedFloorFile={selectedFloorFile}
+          extractedFiles={extractedFiles}
+          showSpheres={showSpheres}
+          showWireframe={showWireframe}
+          editMode={editMode}
+          editFloorplatesMode={editFloorplatesMode}
+          fixtureTypes={fixtureTypes}
+          selectedFixtureType={selectedFixtureType}
+          floorPlatesData={floorPlatesData}
+          modifiedFloorPlates={modifiedFloorPlates}
+          getBrandCategory={getBrandCategory}
+          isExporting={isExporting}
+          isExportingZip={isExportingZip}
+          movedFixtures={movedFixtures}
+          rotatedFixtures={rotatedFixtures}
+          modifiedFixtures={modifiedFixtures}
+          modifiedFixtureBrands={modifiedFixtureBrands}
+          jobId={jobId}
+          onFloorFileChange={handleFloorFileChange}
+          onShowSpheresChange={setShowSpheres}
+          onFixtureTypeChange={setSelectedFixtureType}
+          onShowWireframeChange={setShowWireframe}
+          onEditModeChange={handleEditModeChange}
+          onDownloadGLB={handleDownloadGLB}
+          onDownloadModifiedZip={handleDownloadModifiedZip}
+        />
         <Canvas
           camera={{ position: cameraPosition, fov: 50 }}
           shadows
@@ -2099,195 +1899,24 @@ export function ThreeDViewerModifier() {
           />
         </Canvas>
         
-        {/* Location/Floor Plate Info Overlay */}
-        {(selectedLocation && !editFloorplatesMode) && (() => {
-          const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
-          const movedData = movedFixtures.get(key);
-          const rotatedData = rotatedFixtures.get(key);
-          const brandData = modifiedFixtureBrands.get(key);
-          const hasMoved = movedData !== undefined;
-          const hasRotated = rotatedData !== undefined;
-          const hasBrandChanged = brandData !== undefined;
-          const hasChanges = hasMoved || hasRotated || hasBrandChanged;
-          
-          return (
-            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-sm">Location Info</h3>
-                <button 
-                  onClick={() => setSelectedLocation(null)}
-                  className="text-muted-foreground hover:text-foreground text-xs"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="space-y-1 text-xs">
-                <div><span className="font-medium">Block:</span> {selectedLocation.blockName}</div>
-                <div className="flex items-center justify-between">
-                  <span><span className="font-medium">Type:</span> {fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown'}</span>
-                  {editMode && (
-                    <button
-                      onClick={() => setFixtureTypeModalOpen(true)}
-                      className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors ml-2"
-                      title="Change fixture type"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center justify-between">
-                  <div style={{ color: hasBrandChanged ? '#ef4444' : 'inherit' }}>
-                    <span className="font-medium">Brand:</span> {hasBrandChanged ? brandData?.originalBrand : selectedLocation.brand}
-                  </div>
-                  {editMode && (
-                    <button
-                      onClick={() => setBrandModalOpen(true)}
-                      className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
-                      title="Change brand"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-                {hasBrandChanged && (
-                  <div style={{ color: '#22c55e' }}>
-                    <span className="font-medium">New Brand:</span> {selectedLocation.brand}
-                  </div>
-                )}
-                <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
-                <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
-                  <span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
-                </div>
-                {hasMoved && movedData && (
-                  <div style={{ color: '#22c55e' }}>
-                    <span className="font-medium">New Position:</span> ({movedData.newPosition[0].toFixed(2)}, {movedData.newPosition[1].toFixed(2)}, {movedData.newPosition[2].toFixed(2)})
-                  </div>
-                )}
-                <div style={{ color: hasRotated ? '#ef4444' : 'inherit' }}>
-                  <span className="font-medium">Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
-                </div>
-                {hasRotated && rotatedData && (
-                  <div style={{ color: '#22c55e' }}>
-                    <span className="font-medium">New Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {((selectedLocation.rotationY + rotatedData.rotationOffset) % 360).toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
-                  </div>
-                )}
-              </div>
-              {editMode && (
-                <div className="mt-3 pt-2 border-t border-border">
-                  <div className="flex gap-1 mb-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRotateFixture(-90)}
-                      className="text-xs px-2 py-1 h-auto flex-1"
-                    >
-                      Rotate -90°
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRotateFixture(90)}
-                      className="text-xs px-2 py-1 h-auto flex-1"
-                    >
-                      Rotate +90°
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {hasChanges && (
-                <div className={`${editMode ? '' : 'mt-3 pt-2 border-t border-border'}`}>
-                  <Button 
-                    size="sm" 
-                    variant="outline" 
-                    onClick={() => handleResetPosition(selectedLocation)}
-                    className="w-full text-xs"
-                  >
-                    Reset
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-        
-        {/* Floor Plate Info Overlay */}
-        {selectedFloorPlate && editFloorplatesMode && (() => {
-          const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
-          const modifiedData = modifiedFloorPlates.get(key);
-          const hasBrandChanged = modifiedData !== undefined;
-          const originalBrand = modifiedData?.originalBrand || selectedFloorPlate.brand;
-          const currentBrand = selectedFloorPlate.brand;
-          
-          return (
-            <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-sm">Floor Plate Info</h3>
-                <button 
-                  onClick={() => setSelectedFloorPlate(null)}
-                  className="text-muted-foreground hover:text-foreground text-xs"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="space-y-1 text-xs">
-                <div className="flex items-center justify-between">
-                  <div style={{ color: hasBrandChanged ? '#ef4444' : 'inherit' }}>
-                    <span className="font-medium">Brand:</span> {hasBrandChanged ? originalBrand : (currentBrand || 'Unknown')}
-                  </div>
-                  <button
-                    onClick={() => setBrandModalOpen(true)}
-                    className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
-                    title="Change brand"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                </div>
-                {hasBrandChanged && (
-                  <div style={{ color: '#22c55e' }}>
-                    <span className="font-medium">New Brand:</span> {currentBrand}
-                  </div>
-                )}
-              <div><span className="font-medium">Surface ID:</span> {selectedFloorPlate.surfaceId || 'Unknown'}</div>
-              <div><span className="font-medium">Area:</span> {selectedFloorPlate.area ? `${selectedFloorPlate.area.toFixed(2)} sqm` : 'Unknown'}</div>
-              {selectedFloorPlate.centroid && (
-                <div><span className="font-medium">Centroid:</span> ({selectedFloorPlate.centroid[0]?.toFixed(2)}, {selectedFloorPlate.centroid[1]?.toFixed(2)}, {selectedFloorPlate.centroid[2]?.toFixed(2)})</div>
-              )}
-              {selectedFloorPlate.bbox && (
-                <>
-                  <div><span className="font-medium">Bbox Min:</span> ({selectedFloorPlate.bbox.min[0]?.toFixed(2)}, {selectedFloorPlate.bbox.min[1]?.toFixed(2)})</div>
-                  <div><span className="font-medium">Bbox Max:</span> ({selectedFloorPlate.bbox.max[0]?.toFixed(2)}, {selectedFloorPlate.bbox.max[1]?.toFixed(2)})</div>
-                </>
-              )}
-              <div><span className="font-medium">Mesh:</span> {selectedFloorPlate.meshName || 'Unknown'}</div>
-              {selectedFloorPlate.layerSource && (
-                <div><span className="font-medium">Layer:</span> {selectedFloorPlate.layerSource}</div>
-              )}
-            </div>
-            {hasBrandChanged && (
-              <div className="mt-3 pt-2 border-t border-border">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => {
-                    const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
-                    setModifiedFloorPlates(prev => {
-                      const newMap = new Map(prev);
-                      newMap.delete(key);
-                      return newMap;
-                    });
-                    // Reset to original brand
-                    const originalBrand = modifiedData?.originalBrand || selectedFloorPlate.brand;
-                    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
-                  }}
-                  className="w-full text-xs"
-                >
-                  Reset
-                </Button>
-              </div>
-            )}
-          </div>
-        );
-        })()}
+        <RightInfoPanel
+          selectedLocation={selectedLocation}
+          selectedFloorPlate={selectedFloorPlate}
+          editMode={editMode}
+          editFloorplatesMode={editFloorplatesMode}
+          movedFixtures={movedFixtures}
+          rotatedFixtures={rotatedFixtures}
+          modifiedFixtureBrands={modifiedFixtureBrands}
+          modifiedFloorPlates={modifiedFloorPlates}
+          fixtureTypeMap={fixtureTypeMap}
+          onCloseLocation={() => setSelectedLocation(null)}
+          onCloseFloorPlate={() => setSelectedFloorPlate(null)}
+          onOpenFixtureTypeModal={() => setFixtureTypeModalOpen(true)}
+          onOpenBrandModal={() => setBrandModalOpen(true)}
+          onRotateFixture={handleRotateFixture}
+          onResetLocation={handleResetPosition}
+          onResetFloorPlate={handleResetFloorPlate}
+        />
       </div>
 
       {/* Brand Selection Modal */}
