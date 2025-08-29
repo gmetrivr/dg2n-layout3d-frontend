@@ -68,11 +68,12 @@ interface LocationGLBProps {
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
   movedFixtures?: Map<string, { originalPosition: [number, number, number], newPosition: [number, number, number] }>;
   rotatedFixtures?: Map<string, { originalRotation: [number, number, number], rotationOffset: number }>;
+  modifiedFixtureBrands?: Map<string, { originalBrand: string, newBrand: string }>;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocation, editMode = false, onPositionChange, movedFixtures, rotatedFixtures, modifiedFixtureBrands, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -115,6 +116,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
       const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
       const movedData = movedFixtures?.get(key);
       const rotatedData = rotatedFixtures?.get(key);
+      const brandData = modifiedFixtureBrands?.get(key);
       
       const currentPosition = movedData 
         ? [movedData.newPosition[0], movedData.newPosition[2], -movedData.newPosition[1]] 
@@ -130,15 +132,16 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
         key,
         movedData,
         rotatedData,
+        brandData,
         currentPosition: currentPosition as [number, number, number],
         rotationX,
         rotationY,
         rotationZ,
         additionalYRotation
       };
-    }, [location, movedFixtures, rotatedFixtures]);
+    }, [location, movedFixtures, rotatedFixtures, modifiedFixtureBrands]);
     
-    const { movedData, rotatedData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    const { movedData, rotatedData, brandData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
     
     // Calculate bounding box when scene loads or rotation changes
     useEffect(() => {
@@ -203,6 +206,14 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
             <meshBasicMaterial transparent opacity={0} />
           </mesh>
           
+          {/* Yellow edge outline for brand-modified fixtures - use calculated bounding box */}
+          {brandData && !isSelected && !movedData && !rotatedData && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={997}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="yellow" />
+            </lineSegments>
+          )}
+          
           {/* Orange edge outline for moved/rotated fixtures - use calculated bounding box */}
           {(movedData || rotatedData) && !isSelected && (
             <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={998}>
@@ -244,6 +255,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
   const nextMovedData = nextProps.movedFixtures?.get(nextKey);
   const prevRotatedData = prevProps.rotatedFixtures?.get(prevKey);
   const nextRotatedData = nextProps.rotatedFixtures?.get(nextKey);
+  const prevBrandData = prevProps.modifiedFixtureBrands?.get(prevKey);
+  const nextBrandData = nextProps.modifiedFixtureBrands?.get(nextKey);
   
   return (
     prevProps.location.blockName === nextProps.location.blockName &&
@@ -258,7 +271,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, selectedLocat
     prevProps.editMode === nextProps.editMode &&
     prevProps.selectedLocation === nextProps.selectedLocation &&
     JSON.stringify(prevMovedData) === JSON.stringify(nextMovedData) &&
-    JSON.stringify(prevRotatedData) === JSON.stringify(nextRotatedData)
+    JSON.stringify(prevRotatedData) === JSON.stringify(nextRotatedData) &&
+    JSON.stringify(prevBrandData) === JSON.stringify(nextBrandData)
   );
 });
 
@@ -1870,6 +1884,7 @@ export function ThreeDViewerModifier() {
                     onPositionChange={editMode ? handlePositionChange : undefined}
                     movedFixtures={movedFixtures}
                     rotatedFixtures={rotatedFixtures}
+                    modifiedFixtureBrands={modifiedFixtureBrands}
                     {...(editMode && {
                       onTransformStart: () => setIsTransforming(true),
                       onTransformEnd: () => setIsTransforming(false)
