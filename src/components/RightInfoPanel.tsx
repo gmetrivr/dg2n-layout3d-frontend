@@ -12,6 +12,8 @@ interface LocationData {
   rotationY: number;
   rotationZ: number;
   brand: string;
+  count: number;
+  hierarchy: number;
   glbUrl?: string;
   _updateTimestamp?: number;
 }
@@ -42,6 +44,8 @@ interface RightInfoPanelProps {
   movedFixtures: Map<string, { originalPosition: [number, number, number]; newPosition: [number, number, number] }>;
   rotatedFixtures: Map<string, { originalRotation: [number, number, number]; rotationOffset: number }>;
   modifiedFixtureBrands: Map<string, { originalBrand: string; newBrand: string }>;
+  modifiedFixtureCounts?: Map<string, { originalCount: number; newCount: number }>;
+  modifiedFixtureHierarchies?: Map<string, { originalHierarchy: number; newHierarchy: number }>;
   modifiedFloorPlates: Map<string, any>;
   fixtureTypeMap: Map<string, string>;
   
@@ -55,6 +59,8 @@ interface RightInfoPanelProps {
   onResetFloorPlate: (plateData: FloorPlateData, modifiedData: any) => void;
   onDuplicateFixture?: (location: LocationData) => void;
   onDeleteFixture?: (location: LocationData) => void;
+  onCountChange?: (location: LocationData, newCount: number) => void;
+  onHierarchyChange?: (location: LocationData, newHierarchy: number) => void;
 }
 
 export function RightInfoPanel({
@@ -65,6 +71,8 @@ export function RightInfoPanel({
   movedFixtures,
   rotatedFixtures,
   modifiedFixtureBrands,
+  modifiedFixtureCounts,
+  modifiedFixtureHierarchies,
   modifiedFloorPlates,
   fixtureTypeMap,
   onCloseLocation,
@@ -76,9 +84,15 @@ export function RightInfoPanel({
   onResetFloorPlate,
   onDuplicateFixture,
   onDeleteFixture,
+  onCountChange,
+  onHierarchyChange,
 }: RightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
+  const [isEditingCount, setIsEditingCount] = useState(false);
+  const [countValue, setCountValue] = useState('');
+  const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
+  const [hierarchyValue, setHierarchyValue] = useState('');
   
   const handleCustomRotation = () => {
     const angle = parseFloat(customRotationValue);
@@ -102,16 +116,74 @@ export function RightInfoPanel({
     }
   };
   
+  const handleCountEdit = () => {
+    setIsEditingCount(true);
+    setCountValue(selectedLocation?.count?.toString() || '1');
+  };
+  
+  const handleCountSave = () => {
+    const newCount = parseInt(countValue);
+    if (!isNaN(newCount) && newCount > 0 && selectedLocation && onCountChange) {
+      onCountChange(selectedLocation, newCount);
+    }
+    setIsEditingCount(false);
+    setCountValue('');
+  };
+  
+  const handleCountCancel = () => {
+    setIsEditingCount(false);
+    setCountValue('');
+  };
+  
+  const handleCountKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCountSave();
+    } else if (e.key === 'Escape') {
+      handleCountCancel();
+    }
+  };
+  
+  const handleHierarchyEdit = () => {
+    setIsEditingHierarchy(true);
+    setHierarchyValue(selectedLocation?.hierarchy?.toString() || '0');
+  };
+  
+  const handleHierarchySave = () => {
+    const newHierarchy = parseInt(hierarchyValue);
+    if (!isNaN(newHierarchy) && selectedLocation && onHierarchyChange) {
+      onHierarchyChange(selectedLocation, newHierarchy);
+    }
+    setIsEditingHierarchy(false);
+    setHierarchyValue('');
+  };
+  
+  const handleHierarchyCancel = () => {
+    setIsEditingHierarchy(false);
+    setHierarchyValue('');
+  };
+  
+  const handleHierarchyKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleHierarchySave();
+    } else if (e.key === 'Escape') {
+      handleHierarchyCancel();
+    }
+  };
+  
   // Location Info Panel
   if (selectedLocation && !editFloorplatesMode) {
     const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
     const movedData = movedFixtures.get(key);
     const rotatedData = rotatedFixtures.get(key);
     const brandData = modifiedFixtureBrands.get(key);
+    const countData = modifiedFixtureCounts?.get(key);
+    const hierarchyData = modifiedFixtureHierarchies?.get(key);
     const hasMoved = movedData !== undefined;
     const hasRotated = rotatedData !== undefined;
     const hasBrandChanged = brandData !== undefined;
-    const hasChanges = hasMoved || hasRotated || hasBrandChanged;
+    const hasCountChanged = countData !== undefined;
+    const hasHierarchyChanged = hierarchyData !== undefined;
+    const hasChanges = hasMoved || hasRotated || hasBrandChanged || hasCountChanged || hasHierarchyChanged;
     
     return (
       <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
@@ -158,6 +230,44 @@ export function RightInfoPanel({
             </div>
           )}
           <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
+          <div className="flex items-center justify-between">
+            <div style={{ color: hasCountChanged ? '#ef4444' : 'inherit' }}>
+              <span className="font-medium">Count:</span> {hasCountChanged ? countData?.originalCount : selectedLocation.count}
+            </div>
+            {editMode && onCountChange && (
+              <button
+                onClick={handleCountEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Change count"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          {hasCountChanged && (
+            <div style={{ color: '#22c55e' }}>
+              <span className="font-medium">New Count:</span> {countData?.newCount}
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <div style={{ color: hasHierarchyChanged ? '#ef4444' : 'inherit' }}>
+              <span className="font-medium">Hierarchy:</span> {hasHierarchyChanged ? hierarchyData?.originalHierarchy : selectedLocation.hierarchy}
+            </div>
+            {editMode && onHierarchyChange && (
+              <button
+                onClick={handleHierarchyEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Change hierarchy"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          {hasHierarchyChanged && (
+            <div style={{ color: '#22c55e' }}>
+              <span className="font-medium">New Hierarchy:</span> {hierarchyData?.newHierarchy}
+            </div>
+          )}
           <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
             <span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
           </div>
@@ -227,6 +337,49 @@ export function RightInfoPanel({
                 </div>
               )}
             </div>
+            {isEditingCount && (
+              <div className="flex gap-1 mb-2">
+                <input
+                  type="number"
+                  value={countValue}
+                  onChange={(e) => setCountValue(e.target.value)}
+                  onKeyDown={handleCountKeyPress}
+                  placeholder="Count"
+                  min="1"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCountSave}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+            {isEditingHierarchy && (
+              <div className="flex gap-1 mb-2">
+                <input
+                  type="number"
+                  value={hierarchyValue}
+                  onChange={(e) => setHierarchyValue(e.target.value)}
+                  onKeyDown={handleHierarchyKeyPress}
+                  placeholder="Hierarchy"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleHierarchySave}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
             <div className="flex gap-1">
               {onDuplicateFixture && (
                 <Button

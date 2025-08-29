@@ -27,6 +27,8 @@ interface LocationData {
   rotationY: number;
   rotationZ: number;
   brand: string;
+  count: number;
+  hierarchy: number;
   glbUrl?: string; // Will be populated from API
   _updateTimestamp?: number; // Used to force re-renders when GLB URL changes
 }
@@ -76,11 +78,13 @@ interface LocationGLBProps {
   rotatedFixtures?: Map<string, { originalRotation: [number, number, number], rotationOffset: number }>;
   modifiedFixtureBrands?: Map<string, { originalBrand: string, newBrand: string }>;
   modifiedFixtures?: Map<string, { originalType: string, newType: string, newGlbUrl: string }>;
+  modifiedFixtureCounts?: Map<string, { originalCount: number, newCount: number }>;
+  modifiedFixtureHierarchies?: Map<string, { originalHierarchy: number, newHierarchy: number }>;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, isSingleSelection = false, onPositionChange, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures, onTransformStart, onTransformEnd }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, isSingleSelection = false, onPositionChange, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures, modifiedFixtureCounts, modifiedFixtureHierarchies, onTransformStart, onTransformEnd }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -120,6 +124,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
       const rotatedData = rotatedFixtures?.get(key);
       const brandData = modifiedFixtureBrands?.get(key);
       const fixtureTypeData = modifiedFixtures?.get(key);
+      const countData = modifiedFixtureCounts?.get(key);
+      const hierarchyData = modifiedFixtureHierarchies?.get(key);
       
       const currentPosition = movedData 
         ? [movedData.newPosition[0], movedData.newPosition[2], -movedData.newPosition[1]] 
@@ -137,15 +143,17 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
         rotatedData,
         brandData,
         fixtureTypeData,
+        countData,
+        hierarchyData,
         currentPosition: currentPosition as [number, number, number],
         rotationX,
         rotationY,
         rotationZ,
         additionalYRotation
       };
-    }, [location, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures]);
+    }, [location, movedFixtures, rotatedFixtures, modifiedFixtureBrands, modifiedFixtures, modifiedFixtureCounts, modifiedFixtureHierarchies]);
     
-    const { movedData, rotatedData, brandData, fixtureTypeData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
+    const { movedData, rotatedData, brandData, fixtureTypeData, countData, hierarchyData, currentPosition, rotationX, rotationY, rotationZ, additionalYRotation } = memoizedData;
     
     // Calculate bounding box when scene loads or rotation changes
     useEffect(() => {
@@ -218,7 +226,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           </mesh>
           
           {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use calculated bounding box */}
-          {(brandData || fixtureTypeData) && !isSelected && !movedData && !rotatedData && (
+          {(brandData || fixtureTypeData || countData || hierarchyData) && !isSelected && !movedData && !rotatedData && (
             <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={997}>
               <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
               <lineBasicMaterial color="yellow" />
@@ -268,6 +276,10 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
   const nextRotatedData = nextProps.rotatedFixtures?.get(nextKey);
   const prevBrandData = prevProps.modifiedFixtureBrands?.get(prevKey);
   const nextBrandData = nextProps.modifiedFixtureBrands?.get(nextKey);
+  const prevCountData = prevProps.modifiedFixtureCounts?.get(prevKey);
+  const nextCountData = nextProps.modifiedFixtureCounts?.get(nextKey);
+  const prevHierarchyData = prevProps.modifiedFixtureHierarchies?.get(prevKey);
+  const nextHierarchyData = nextProps.modifiedFixtureHierarchies?.get(nextKey);
   
   return (
     prevProps.location.blockName === nextProps.location.blockName &&
@@ -285,6 +297,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     JSON.stringify(prevMovedData) === JSON.stringify(nextMovedData) &&
     JSON.stringify(prevRotatedData) === JSON.stringify(nextRotatedData) &&
     JSON.stringify(prevBrandData) === JSON.stringify(nextBrandData) &&
+    JSON.stringify(prevCountData) === JSON.stringify(nextCountData) &&
+    JSON.stringify(prevHierarchyData) === JSON.stringify(nextHierarchyData) &&
     JSON.stringify(prevProps.modifiedFixtures?.get(prevKey)) === JSON.stringify(nextProps.modifiedFixtures?.get(nextKey))
   );
 });
@@ -648,6 +662,8 @@ export function ThreeDViewerModifier() {
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [modifiedFixtures, setModifiedFixtures] = useState<Map<string, { originalType: string, newType: string, newGlbUrl: string }>>(new Map());
   const [modifiedFixtureBrands, setModifiedFixtureBrands] = useState<Map<string, { originalBrand: string, newBrand: string }>>(new Map());
+  const [modifiedFixtureCounts, setModifiedFixtureCounts] = useState<Map<string, { originalCount: number, newCount: number }>>(new Map());
+  const [modifiedFixtureHierarchies, setModifiedFixtureHierarchies] = useState<Map<string, { originalHierarchy: number, newHierarchy: number }>>(new Map());
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
@@ -913,6 +929,52 @@ export function ThreeDViewerModifier() {
       return newMap;
     });
     
+    // Reset count changes
+    setModifiedFixtureCounts(prev => {
+      if (!prev.has(key)) return prev; // No change needed
+      const newMap = new Map(prev);
+      const originalCount = newMap.get(key)?.originalCount;
+      newMap.delete(key);
+      // Reset selected location count to original
+      if (originalCount !== undefined) {
+        setSelectedLocation((prev: any) => prev ? { ...prev, count: originalCount } : null);
+        // Also reset in locationData
+        setLocationData(prevData => prevData.map(loc => {
+          if (loc.blockName === location.blockName &&
+              Math.abs(loc.posX - location.posX) < 0.001 &&
+              Math.abs(loc.posY - location.posY) < 0.001 &&
+              Math.abs(loc.posZ - location.posZ) < 0.001) {
+            return { ...loc, count: originalCount };
+          }
+          return loc;
+        }));
+      }
+      return newMap;
+    });
+    
+    // Reset hierarchy changes
+    setModifiedFixtureHierarchies(prev => {
+      if (!prev.has(key)) return prev; // No change needed
+      const newMap = new Map(prev);
+      const originalHierarchy = newMap.get(key)?.originalHierarchy;
+      newMap.delete(key);
+      // Reset selected location hierarchy to original
+      if (originalHierarchy !== undefined) {
+        setSelectedLocation((prev: any) => prev ? { ...prev, hierarchy: originalHierarchy } : null);
+        // Also reset in locationData
+        setLocationData(prevData => prevData.map(loc => {
+          if (loc.blockName === location.blockName &&
+              Math.abs(loc.posX - location.posX) < 0.001 &&
+              Math.abs(loc.posY - location.posY) < 0.001 &&
+              Math.abs(loc.posZ - location.posZ) < 0.001) {
+            return { ...loc, hierarchy: originalHierarchy };
+          }
+          return loc;
+        }));
+      }
+      return newMap;
+    });
+    
     // Force re-render by clearing and re-setting selection
     setSelectedLocation(null);
     setTimeout(() => setSelectedLocation(location), 10);
@@ -969,6 +1031,120 @@ export function ThreeDViewerModifier() {
       setSelectedLocation((prev: any) => prev ? { ...prev, brand: newBrand } : null);
     }
   }, [selectedLocation, selectedLocations]);
+
+  const handleFixtureCountChange = useCallback((location: LocationData, newCount: number) => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    setModifiedFixtureCounts(prev => {
+      const newMap = new Map(prev);
+      newMap.set(key, {
+        originalCount: location.count,
+        newCount: newCount
+      });
+      return newMap;
+    });
+    
+    // Update selected location immediately
+    setSelectedLocation((prev: any) => prev ? { ...prev, count: newCount } : null);
+    
+    // Update the location in locationData as well
+    setLocationData(prev => prev.map(loc => {
+      if (loc.blockName === location.blockName &&
+          Math.abs(loc.posX - location.posX) < 0.001 &&
+          Math.abs(loc.posY - location.posY) < 0.001 &&
+          Math.abs(loc.posZ - location.posZ) < 0.001) {
+        return { ...loc, count: newCount };
+      }
+      return loc;
+    }));
+  }, []);
+
+  const handleFixtureCountChangeMulti = useCallback((locations: LocationData[], newCount: number) => {
+    locations.forEach(location => {
+      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      setModifiedFixtureCounts(prev => {
+        const newMap = new Map(prev);
+        newMap.set(key, {
+          originalCount: location.count,
+          newCount: newCount
+        });
+        return newMap;
+      });
+    });
+    
+    // Update selected locations immediately
+    setSelectedLocations(prev => prev.map(loc => ({ ...loc, count: newCount })));
+    
+    // Update the locations in locationData as well
+    setLocationData(prev => prev.map(loc => {
+      const locationKey = `${loc.blockName}-${loc.posX}-${loc.posY}-${loc.posZ}`;
+      const isModified = locations.some(selectedLoc => {
+        const selectedKey = `${selectedLoc.blockName}-${selectedLoc.posX}-${selectedLoc.posY}-${selectedLoc.posZ}`;
+        return selectedKey === locationKey;
+      });
+      
+      if (isModified) {
+        return { ...loc, count: newCount };
+      }
+      return loc;
+    }));
+  }, []);
+
+  const handleFixtureHierarchyChange = useCallback((location: LocationData, newHierarchy: number) => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    setModifiedFixtureHierarchies(prev => {
+      const newMap = new Map(prev);
+      newMap.set(key, {
+        originalHierarchy: location.hierarchy,
+        newHierarchy: newHierarchy
+      });
+      return newMap;
+    });
+    
+    // Update selected location immediately
+    setSelectedLocation((prev: any) => prev ? { ...prev, hierarchy: newHierarchy } : null);
+    
+    // Update the location in locationData as well
+    setLocationData(prev => prev.map(loc => {
+      if (loc.blockName === location.blockName &&
+          Math.abs(loc.posX - location.posX) < 0.001 &&
+          Math.abs(loc.posY - location.posY) < 0.001 &&
+          Math.abs(loc.posZ - location.posZ) < 0.001) {
+        return { ...loc, hierarchy: newHierarchy };
+      }
+      return loc;
+    }));
+  }, []);
+
+  const handleFixtureHierarchyChangeMulti = useCallback((locations: LocationData[], newHierarchy: number) => {
+    locations.forEach(location => {
+      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      setModifiedFixtureHierarchies(prev => {
+        const newMap = new Map(prev);
+        newMap.set(key, {
+          originalHierarchy: location.hierarchy,
+          newHierarchy: newHierarchy
+        });
+        return newMap;
+      });
+    });
+    
+    // Update selected locations immediately
+    setSelectedLocations(prev => prev.map(loc => ({ ...loc, hierarchy: newHierarchy })));
+    
+    // Update the locations in locationData as well
+    setLocationData(prev => prev.map(loc => {
+      const locationKey = `${loc.blockName}-${loc.posX}-${loc.posY}-${loc.posZ}`;
+      const isModified = locations.some(selectedLoc => {
+        const selectedKey = `${selectedLoc.blockName}-${selectedLoc.posX}-${selectedLoc.posY}-${selectedLoc.posZ}`;
+        return selectedKey === locationKey;
+      });
+      
+      if (isModified) {
+        return { ...loc, hierarchy: newHierarchy };
+      }
+      return loc;
+    }));
+  }, []);
 
   const handleDuplicateFixture = useCallback((location: LocationData) => {
     // Create a duplicate fixture at a slightly offset position (1 unit in X direction)
@@ -1301,7 +1477,7 @@ export function ThreeDViewerModifier() {
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, locationData, deletedFixtures, isExportingZip, jobId]);
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, modifiedFixtureCounts, modifiedFixtureHierarchies, locationData, deletedFixtures, isExportingZip, jobId]);
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -1528,6 +1704,24 @@ export function ThreeDViewerModifier() {
         }
       }
       
+      // Update count if changed
+      const countData = modifiedFixtureCounts.get(key);
+      if (countData) {
+        // Count is at index 12 in the CSV structure
+        if (values.length > 12) {
+          values[12] = countData.newCount.toString();
+        }
+      }
+      
+      // Update hierarchy if changed
+      const hierarchyData = modifiedFixtureHierarchies.get(key);
+      if (hierarchyData) {
+        // Hierarchy is at index 13 in the CSV structure
+        if (values.length > 13) {
+          values[13] = hierarchyData.newHierarchy.toString();
+        }
+      }
+      
       modifiedLines.push(values.join(','));
     }
     
@@ -1551,8 +1745,8 @@ export function ThreeDViewerModifier() {
           location.rotationY.toFixed(1), // 9: Rotation Y (deg)
           location.rotationZ.toFixed(1), // 10: Rotation Z (deg)
           location.brand,                // 11: Brand
-          '1',                          // 12: Count - default to 1
-          ''                            // 13: Hierarchy - empty
+          location.count.toString(),     // 12: Count
+          location.hierarchy.toString()  // 13: Hierarchy
         ].join(',');
         
         modifiedLines.push(csvLine);
@@ -1812,6 +2006,8 @@ export function ThreeDViewerModifier() {
               rotationY: parseFloat(values[9]) || 0, // Rotation Y (deg)
               rotationZ: parseFloat(values[10]) || 0, // Rotation Z (deg)
               brand: values[11]?.trim() || 'unknown', // Brand is at index 11
+              count: parseInt(values[12]) || 1, // Count is at index 12
+              hierarchy: parseInt(values[13]) || 0, // Hierarchy is at index 13
               glbUrl: undefined // Will be loaded via API
             };
             data.push(locationItem);
@@ -2037,6 +2233,8 @@ export function ThreeDViewerModifier() {
           rotatedFixtures={rotatedFixtures}
           modifiedFixtures={modifiedFixtures}
           modifiedFixtureBrands={modifiedFixtureBrands}
+          modifiedFixtureCounts={modifiedFixtureCounts}
+          modifiedFixtureHierarchies={modifiedFixtureHierarchies}
           deletedFixtures={deletedFixtures}
           locationData={locationData}
           jobId={jobId}
@@ -2158,6 +2356,8 @@ export function ThreeDViewerModifier() {
                     rotatedFixtures={rotatedFixtures}
                     modifiedFixtureBrands={modifiedFixtureBrands}
                     modifiedFixtures={modifiedFixtures}
+                    modifiedFixtureCounts={modifiedFixtureCounts}
+                    modifiedFixtureHierarchies={modifiedFixtureHierarchies}
                     {...(editMode && {
                       onTransformStart: () => setIsTransforming(true),
                       onTransformEnd: () => setIsTransforming(false)
@@ -2195,12 +2395,16 @@ export function ThreeDViewerModifier() {
             movedFixtures={movedFixtures}
             rotatedFixtures={rotatedFixtures}
             modifiedFixtureBrands={modifiedFixtureBrands}
+            modifiedFixtureCounts={modifiedFixtureCounts}
+            modifiedFixtureHierarchies={modifiedFixtureHierarchies}
             fixtureTypeMap={fixtureTypeMap}
             onClose={clearSelections}
             onOpenBrandModal={() => setBrandModalOpen(true)}
             onRotateFixture={handleMultiRotateFixture}
             onResetLocation={handleResetPosition}
             onDeleteFixtures={handleDeleteFixtures}
+            onCountChange={handleFixtureCountChangeMulti}
+            onHierarchyChange={handleFixtureHierarchyChangeMulti}
           />
         )}
         
@@ -2214,6 +2418,8 @@ export function ThreeDViewerModifier() {
             movedFixtures={movedFixtures}
             rotatedFixtures={rotatedFixtures}
             modifiedFixtureBrands={modifiedFixtureBrands}
+            modifiedFixtureCounts={modifiedFixtureCounts}
+            modifiedFixtureHierarchies={modifiedFixtureHierarchies}
             modifiedFloorPlates={modifiedFloorPlates}
             fixtureTypeMap={fixtureTypeMap}
             onCloseLocation={() => setSelectedLocation(null)}
@@ -2225,6 +2431,8 @@ export function ThreeDViewerModifier() {
             onResetFloorPlate={handleResetFloorPlate}
             onDuplicateFixture={handleDuplicateFixture}
             onDeleteFixture={handleDeleteFixture}
+            onCountChange={handleFixtureCountChange}
+            onHierarchyChange={handleFixtureHierarchyChange}
           />
         )}
       </div>

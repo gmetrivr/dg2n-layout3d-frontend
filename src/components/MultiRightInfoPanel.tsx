@@ -12,6 +12,8 @@ interface LocationData {
   rotationY: number;
   rotationZ: number;
   brand: string;
+  count: number;
+  hierarchy: number;
   glbUrl?: string;
   _updateTimestamp?: number;
 }
@@ -22,12 +24,16 @@ interface MultiRightInfoPanelProps {
   movedFixtures: Map<string, { originalPosition: [number, number, number]; newPosition: [number, number, number] }>;
   rotatedFixtures: Map<string, { originalRotation: [number, number, number]; rotationOffset: number }>;
   modifiedFixtureBrands: Map<string, { originalBrand: string; newBrand: string }>;
+  modifiedFixtureCounts?: Map<string, { originalCount: number; newCount: number }>;
+  modifiedFixtureHierarchies?: Map<string, { originalHierarchy: number; newHierarchy: number }>;
   fixtureTypeMap: Map<string, string>;
   onClose: () => void;
   onOpenBrandModal?: () => void;
   onRotateFixture?: (angle: number) => void;
   onResetLocation?: (location: LocationData) => void;
   onDeleteFixtures?: (locations: LocationData[]) => void;
+  onCountChange?: (locations: LocationData[], newCount: number) => void;
+  onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -50,15 +56,23 @@ export function MultiRightInfoPanel({
   movedFixtures,
   rotatedFixtures,
   modifiedFixtureBrands,
+  modifiedFixtureCounts,
+  modifiedFixtureHierarchies,
   fixtureTypeMap,
   onClose,
   onOpenBrandModal,
   onRotateFixture,
   onResetLocation,
   onDeleteFixtures,
+  onCountChange,
+  onHierarchyChange,
 }: MultiRightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
+  const [isEditingCount, setIsEditingCount] = useState(false);
+  const [countValue, setCountValue] = useState('');
+  const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
+  const [hierarchyValue, setHierarchyValue] = useState('');
   
   const handleCustomRotation = () => {
     const angle = parseFloat(customRotationValue);
@@ -82,6 +96,68 @@ export function MultiRightInfoPanel({
     }
   };
   
+  const handleCountEdit = () => {
+    setIsEditingCount(true);
+    if (commonCount !== "Multiple Values" && commonCount !== "N/A") {
+      setCountValue(commonCount.toString());
+    } else {
+      setCountValue('');
+    }
+  };
+  
+  const handleCountSave = () => {
+    const newCount = parseInt(countValue);
+    if (!isNaN(newCount) && newCount > 0 && onCountChange) {
+      onCountChange(selectedLocations, newCount);
+    }
+    setIsEditingCount(false);
+    setCountValue('');
+  };
+  
+  const handleCountCancel = () => {
+    setIsEditingCount(false);
+    setCountValue('');
+  };
+  
+  const handleCountKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCountSave();
+    } else if (e.key === 'Escape') {
+      handleCountCancel();
+    }
+  };
+  
+  const handleHierarchyEdit = () => {
+    setIsEditingHierarchy(true);
+    if (commonHierarchy !== "Multiple Values" && commonHierarchy !== "N/A") {
+      setHierarchyValue(commonHierarchy.toString());
+    } else {
+      setHierarchyValue('');
+    }
+  };
+  
+  const handleHierarchySave = () => {
+    const newHierarchy = parseInt(hierarchyValue);
+    if (!isNaN(newHierarchy) && onHierarchyChange) {
+      onHierarchyChange(selectedLocations, newHierarchy);
+    }
+    setIsEditingHierarchy(false);
+    setHierarchyValue('');
+  };
+  
+  const handleHierarchyCancel = () => {
+    setIsEditingHierarchy(false);
+    setHierarchyValue('');
+  };
+  
+  const handleHierarchyKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleHierarchySave();
+    } else if (e.key === 'Escape') {
+      handleHierarchyCancel();
+    }
+  };
+  
   if (selectedLocations.length === 0) return null;
 
   // Extract values for comparison
@@ -95,11 +171,14 @@ export function MultiRightInfoPanel({
   const rotationsX = selectedLocations.map(loc => loc.rotationX);
   const rotationsY = selectedLocations.map(loc => loc.rotationY);
   const rotationsZ = selectedLocations.map(loc => loc.rotationZ);
+  const counts = selectedLocations.map(loc => loc.count);
+  const hierarchies = selectedLocations.map(loc => loc.hierarchy);
 
   // Check if any fixtures have been modified
   const hasAnyChanges = selectedLocations.some(location => {
     const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    return movedFixtures.has(key) || rotatedFixtures.has(key) || modifiedFixtureBrands.has(key);
+    return movedFixtures.has(key) || rotatedFixtures.has(key) || modifiedFixtureBrands.has(key) || 
+           modifiedFixtureCounts?.has(key) || modifiedFixtureHierarchies?.has(key);
   });
 
   // Check if brands have been changed and get effective brands
@@ -114,6 +193,18 @@ export function MultiRightInfoPanel({
     const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
     return modifiedFixtureBrands.has(key);
   });
+  
+  // Check if any count has been changed
+  const hasAnyCountChanges = selectedLocations.some(location => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    return modifiedFixtureCounts?.has(key) || false;
+  });
+  
+  // Check if any hierarchy has been changed
+  const hasAnyHierarchyChanges = selectedLocations.some(location => {
+    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+    return modifiedFixtureHierarchies?.has(key) || false;
+  });
 
   // Get common values
   const commonBlockName = getCommonValue(blockNames);
@@ -127,6 +218,8 @@ export function MultiRightInfoPanel({
   const commonRotX = getCommonValue(rotationsX);
   const commonRotY = getCommonValue(rotationsY);
   const commonRotZ = getCommonValue(rotationsZ);
+  const commonCount = getCommonValue(counts);
+  const commonHierarchy = getCommonValue(hierarchies);
 
   const canEditBrand = editMode; // Allow brand editing even with multiple origin values
 
@@ -195,7 +288,86 @@ export function MultiRightInfoPanel({
         <div>
           <span className="font-medium">Rotation Z:</span> {commonRotZ === "Multiple Values" || commonRotZ === "N/A" ? commonRotZ : (commonRotZ as number).toFixed(2)}°
         </div>
+        
+        <div className="flex items-center justify-between">
+          <div style={{ color: hasAnyCountChanges ? '#ef4444' : 'inherit' }}>
+            <span className="font-medium">Count:</span> {commonCount === "Multiple Values" || commonCount === "N/A" ? commonCount : String(commonCount)}
+          </div>
+          {editMode && onCountChange && (
+            <button
+              onClick={handleCountEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Change count"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <div style={{ color: hasAnyHierarchyChanges ? '#ef4444' : 'inherit' }}>
+            <span className="font-medium">Hierarchy:</span> {commonHierarchy === "Multiple Values" || commonHierarchy === "N/A" ? commonHierarchy : String(commonHierarchy)}
+          </div>
+          {editMode && onHierarchyChange && (
+            <button
+              onClick={handleHierarchyEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Change hierarchy"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
+      
+      {isEditingCount && (
+        <div className="mt-3 pt-2 border-t border-border">
+          <div className="flex gap-1 mb-2">
+            <input
+              type="number"
+              value={countValue}
+              onChange={(e) => setCountValue(e.target.value)}
+              onKeyDown={handleCountKeyPress}
+              placeholder="Count"
+              min="1"
+              className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleCountSave}
+              className="text-xs px-2 py-1 h-auto"
+            >
+              <Check className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
+      
+      {isEditingHierarchy && (
+        <div className="mt-3 pt-2 border-t border-border">
+          <div className="flex gap-1 mb-2">
+            <input
+              type="number"
+              value={hierarchyValue}
+              onChange={(e) => setHierarchyValue(e.target.value)}
+              onKeyDown={handleHierarchyKeyPress}
+              placeholder="Hierarchy"
+              className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+              autoFocus
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleHierarchySave}
+              className="text-xs px-2 py-1 h-auto"
+            >
+              <Check className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
       
       {editMode && (
         <div className="mt-3 pt-2 border-t border-border">
