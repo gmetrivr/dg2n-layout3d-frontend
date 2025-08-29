@@ -1,4 +1,4 @@
-import { Pencil } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 
 interface LocationData {
@@ -26,6 +26,7 @@ interface MultiRightInfoPanelProps {
   onOpenBrandModal?: () => void;
   onRotateFixture?: (angle: number) => void;
   onResetLocation?: (location: LocationData) => void;
+  onDeleteFixtures?: (locations: LocationData[]) => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -53,6 +54,7 @@ export function MultiRightInfoPanel({
   onOpenBrandModal,
   onRotateFixture,
   onResetLocation,
+  onDeleteFixtures,
 }: MultiRightInfoPanelProps) {
   
   if (selectedLocations.length === 0) return null;
@@ -190,6 +192,17 @@ export function MultiRightInfoPanel({
               Rotate +90°
             </Button>
           </div>
+          {onDeleteFixtures && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => onDeleteFixtures(selectedLocations)}
+              className="w-full text-xs flex items-center justify-center gap-1 mt-2"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete All ({selectedLocations.length})
+            </Button>
+          )}
         </div>
       )}
       

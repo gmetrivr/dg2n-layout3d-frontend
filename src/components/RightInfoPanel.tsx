@@ -1,4 +1,4 @@
-import { Pencil, Copy } from 'lucide-react';
+import { Pencil, Copy, Trash2 } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 
 interface LocationData {
@@ -53,6 +53,7 @@ interface RightInfoPanelProps {
   onResetLocation: (location: LocationData) => void;
   onResetFloorPlate: (plateData: FloorPlateData, modifiedData: any) => void;
   onDuplicateFixture?: (location: LocationData) => void;
+  onDeleteFixture?: (location: LocationData) => void;
 }
 
 export function RightInfoPanel({
@@ -73,6 +74,7 @@ export function RightInfoPanel({
   onResetLocation,
   onResetFloorPlate,
   onDuplicateFixture,
+  onDeleteFixture,
 }: RightInfoPanelProps) {
   
   // Location Info Panel
@@ -168,17 +170,30 @@ export function RightInfoPanel({
                 Rotate +90°
               </Button>
             </div>
-            {onDuplicateFixture && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => onDuplicateFixture(selectedLocation)}
-                className="w-full text-xs flex items-center justify-center gap-1"
-              >
-                <Copy className="h-3 w-3" />
-                Duplicate
-              </Button>
-            )}
+            <div className="flex gap-1">
+              {onDuplicateFixture && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onDuplicateFixture(selectedLocation)}
+                  className="text-xs flex items-center justify-center gap-1 flex-1"
+                >
+                  <Copy className="h-3 w-3" />
+                  Duplicate
+                </Button>
+              )}
+              {onDeleteFixture && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => onDeleteFixture(selectedLocation)}
+                  className="text-xs flex items-center justify-center gap-1 flex-1"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Delete
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {hasChanges && (

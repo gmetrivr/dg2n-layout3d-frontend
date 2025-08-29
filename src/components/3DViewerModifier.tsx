@@ -15,6 +15,7 @@ import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
 import { LeftControlPanel } from './LeftControlPanel';
 import { RightInfoPanel } from './RightInfoPanel';
 import { MultiRightInfoPanel } from './MultiRightInfoPanel';
+import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
 
 interface LocationData {
   blockName: string;
@@ -652,6 +653,9 @@ export function ThreeDViewerModifier() {
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
+  const [deletedFixtures, setDeletedFixtures] = useState<Set<string>>(new Set());
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [fixturesToDelete, setFixturesToDelete] = useState<LocationData[]>([]);
 
   // Handle multi-select functionality
   const handleFixtureClick = useCallback((clickedLocation: LocationData, event?: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => {
@@ -983,6 +987,60 @@ export function ThreeDViewerModifier() {
     setSelectedLocations([duplicatedFixture]);
   }, []);
 
+  const handleDeleteFixture = useCallback((location: LocationData) => {
+    setFixturesToDelete([location]);
+    setDeleteConfirmationOpen(true);
+  }, []);
+
+  const handleDeleteFixtures = useCallback((locations: LocationData[]) => {
+    setFixturesToDelete(locations);
+    setDeleteConfirmationOpen(true);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    const keysToDelete = new Set<string>();
+    
+    fixturesToDelete.forEach(location => {
+      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+      keysToDelete.add(key);
+    });
+    
+    // Add to deleted fixtures set
+    setDeletedFixtures(prev => new Set([...prev, ...keysToDelete]));
+    
+    // Clear selections
+    setSelectedLocation(null);
+    setSelectedLocations([]);
+    
+    // Clear any modifications for deleted fixtures
+    setMovedFixtures(prev => {
+      const newMap = new Map(prev);
+      keysToDelete.forEach(key => newMap.delete(key));
+      return newMap;
+    });
+    
+    setRotatedFixtures(prev => {
+      const newMap = new Map(prev);
+      keysToDelete.forEach(key => newMap.delete(key));
+      return newMap;
+    });
+    
+    setModifiedFixtureBrands(prev => {
+      const newMap = new Map(prev);
+      keysToDelete.forEach(key => newMap.delete(key));
+      return newMap;
+    });
+    
+    setModifiedFixtures(prev => {
+      const newMap = new Map(prev);
+      keysToDelete.forEach(key => newMap.delete(key));
+      return newMap;
+    });
+    
+    // Reset state
+    setFixturesToDelete([]);
+  }, [fixturesToDelete]);
+
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
     // For now, only support single selection for fixture type changes
     // Multi-selection fixture type changes could be complex due to different GLB URLs
@@ -1104,10 +1162,14 @@ export function ThreeDViewerModifier() {
       const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
       
-      // Add all fixture GLBs for the current floor
-      const currentFloorLocations = locationData.filter(location => 
-        location.floorIndex === currentFloor && location.glbUrl
-      );
+      // Add all fixture GLBs for the current floor (excluding deleted fixtures)
+      const currentFloorLocations = locationData.filter(location => {
+        if (location.floorIndex !== currentFloor || !location.glbUrl) return false;
+        
+        // Exclude deleted fixtures
+        const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+        return !deletedFixtures.has(key);
+      });
       
       for (const location of currentFloorLocations) {
         try {
@@ -1182,7 +1244,7 @@ export function ThreeDViewerModifier() {
       }
       setIsExporting(false);
     }
-  }, [selectedFile, selectedFloorFile, locationData, movedFixtures, rotatedFixtures, isExporting]);
+  }, [selectedFile, selectedFloorFile, locationData, movedFixtures, rotatedFixtures, deletedFixtures, isExporting]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
@@ -1239,7 +1301,7 @@ export function ThreeDViewerModifier() {
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, locationData, isExportingZip, jobId]);
+  }, [extractedFiles, movedFixtures, rotatedFixtures, modifiedFloorPlates, modifiedFixtures, modifiedFixtureBrands, locationData, deletedFixtures, isExportingZip, jobId]);
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -1389,8 +1451,13 @@ export function ThreeDViewerModifier() {
       const originalKey = `${blockName}-${posX}-${posY}-${posZ}`;
       originalFixtures.add(originalKey);
       
-      // Check if this location has been moved or rotated
+      // Check if this fixture has been deleted - skip if so
       const key = `${blockName}-${posX}-${posY}-${posZ}`;
+      if (deletedFixtures.has(key)) {
+        continue; // Skip deleted fixtures
+      }
+      
+      // Check if this location has been moved or rotated
       
       // Try exact match first
       let movedData = movedFixtures.get(key);
@@ -1970,6 +2037,7 @@ export function ThreeDViewerModifier() {
           rotatedFixtures={rotatedFixtures}
           modifiedFixtures={modifiedFixtures}
           modifiedFixtureBrands={modifiedFixtureBrands}
+          deletedFixtures={deletedFixtures}
           locationData={locationData}
           jobId={jobId}
           onFloorFileChange={handleFloorFileChange}
@@ -2063,6 +2131,11 @@ export function ThreeDViewerModifier() {
             return locationData
               .filter(location => location.floorIndex === currentFloor)
               .filter(location => {
+                // Exclude deleted fixtures
+                const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
+                return !deletedFixtures.has(key);
+              })
+              .filter(location => {
                 // Apply fixture type filter if not "all"
                 if (selectedFixtureType === 'all') return true;
                 
@@ -2127,6 +2200,7 @@ export function ThreeDViewerModifier() {
             onOpenBrandModal={() => setBrandModalOpen(true)}
             onRotateFixture={handleMultiRotateFixture}
             onResetLocation={handleResetPosition}
+            onDeleteFixtures={handleDeleteFixtures}
           />
         )}
         
@@ -2150,6 +2224,7 @@ export function ThreeDViewerModifier() {
             onResetLocation={handleResetPosition}
             onResetFloorPlate={handleResetFloorPlate}
             onDuplicateFixture={handleDuplicateFixture}
+            onDeleteFixture={handleDeleteFixture}
           />
         )}
       </div>
@@ -2169,6 +2244,14 @@ export function ThreeDViewerModifier() {
         currentType={selectedLocation ? (fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown') : ''}
         availableTypes={fixtureTypes}
         onTypeSelect={handleFixtureTypeChange}
+      />
+      
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        open={deleteConfirmationOpen}
+        onOpenChange={setDeleteConfirmationOpen}
+        fixtureCount={fixturesToDelete.length}
+        onConfirmDelete={handleConfirmDelete}
       />
     </div>
   );

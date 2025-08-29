@@ -34,6 +34,7 @@ interface LeftControlPanelProps {
   rotatedFixtures: Map<string, any>;
   modifiedFixtures: Map<string, any>;
   modifiedFixtureBrands: Map<string, any>;
+  deletedFixtures: Set<string>;
   locationData: any[]; // For detecting duplicated fixtures
   
   // Job info
@@ -69,6 +70,7 @@ export function LeftControlPanel({
   rotatedFixtures,
   modifiedFixtures,
   modifiedFixtureBrands,
+  deletedFixtures,
   locationData,
   jobId,
   onFloorFileChange,
@@ -91,6 +93,7 @@ export function LeftControlPanel({
                     modifiedFloorPlates.size > 0 || 
                     modifiedFixtures.size > 0 || 
                     modifiedFixtureBrands.size > 0 ||
+                    deletedFixtures.size > 0 ||
                     hasDuplicatedFixtures();
 
   return (
