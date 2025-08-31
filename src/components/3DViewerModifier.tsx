@@ -16,22 +16,8 @@ import { LeftControlPanel } from './LeftControlPanel';
 import { RightInfoPanel } from './RightInfoPanel';
 import { MultiRightInfoPanel } from './MultiRightInfoPanel';
 import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
-
-interface LocationData {
-  blockName: string;
-  floorIndex: number;
-  posX: number;
-  posY: number;
-  posZ: number;
-  rotationX: number;
-  rotationY: number;
-  rotationZ: number;
-  brand: string;
-  count: number;
-  hierarchy: number;
-  glbUrl?: string; // Will be populated from API
-  _updateTimestamp?: number; // Used to force re-renders when GLB URL changes
-}
+import { useFixtureSelection, type LocationData } from '../hooks/useFixtureSelection';
+import { useFixtureModifications } from '../hooks/useFixtureModifications';
 
 interface LocationSphereProps {
   location: LocationData;
@@ -641,107 +627,74 @@ export function ThreeDViewerModifier() {
   const [locationData, setLocationData] = useState<LocationData[]>([]);
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
-  const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
-  const [movedFixtures, setMovedFixtures] = useState<Map<string, { originalPosition: [number, number, number], newPosition: [number, number, number] }>>(new Map());
-  const [rotatedFixtures, setRotatedFixtures] = useState<Map<string, { originalRotation: [number, number, number], rotationOffset: number }>>(new Map());
   const [isTransforming, setIsTransforming] = useState(false);
   const [floorPlatesData, setFloorPlatesData] = useState<Record<string, Record<string, any[]>>>({});
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
-  const [modifiedFixtures, setModifiedFixtures] = useState<Map<string, { originalType: string, newType: string, newGlbUrl: string }>>(new Map());
-  const [modifiedFixtureBrands, setModifiedFixtureBrands] = useState<Map<string, { originalBrand: string, newBrand: string }>>(new Map());
-  const [modifiedFixtureCounts, setModifiedFixtureCounts] = useState<Map<string, { originalCount: number, newCount: number }>>(new Map());
-  const [modifiedFixtureHierarchies, setModifiedFixtureHierarchies] = useState<Map<string, { originalHierarchy: number, newHierarchy: number }>>(new Map());
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
-  const [deletedFixtures, setDeletedFixtures] = useState<Set<string>>(new Set());
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
-  const [fixturesToDelete, setFixturesToDelete] = useState<LocationData[]>([]);
 
-  // Handle multi-select functionality
-  const handleFixtureClick = useCallback((clickedLocation: LocationData, event?: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => {
-    if (editFloorplatesMode) return;
-    
-    const isMultiSelect = event?.shiftKey || event?.metaKey || event?.ctrlKey;
-    
-    if (isMultiSelect) {
-      setSelectedLocations(prev => {
-        // Include current single selection if we're transitioning from single to multi
-        const currentSelections = prev.length === 0 && selectedLocation ? [selectedLocation] : prev;
-        
-        const isAlreadySelected = currentSelections.some(loc => 
-          loc.blockName === clickedLocation.blockName &&
-          Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
-          Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
-          Math.abs(loc.posZ - clickedLocation.posZ) < 0.001
-        );
-        
-        if (isAlreadySelected) {
-          // Remove from selection
-          const newSelection = currentSelections.filter(loc => !(loc.blockName === clickedLocation.blockName &&
-            Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
-            Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
-            Math.abs(loc.posZ - clickedLocation.posZ) < 0.001));
-          
-          return newSelection;
-        } else {
-          // Add to selection
-          const newSelection = [...currentSelections, clickedLocation];
-          return newSelection;
-        }
-      });
-      
-      // Update selectedLocation based on new selection state
-      setSelectedLocation(null); // Will be updated by useEffect
-    } else {
-      // Single select
-      setSelectedLocations([clickedLocation]);
-      setSelectedLocation(clickedLocation);
-    }
-  }, [editFloorplatesMode, selectedLocation]);
+  // Use custom hooks for fixture selection and modifications
+  const {
+    selectedLocation,
+    selectedLocations,
+    setSelectedLocation,
+    setSelectedLocations,
+    handleFixtureClick,
+    isLocationSelected,
+    clearSelections,
+  } = useFixtureSelection(editFloorplatesMode);
 
-  // Check if a location is selected (check selectedLocations array as single source of truth)
-  const isLocationSelected = useCallback((location: LocationData) => {
-    return selectedLocations.some(loc => 
-      loc.blockName === location.blockName &&
-      Math.abs(loc.posX - location.posX) < 0.001 &&
-      Math.abs(loc.posY - location.posY) < 0.001 &&
-      Math.abs(loc.posZ - location.posZ) < 0.001
-    );
-  }, [selectedLocations]);
-
-  // Clear all selections
-  const clearSelections = useCallback(() => {
-    setSelectedLocation(null);
-    setSelectedLocations([]);
-  }, []);
-  
-  // Sync selectedLocation with selectedLocations array
-  useEffect(() => {
-    if (selectedLocations.length === 1) {
-      setSelectedLocation(selectedLocations[0]);
-    } else if (selectedLocations.length > 1) {
-      setSelectedLocation(null);
-    } else {
-      setSelectedLocation(null);
-    }
-  }, [selectedLocations]);
-
+  const {
+    movedFixtures,
+    rotatedFixtures,
+    modifiedFixtures,
+    modifiedFixtureBrands,
+    modifiedFixtureCounts,
+    modifiedFixtureHierarchies,
+    modifiedFloorPlates,
+    deletedFixtures,
+    deleteConfirmationOpen,
+    fixturesToDelete,
+    setModifiedFixtures,
+    setModifiedFloorPlates,
+    setDeleteConfirmationOpen,
+    handlePositionChange,
+    handleRotateFixture,
+    handleMultiRotateFixture,
+    handleResetPosition,
+    handleBrandChange,
+    handleFixtureBrandChange,
+    handleFixtureCountChange,
+    handleFixtureCountChangeMulti,
+    handleFixtureHierarchyChange,
+    handleFixtureHierarchyChangeMulti,
+    handleDuplicateFixture,
+    handleDeleteFixture,
+    handleDeleteFixtures,
+    handleConfirmDelete,
+  } = useFixtureModifications(
+    selectedLocation,
+    selectedLocations,
+    selectedFloorPlate,
+    setSelectedLocation,
+    setSelectedLocations,
+    setLocationData,
+    setSelectedFloorPlate
+  );
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -811,411 +764,6 @@ export function ThreeDViewerModifier() {
       return newSet;
     });
   };
-
-  const handlePositionChange = useCallback((location: LocationData, newPosition: [number, number, number]) => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    setMovedFixtures(prev => {
-      // Only create new Map if the value actually changed
-      const existing = prev.get(key);
-      const newValue = {
-        originalPosition: [location.posX, location.posY, location.posZ] as [number, number, number],
-        newPosition: newPosition
-      };
-      
-      // Check if position actually changed to avoid unnecessary updates
-      if (existing && 
-          existing.newPosition[0] === newPosition[0] &&
-          existing.newPosition[1] === newPosition[1] &&
-          existing.newPosition[2] === newPosition[2]) {
-        return prev; // Return same reference to prevent re-renders
-      }
-      
-      const newMap = new Map(prev);
-      newMap.set(key, newValue);
-      return newMap;
-    });
-  }, []);
-
-  const handleRotateFixture = useCallback((degrees: number) => {
-    if (!selectedLocation) return;
-    
-    const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
-    setRotatedFixtures(prev => {
-      const existing = prev.get(key);
-      const currentOffset = existing?.rotationOffset || 0;
-      let newOffset = currentOffset + degrees;
-      
-      // Normalize rotation to 0-359 range
-      newOffset = ((newOffset % 360) + 360) % 360;
-      
-      // If rotation is back to 0 (or effectively 0), remove the entry entirely
-      if (newOffset === 0 || Math.abs(newOffset - 360) < 0.001) {
-        if (!prev.has(key)) return prev; // Already doesn't exist
-        const newMap = new Map(prev);
-        newMap.delete(key);
-        return newMap;
-      }
-      
-      // Only create new Map if the value actually changed
-      if (existing && existing.rotationOffset === newOffset) {
-        return prev; // Return same reference to prevent re-renders
-      }
-      
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        originalRotation: [selectedLocation.rotationX, selectedLocation.rotationY, selectedLocation.rotationZ],
-        rotationOffset: newOffset
-      });
-      return newMap;
-    });
-  }, [selectedLocation]);
-
-  const handleMultiRotateFixture = useCallback((degrees: number) => {
-    selectedLocations.forEach(location => {
-      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-      setRotatedFixtures(prev => {
-        const existing = prev.get(key);
-        const currentOffset = existing?.rotationOffset || 0;
-        let newOffset = currentOffset + degrees;
-        
-        // Normalize rotation to 0-359 range
-        newOffset = ((newOffset % 360) + 360) % 360;
-        
-        // If rotation is back to 0 (or effectively 0), remove the entry entirely
-        if (newOffset === 0 || Math.abs(newOffset - 360) < 0.001) {
-          if (!prev.has(key)) return prev; // Already doesn't exist
-          const newMap = new Map(prev);
-          newMap.delete(key);
-          return newMap;
-        }
-        
-        const newMap = new Map(prev);
-        newMap.set(key, {
-          originalRotation: [location.rotationX, location.rotationY, location.rotationZ],
-          rotationOffset: newOffset
-        });
-        return newMap;
-      });
-    });
-  }, [selectedLocations]);
-
-  const handleResetPosition = useCallback((location: LocationData) => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    
-    setMovedFixtures(prev => {
-      if (!prev.has(key)) return prev; // No change needed
-      const newMap = new Map(prev);
-      newMap.delete(key);
-      return newMap;
-    });
-    
-    setRotatedFixtures(prev => {
-      if (!prev.has(key)) return prev; // No change needed
-      const newMap = new Map(prev);
-      newMap.delete(key);
-      return newMap;
-    });
-    
-    // Reset brand changes
-    setModifiedFixtureBrands(prev => {
-      if (!prev.has(key)) return prev; // No change needed
-      const newMap = new Map(prev);
-      const originalBrand = newMap.get(key)?.originalBrand;
-      newMap.delete(key);
-      // Reset selected location brand to original
-      if (originalBrand) {
-        setSelectedLocation((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
-      }
-      return newMap;
-    });
-    
-    // Reset count changes
-    setModifiedFixtureCounts(prev => {
-      if (!prev.has(key)) return prev; // No change needed
-      const newMap = new Map(prev);
-      const originalCount = newMap.get(key)?.originalCount;
-      newMap.delete(key);
-      // Reset selected location count to original
-      if (originalCount !== undefined) {
-        setSelectedLocation((prev: any) => prev ? { ...prev, count: originalCount } : null);
-        // Also reset in locationData
-        setLocationData(prevData => prevData.map(loc => {
-          if (loc.blockName === location.blockName &&
-              Math.abs(loc.posX - location.posX) < 0.001 &&
-              Math.abs(loc.posY - location.posY) < 0.001 &&
-              Math.abs(loc.posZ - location.posZ) < 0.001) {
-            return { ...loc, count: originalCount };
-          }
-          return loc;
-        }));
-      }
-      return newMap;
-    });
-    
-    // Reset hierarchy changes
-    setModifiedFixtureHierarchies(prev => {
-      if (!prev.has(key)) return prev; // No change needed
-      const newMap = new Map(prev);
-      const originalHierarchy = newMap.get(key)?.originalHierarchy;
-      newMap.delete(key);
-      // Reset selected location hierarchy to original
-      if (originalHierarchy !== undefined) {
-        setSelectedLocation((prev: any) => prev ? { ...prev, hierarchy: originalHierarchy } : null);
-        // Also reset in locationData
-        setLocationData(prevData => prevData.map(loc => {
-          if (loc.blockName === location.blockName &&
-              Math.abs(loc.posX - location.posX) < 0.001 &&
-              Math.abs(loc.posY - location.posY) < 0.001 &&
-              Math.abs(loc.posZ - location.posZ) < 0.001) {
-            return { ...loc, hierarchy: originalHierarchy };
-          }
-          return loc;
-        }));
-      }
-      return newMap;
-    });
-    
-    // Force re-render by clearing and re-setting selection
-    setSelectedLocation(null);
-    setTimeout(() => setSelectedLocation(location), 10);
-  }, []);
-
-  const handleBrandChange = useCallback((newBrand: string) => {
-    if (!selectedFloorPlate) return;
-    
-    const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
-    setModifiedFloorPlates(prev => {
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        ...selectedFloorPlate,
-        brand: newBrand,
-        originalBrand: selectedFloorPlate.originalBrand || selectedFloorPlate.brand
-      });
-      return newMap;
-    });
-    
-    // Update selected floor plate immediately
-    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
-  }, [selectedFloorPlate]);
-
-  const handleFixtureBrandChange = useCallback((newBrand: string) => {
-    // Handle multi-selection
-    if (selectedLocations.length > 1) {
-      selectedLocations.forEach(location => {
-        const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-        setModifiedFixtureBrands(prev => {
-          const newMap = new Map(prev);
-          newMap.set(key, {
-            originalBrand: location.brand,
-            newBrand: newBrand
-          });
-          return newMap;
-        });
-      });
-      
-      // Update selected locations immediately
-      setSelectedLocations(prev => prev.map(loc => ({ ...loc, brand: newBrand })));
-    } else if (selectedLocation) {
-      // Handle single selection
-      const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
-      setModifiedFixtureBrands(prev => {
-        const newMap = new Map(prev);
-        newMap.set(key, {
-          originalBrand: selectedLocation.brand,
-          newBrand: newBrand
-        });
-        return newMap;
-      });
-      
-      // Update selected location immediately
-      setSelectedLocation((prev: any) => prev ? { ...prev, brand: newBrand } : null);
-    }
-  }, [selectedLocation, selectedLocations]);
-
-  const handleFixtureCountChange = useCallback((location: LocationData, newCount: number) => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    setModifiedFixtureCounts(prev => {
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        originalCount: location.count,
-        newCount: newCount
-      });
-      return newMap;
-    });
-    
-    // Update selected location immediately
-    setSelectedLocation((prev: any) => prev ? { ...prev, count: newCount } : null);
-    
-    // Update the location in locationData as well
-    setLocationData(prev => prev.map(loc => {
-      if (loc.blockName === location.blockName &&
-          Math.abs(loc.posX - location.posX) < 0.001 &&
-          Math.abs(loc.posY - location.posY) < 0.001 &&
-          Math.abs(loc.posZ - location.posZ) < 0.001) {
-        return { ...loc, count: newCount };
-      }
-      return loc;
-    }));
-  }, []);
-
-  const handleFixtureCountChangeMulti = useCallback((locations: LocationData[], newCount: number) => {
-    locations.forEach(location => {
-      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-      setModifiedFixtureCounts(prev => {
-        const newMap = new Map(prev);
-        newMap.set(key, {
-          originalCount: location.count,
-          newCount: newCount
-        });
-        return newMap;
-      });
-    });
-    
-    // Update selected locations immediately
-    setSelectedLocations(prev => prev.map(loc => ({ ...loc, count: newCount })));
-    
-    // Update the locations in locationData as well
-    setLocationData(prev => prev.map(loc => {
-      const locationKey = `${loc.blockName}-${loc.posX}-${loc.posY}-${loc.posZ}`;
-      const isModified = locations.some(selectedLoc => {
-        const selectedKey = `${selectedLoc.blockName}-${selectedLoc.posX}-${selectedLoc.posY}-${selectedLoc.posZ}`;
-        return selectedKey === locationKey;
-      });
-      
-      if (isModified) {
-        return { ...loc, count: newCount };
-      }
-      return loc;
-    }));
-  }, []);
-
-  const handleFixtureHierarchyChange = useCallback((location: LocationData, newHierarchy: number) => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    setModifiedFixtureHierarchies(prev => {
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        originalHierarchy: location.hierarchy,
-        newHierarchy: newHierarchy
-      });
-      return newMap;
-    });
-    
-    // Update selected location immediately
-    setSelectedLocation((prev: any) => prev ? { ...prev, hierarchy: newHierarchy } : null);
-    
-    // Update the location in locationData as well
-    setLocationData(prev => prev.map(loc => {
-      if (loc.blockName === location.blockName &&
-          Math.abs(loc.posX - location.posX) < 0.001 &&
-          Math.abs(loc.posY - location.posY) < 0.001 &&
-          Math.abs(loc.posZ - location.posZ) < 0.001) {
-        return { ...loc, hierarchy: newHierarchy };
-      }
-      return loc;
-    }));
-  }, []);
-
-  const handleFixtureHierarchyChangeMulti = useCallback((locations: LocationData[], newHierarchy: number) => {
-    locations.forEach(location => {
-      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-      setModifiedFixtureHierarchies(prev => {
-        const newMap = new Map(prev);
-        newMap.set(key, {
-          originalHierarchy: location.hierarchy,
-          newHierarchy: newHierarchy
-        });
-        return newMap;
-      });
-    });
-    
-    // Update selected locations immediately
-    setSelectedLocations(prev => prev.map(loc => ({ ...loc, hierarchy: newHierarchy })));
-    
-    // Update the locations in locationData as well
-    setLocationData(prev => prev.map(loc => {
-      const locationKey = `${loc.blockName}-${loc.posX}-${loc.posY}-${loc.posZ}`;
-      const isModified = locations.some(selectedLoc => {
-        const selectedKey = `${selectedLoc.blockName}-${selectedLoc.posX}-${selectedLoc.posY}-${selectedLoc.posZ}`;
-        return selectedKey === locationKey;
-      });
-      
-      if (isModified) {
-        return { ...loc, hierarchy: newHierarchy };
-      }
-      return loc;
-    }));
-  }, []);
-
-  const handleDuplicateFixture = useCallback((location: LocationData) => {
-    // Create a duplicate fixture at a slightly offset position (1 unit in X direction)
-    const duplicatedFixture: LocationData = {
-      ...location,
-      posX: location.posX + 1.0, // Offset by 1 unit in X direction
-      blockName: location.blockName, // Keep the same block name initially
-      _updateTimestamp: Date.now() // Force re-render
-    };
-    
-    // Add the duplicated fixture to the location data
-    setLocationData(prev => [...prev, duplicatedFixture]);
-    
-    // Clear current selection and select the new duplicated fixture
-    setSelectedLocation(duplicatedFixture);
-    setSelectedLocations([duplicatedFixture]);
-  }, []);
-
-  const handleDeleteFixture = useCallback((location: LocationData) => {
-    setFixturesToDelete([location]);
-    setDeleteConfirmationOpen(true);
-  }, []);
-
-  const handleDeleteFixtures = useCallback((locations: LocationData[]) => {
-    setFixturesToDelete(locations);
-    setDeleteConfirmationOpen(true);
-  }, []);
-
-  const handleConfirmDelete = useCallback(() => {
-    const keysToDelete = new Set<string>();
-    
-    fixturesToDelete.forEach(location => {
-      const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-      keysToDelete.add(key);
-    });
-    
-    // Add to deleted fixtures set
-    setDeletedFixtures(prev => new Set([...prev, ...keysToDelete]));
-    
-    // Clear selections
-    setSelectedLocation(null);
-    setSelectedLocations([]);
-    
-    // Clear any modifications for deleted fixtures
-    setMovedFixtures(prev => {
-      const newMap = new Map(prev);
-      keysToDelete.forEach(key => newMap.delete(key));
-      return newMap;
-    });
-    
-    setRotatedFixtures(prev => {
-      const newMap = new Map(prev);
-      keysToDelete.forEach(key => newMap.delete(key));
-      return newMap;
-    });
-    
-    setModifiedFixtureBrands(prev => {
-      const newMap = new Map(prev);
-      keysToDelete.forEach(key => newMap.delete(key));
-      return newMap;
-    });
-    
-    setModifiedFixtures(prev => {
-      const newMap = new Map(prev);
-      keysToDelete.forEach(key => newMap.delete(key));
-      return newMap;
-    });
-    
-    // Reset state
-    setFixturesToDelete([]);
-  }, [fixturesToDelete]);
 
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
     // For now, only support single selection for fixture type changes
