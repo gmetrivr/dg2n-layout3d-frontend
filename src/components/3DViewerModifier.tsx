@@ -1294,6 +1294,43 @@ export function ThreeDViewerModifier() {
             onDeleteFixture={handleDeleteFixture}
             onCountChange={handleFixtureCountChange}
             onHierarchyChange={handleFixtureHierarchyChange}
+            onPositionChange={handlePositionChange}
+            onRotationChange={(location, newRotation) => {
+              // Update the location's rotation values
+              const key = generateFixtureUID(location);
+              setLocationData(prev => prev.map(loc => {
+                if (generateFixtureUID(loc) === key) {
+                  return {
+                    ...loc,
+                    rotationX: newRotation[0],
+                    rotationY: newRotation[1],
+                    rotationZ: newRotation[2],
+                    wasRotated: true,
+                    originalRotationX: loc.originalRotationX ?? loc.rotationX,
+                    originalRotationY: loc.originalRotationY ?? loc.rotationY,
+                    originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
+                  };
+                }
+                return loc;
+              }));
+              
+              // Update selected location
+              setSelectedLocation(prev => {
+                if (prev && generateFixtureUID(prev) === key) {
+                  return {
+                    ...prev,
+                    rotationX: newRotation[0],
+                    rotationY: newRotation[1],
+                    rotationZ: newRotation[2],
+                    wasRotated: true,
+                    originalRotationX: prev.originalRotationX ?? prev.rotationX,
+                    originalRotationY: prev.originalRotationY ?? prev.rotationY,
+                    originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
+                  };
+                }
+                return prev;
+              });
+            }}
           />
         )}
       </div>

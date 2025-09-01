@@ -1,6 +1,6 @@
 import { Pencil, Copy, Trash2, Check } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface LocationData {
   blockName: string;
@@ -76,6 +76,8 @@ interface RightInfoPanelProps {
   onDeleteFixture?: (location: LocationData) => void;
   onCountChange?: (location: LocationData, newCount: number) => void;
   onHierarchyChange?: (location: LocationData, newHierarchy: number) => void;
+  onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
+  onRotationChange?: (location: LocationData, newRotation: [number, number, number]) => void;
 }
 
 export function RightInfoPanel({
@@ -96,6 +98,8 @@ export function RightInfoPanel({
   onDeleteFixture,
   onCountChange,
   onHierarchyChange,
+  onPositionChange,
+  onRotationChange,
 }: RightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
@@ -103,6 +107,24 @@ export function RightInfoPanel({
   const [countValue, setCountValue] = useState('');
   const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
   const [hierarchyValue, setHierarchyValue] = useState('');
+  const [isEditingPosition, setIsEditingPosition] = useState(false);
+  const [positionValues, setPositionValues] = useState({ x: '', y: '', z: '' });
+  const [isEditingRotation, setIsEditingRotation] = useState(false);
+  const [rotationValues, setRotationValues] = useState({ x: '', y: '', z: '' });
+  
+  // Reset all editing states when selectedLocation changes
+  useEffect(() => {
+    setIsEditingCount(false);
+    setCountValue('');
+    setIsEditingHierarchy(false);
+    setHierarchyValue('');
+    setIsEditingPosition(false);
+    setPositionValues({ x: '', y: '', z: '' });
+    setIsEditingRotation(false);
+    setRotationValues({ x: '', y: '', z: '' });
+    setIsCustomRotationMode(false);
+    setCustomRotationValue('');
+  }, [selectedLocation]);
   
   const handleCustomRotation = () => {
     const angle = parseFloat(customRotationValue);
@@ -177,6 +199,74 @@ export function RightInfoPanel({
       handleHierarchySave();
     } else if (e.key === 'Escape') {
       handleHierarchyCancel();
+    }
+  };
+  
+  // Position editing handlers
+  const handlePositionEdit = () => {
+    setIsEditingPosition(true);
+    setPositionValues({
+      x: selectedLocation?.posX?.toString() || '0',
+      y: selectedLocation?.posY?.toString() || '0',
+      z: selectedLocation?.posZ?.toString() || '0'
+    });
+  };
+  
+  const handlePositionSave = () => {
+    const x = parseFloat(positionValues.x);
+    const y = parseFloat(positionValues.y);
+    const z = parseFloat(positionValues.z);
+    if (!isNaN(x) && !isNaN(y) && !isNaN(z) && selectedLocation && onPositionChange) {
+      onPositionChange(selectedLocation, [x, y, z]);
+    }
+    setIsEditingPosition(false);
+    setPositionValues({ x: '', y: '', z: '' });
+  };
+  
+  const handlePositionCancel = () => {
+    setIsEditingPosition(false);
+    setPositionValues({ x: '', y: '', z: '' });
+  };
+  
+  const handlePositionKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handlePositionSave();
+    } else if (e.key === 'Escape') {
+      handlePositionCancel();
+    }
+  };
+  
+  // Rotation editing handlers
+  const handleRotationEdit = () => {
+    setIsEditingRotation(true);
+    setRotationValues({
+      x: selectedLocation?.rotationX?.toString() || '0',
+      y: selectedLocation?.rotationY?.toString() || '0',
+      z: selectedLocation?.rotationZ?.toString() || '0'
+    });
+  };
+  
+  const handleRotationSave = () => {
+    const x = parseFloat(rotationValues.x);
+    const y = parseFloat(rotationValues.y);
+    const z = parseFloat(rotationValues.z);
+    if (!isNaN(x) && !isNaN(y) && !isNaN(z) && selectedLocation && onRotationChange) {
+      onRotationChange(selectedLocation, [x, y, z]);
+    }
+    setIsEditingRotation(false);
+    setRotationValues({ x: '', y: '', z: '' });
+  };
+  
+  const handleRotationCancel = () => {
+    setIsEditingRotation(false);
+    setRotationValues({ x: '', y: '', z: '' });
+  };
+  
+  const handleRotationKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleRotationSave();
+    } else if (e.key === 'Escape') {
+      handleRotationCancel();
     }
   };
   
@@ -274,16 +364,38 @@ export function RightInfoPanel({
               <span className="font-medium">New Hierarchy:</span> {selectedLocation.hierarchy}
             </div>
           )}
-          <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
-            <span className="font-medium">Position:</span> ({hasMoved && selectedLocation.originalPosX !== undefined ? selectedLocation.originalPosX.toFixed(2) : selectedLocation.posX.toFixed(2)}, {hasMoved && selectedLocation.originalPosY !== undefined ? selectedLocation.originalPosY.toFixed(2) : selectedLocation.posY.toFixed(2)}, {hasMoved && selectedLocation.originalPosZ !== undefined ? selectedLocation.originalPosZ.toFixed(2) : selectedLocation.posZ.toFixed(2)})
+          <div className="flex items-center justify-between">
+            <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
+              <span className="font-medium">Position:</span> ({hasMoved && selectedLocation.originalPosX !== undefined ? selectedLocation.originalPosX.toFixed(2) : selectedLocation.posX.toFixed(2)}, {hasMoved && selectedLocation.originalPosY !== undefined ? selectedLocation.originalPosY.toFixed(2) : selectedLocation.posY.toFixed(2)}, {hasMoved && selectedLocation.originalPosZ !== undefined ? selectedLocation.originalPosZ.toFixed(2) : selectedLocation.posZ.toFixed(2)})
+            </div>
+            {editMode && onPositionChange && (
+              <button
+                onClick={handlePositionEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Edit position"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
           </div>
           {hasMoved && (
             <div style={{ color: '#22c55e' }}>
               <span className="font-medium">New Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
             </div>
           )}
-          <div style={{ color: hasRotated ? '#ef4444' : 'inherit' }}>
-            <span className="font-medium">Rotation:</span> ({hasRotated && selectedLocation.originalRotationX !== undefined ? selectedLocation.originalRotationX.toFixed(2) : selectedLocation.rotationX.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationY !== undefined ? selectedLocation.originalRotationY.toFixed(2) : selectedLocation.rotationY.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationZ !== undefined ? selectedLocation.originalRotationZ.toFixed(2) : selectedLocation.rotationZ.toFixed(2)}°)
+          <div className="flex items-center justify-between">
+            <div style={{ color: hasRotated ? '#ef4444' : 'inherit' }}>
+              <span className="font-medium">Rotation:</span> ({hasRotated && selectedLocation.originalRotationX !== undefined ? selectedLocation.originalRotationX.toFixed(2) : selectedLocation.rotationX.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationY !== undefined ? selectedLocation.originalRotationY.toFixed(2) : selectedLocation.rotationY.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationZ !== undefined ? selectedLocation.originalRotationZ.toFixed(2) : selectedLocation.rotationZ.toFixed(2)}°)
+            </div>
+            {editMode && onRotationChange && (
+              <button
+                onClick={handleRotationEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Edit rotation"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
           </div>
           {hasRotated && (
             <div style={{ color: '#22c55e' }}>
@@ -384,6 +496,105 @@ export function RightInfoPanel({
                 >
                   <Check className="h-3 w-3" />
                 </Button>
+              </div>
+            )}
+            {isEditingPosition && (
+              <div className="mb-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">X:</label>
+                  <input
+                    type="number"
+                    value={positionValues.x}
+                    onChange={(e) => setPositionValues(prev => ({ ...prev, x: e.target.value }))}
+                    onKeyDown={handlePositionKeyPress}
+                    step="0.1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">Y:</label>
+                  <input
+                    type="number"
+                    value={positionValues.y}
+                    onChange={(e) => setPositionValues(prev => ({ ...prev, y: e.target.value }))}
+                    onKeyDown={handlePositionKeyPress}
+                    step="0.1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">Z:</label>
+                  <input
+                    type="number"
+                    value={positionValues.z}
+                    onChange={(e) => setPositionValues(prev => ({ ...prev, z: e.target.value }))}
+                    onKeyDown={handlePositionKeyPress}
+                    step="0.1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePositionSave}
+                    className="text-xs px-2 py-1 h-auto"
+                  >
+                    <Check className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            {isEditingRotation && (
+              <div className="mb-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">X:</label>
+                  <input
+                    type="number"
+                    value={rotationValues.x}
+                    onChange={(e) => setRotationValues(prev => ({ ...prev, x: e.target.value }))}
+                    onKeyDown={handleRotationKeyPress}
+                    step="1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                    autoFocus
+                  />
+                  <span className="text-xs text-muted-foreground">°</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">Y:</label>
+                  <input
+                    type="number"
+                    value={rotationValues.y}
+                    onChange={(e) => setRotationValues(prev => ({ ...prev, y: e.target.value }))}
+                    onKeyDown={handleRotationKeyPress}
+                    step="1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  />
+                  <span className="text-xs text-muted-foreground">°</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-medium w-4">Z:</label>
+                  <input
+                    type="number"
+                    value={rotationValues.z}
+                    onChange={(e) => setRotationValues(prev => ({ ...prev, z: e.target.value }))}
+                    onKeyDown={handleRotationKeyPress}
+                    step="1"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  />
+                  <span className="text-xs text-muted-foreground">°</span>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRotationSave}
+                    className="text-xs px-2 py-1 h-auto"
+                  >
+                    <Check className="h-3 w-3" />
+                  </Button>
+                </div>
               </div>
             )}
             <div className="flex gap-1">
