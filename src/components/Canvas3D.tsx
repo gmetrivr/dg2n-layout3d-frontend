@@ -56,6 +56,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
+  const [stackBoundingBox, setStackBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
   
   // Local state to store pending position during transform (prevents re-renders during drag)
   const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
@@ -122,8 +123,24 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           size: [size.x, size.y, size.z], 
           center: [center.x, center.y, center.z] 
         });
+        
+        // Calculate stack bounding box based on count
+        const count = location.count || 1;
+        if (count > 1) {
+          // Stack side-by-side along X axis, centered around original point
+          const stackWidth = size.x * count;
+          setStackBoundingBox({
+            size: [stackWidth, size.y, size.z],
+            center: [center.x, center.y, center.z] // Keep center at original position
+          });
+        } else {
+          setStackBoundingBox({ 
+            size: [size.x, size.y, size.z], 
+            center: [center.x, center.y, center.z] 
+          });
+        }
       }
-    }, [scene]); // Only depends on scene loading, not rotations
+    }, [scene, location.count]); // Depends on scene loading and count
     
     const handleTransformChange = () => {
       // Store position locally during transform to avoid global state updates (prevents re-renders)
@@ -150,14 +167,28 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
       }
     };
     
+    const count = location.count || 1;
+    
     return (
       <>
         <group ref={groupRef} position={currentPosition as [number, number, number]} rotation={[rotationX, rotationZ, rotationY]}>
-          <primitive 
-            object={scene.clone()} 
-            scale={[1, 1, 1]}
-          />
-          {/* Transparent bounding box for clicking */}
+          {/* Render multiple GLBs side-by-side based on count, centered around original point */}
+          {Array.from({ length: count }, (_, index) => {
+            // Center the stack around the original point
+            const totalWidth = boundingBox.size[0] * count;
+            const startOffset = -totalWidth / 2 + boundingBox.size[0] / 2; // Start position for first GLB
+            const xOffset = startOffset + index * boundingBox.size[0]; // Position for this GLB
+            return (
+              <group key={index} position={[xOffset, 0, 0]}>
+                <primitive 
+                  object={scene.clone()} 
+                  scale={[1, 1, 1]}
+                />
+              </group>
+            );
+          })}
+          
+          {/* Transparent bounding box for clicking - covers entire stack */}
           <mesh
             onClick={(event) => {
               event.stopPropagation();
@@ -167,41 +198,41 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
                 ctrlKey: event.nativeEvent.ctrlKey
               });
             }}
-            position={boundingBox.center as [number,number,number]}
+            position={stackBoundingBox.center as [number,number,number]}
           >
-            <boxGeometry args={boundingBox.size as [number,number,number]} />
+            <boxGeometry args={stackBoundingBox.size as [number,number,number]} />
             <meshBasicMaterial transparent opacity={0} />
           </mesh>
           
-          {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use calculated bounding box */}
+          {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use stack bounding box */}
           {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged) && !isSelected && !location.wasMoved && !location.wasRotated && (
             <lineSegments 
-              position={boundingBox.center as [number,number,number]} 
+              position={stackBoundingBox.center as [number,number,number]} 
               renderOrder={997}
             >
-              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
               <lineBasicMaterial color="yellow" />
             </lineSegments>
           )}
           
-          {/* Orange edge outline for moved/rotated fixtures - use calculated bounding box */}
+          {/* Orange edge outline for moved/rotated fixtures - use stack bounding box */}
           {(location.wasMoved || location.wasRotated) && !isSelected && (
             <lineSegments 
-              position={boundingBox.center as [number,number,number]} 
+              position={stackBoundingBox.center as [number,number,number]} 
               renderOrder={998}
             >
-              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
               <lineBasicMaterial color="orange" />
             </lineSegments>
           )}
           
-          {/* Red edge outline when selected - use calculated bounding box */}
+          {/* Red edge outline when selected - use stack bounding box */}
           {isSelected && (
             <lineSegments 
-              position={boundingBox.center as [number,number,number]} 
+              position={stackBoundingBox.center as [number,number,number]} 
               renderOrder={999}
             >
-              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
               <lineBasicMaterial color="red" />
             </lineSegments>
           )}
