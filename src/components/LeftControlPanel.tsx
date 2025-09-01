@@ -29,15 +29,9 @@ interface LeftControlPanelProps {
   isExporting: boolean;
   isExportingZip: boolean;
   
-  // Changed data tracking
-  movedFixtures: Map<string, any>;
-  rotatedFixtures: Map<string, any>;
-  modifiedFixtures: Map<string, any>;
-  modifiedFixtureBrands: Map<string, any>;
-  modifiedFixtureCounts: Map<string, any>;
-  modifiedFixtureHierarchies: Map<string, any>;
+  // Changed data tracking  
   deletedFixtures: Set<string>;
-  locationData: any[]; // For detecting duplicated fixtures
+  locationData: any[]; // For detecting duplicated fixtures and modifications
   
   // Job info
   jobId?: string | null;
@@ -68,12 +62,6 @@ export function LeftControlPanel({
   getBrandCategory,
   isExporting,
   isExportingZip,
-  movedFixtures,
-  rotatedFixtures,
-  modifiedFixtures,
-  modifiedFixtureBrands,
-  modifiedFixtureCounts,
-  modifiedFixtureHierarchies,
   deletedFixtures,
   locationData,
   jobId,
@@ -91,14 +79,11 @@ export function LeftControlPanel({
     return locationData.some(location => location._updateTimestamp !== undefined);
   };
   
-  // Check if there are any changes that warrant downloading the zip
-  const hasChanges = movedFixtures.size > 0 || 
-                    rotatedFixtures.size > 0 || 
-                    modifiedFloorPlates.size > 0 || 
-                    modifiedFixtures.size > 0 || 
-                    modifiedFixtureBrands.size > 0 ||
-                    modifiedFixtureCounts.size > 0 ||
-                    modifiedFixtureHierarchies.size > 0 ||
+  // Check if there are any changes that warrant downloading the zip using embedded data
+  const hasChanges = locationData.some(location => 
+    location.wasMoved || location.wasRotated || location.wasTypeChanged || 
+    location.wasBrandChanged || location.wasCountChanged || location.wasHierarchyChanged
+  ) || modifiedFloorPlates.size > 0 ||
                     deletedFixtures.size > 0 ||
                     hasDuplicatedFixtures();
 

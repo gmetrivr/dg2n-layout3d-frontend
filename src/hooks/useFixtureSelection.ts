@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 
 export interface LocationData {
+  // Current state (what's displayed and used)
   blockName: string;
   floorIndex: number;
   posX: number;
@@ -13,7 +14,37 @@ export interface LocationData {
   count: number;
   hierarchy: number;
   glbUrl?: string;
+  
+  // Original state (from CSV ingestion, for reset and export logic)
+  originalBlockName?: string;
+  originalPosX?: number;
+  originalPosY?: number;
+  originalPosZ?: number;
+  originalRotationX?: number;
+  originalRotationY?: number;
+  originalRotationZ?: number;
+  originalBrand?: string;
+  originalCount?: number;
+  originalHierarchy?: number;
+  originalGlbUrl?: string;
+  
+  // Modification tracking
+  wasMoved?: boolean;
+  wasRotated?: boolean;
+  wasTypeChanged?: boolean;
+  wasBrandChanged?: boolean;
+  wasCountChanged?: boolean;
+  wasHierarchyChanged?: boolean;
+  wasDuplicated?: boolean;
+  
+  // Internal tracking
   _updateTimestamp?: number;
+  _ingestionTimestamp?: number;
+}
+
+export function generateFixtureUID(location: LocationData): string {
+  const timestamp = location._ingestionTimestamp || location._updateTimestamp || Date.now();
+  return `${location.blockName}-${location.posX.toFixed(3)}-${location.posY.toFixed(3)}-${location.posZ.toFixed(3)}-${timestamp}`;
 }
 
 export function useFixtureSelection(editFloorplatesMode: boolean = false) {

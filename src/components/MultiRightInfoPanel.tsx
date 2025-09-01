@@ -16,16 +16,31 @@ interface LocationData {
   hierarchy: number;
   glbUrl?: string;
   _updateTimestamp?: number;
+  _ingestionTimestamp?: number;
+  // Original state (from CSV ingestion)
+  originalBlockName?: string;
+  originalPosX?: number;
+  originalPosY?: number;
+  originalPosZ?: number;
+  originalRotationX?: number;
+  originalRotationY?: number;
+  originalRotationZ?: number;
+  originalBrand?: string;
+  originalCount?: number;
+  originalHierarchy?: number;
+  // Modification tracking flags
+  wasMoved?: boolean;
+  wasRotated?: boolean;
+  wasTypeChanged?: boolean;
+  wasBrandChanged?: boolean;
+  wasCountChanged?: boolean;
+  wasHierarchyChanged?: boolean;
 }
+
 
 interface MultiRightInfoPanelProps {
   selectedLocations: LocationData[];
   editMode: boolean;
-  movedFixtures: Map<string, { originalPosition: [number, number, number]; newPosition: [number, number, number] }>;
-  rotatedFixtures: Map<string, { originalRotation: [number, number, number]; rotationOffset: number }>;
-  modifiedFixtureBrands: Map<string, { originalBrand: string; newBrand: string }>;
-  modifiedFixtureCounts?: Map<string, { originalCount: number; newCount: number }>;
-  modifiedFixtureHierarchies?: Map<string, { originalHierarchy: number; newHierarchy: number }>;
   fixtureTypeMap: Map<string, string>;
   onClose: () => void;
   onOpenBrandModal?: () => void;
@@ -53,11 +68,6 @@ function getCommonValue<T>(values: T[]): T | "Multiple Values" | "N/A" {
 export function MultiRightInfoPanel({
   selectedLocations,
   editMode,
-  movedFixtures,
-  rotatedFixtures,
-  modifiedFixtureBrands,
-  modifiedFixtureCounts,
-  modifiedFixtureHierarchies,
   fixtureTypeMap,
   onClose,
   onOpenBrandModal,
@@ -174,37 +184,19 @@ export function MultiRightInfoPanel({
   const counts = selectedLocations.map(loc => loc.count);
   const hierarchies = selectedLocations.map(loc => loc.hierarchy);
 
-  // Check if any fixtures have been modified
-  const hasAnyChanges = selectedLocations.some(location => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    return movedFixtures.has(key) || rotatedFixtures.has(key) || modifiedFixtureBrands.has(key) || 
-           modifiedFixtureCounts?.has(key) || modifiedFixtureHierarchies?.has(key);
-  });
+  // Check if any fixtures have been modified using embedded flags
+  const hasAnyChanges = selectedLocations.some(location => 
+    location.wasMoved || location.wasRotated || location.wasTypeChanged || 
+    location.wasBrandChanged || location.wasCountChanged || location.wasHierarchyChanged
+  );
 
   // Check if brands have been changed and get effective brands
-  const effectiveBrands = selectedLocations.map(location => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    const brandData = modifiedFixtureBrands.get(key);
-    return brandData ? brandData.newBrand : location.brand;
-  });
+  const effectiveBrands = selectedLocations.map(location => location.brand);
 
-  // Check if any brand has been changed
-  const hasAnyBrandChanges = selectedLocations.some(location => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    return modifiedFixtureBrands.has(key);
-  });
-  
-  // Check if any count has been changed
-  const hasAnyCountChanges = selectedLocations.some(location => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    return modifiedFixtureCounts?.has(key) || false;
-  });
-  
-  // Check if any hierarchy has been changed
-  const hasAnyHierarchyChanges = selectedLocations.some(location => {
-    const key = `${location.blockName}-${location.posX}-${location.posY}-${location.posZ}`;
-    return modifiedFixtureHierarchies?.has(key) || false;
-  });
+  // Check if any properties have been changed (use embedded flags)
+  const hasAnyBrandChanges = selectedLocations.some(location => location.wasBrandChanged || false);
+  const hasAnyCountChanges = selectedLocations.some(location => location.wasCountChanged || false);
+  const hasAnyHierarchyChanges = selectedLocations.some(location => location.wasHierarchyChanged || false);
 
   // Get common values
   const commonBlockName = getCommonValue(blockNames);

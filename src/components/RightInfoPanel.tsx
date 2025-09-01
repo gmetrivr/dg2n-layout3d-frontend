@@ -16,7 +16,27 @@ interface LocationData {
   hierarchy: number;
   glbUrl?: string;
   _updateTimestamp?: number;
+  _ingestionTimestamp?: number;
+  // Original state (from CSV ingestion)
+  originalBlockName?: string;
+  originalPosX?: number;
+  originalPosY?: number;
+  originalPosZ?: number;
+  originalRotationX?: number;
+  originalRotationY?: number;
+  originalRotationZ?: number;
+  originalBrand?: string;
+  originalCount?: number;
+  originalHierarchy?: number;
+  // Modification tracking flags
+  wasMoved?: boolean;
+  wasRotated?: boolean;
+  wasTypeChanged?: boolean;
+  wasBrandChanged?: boolean;
+  wasCountChanged?: boolean;
+  wasHierarchyChanged?: boolean;
 }
+
 
 interface FloorPlateData {
   surfaceId?: string;
@@ -41,11 +61,6 @@ interface RightInfoPanelProps {
   editFloorplatesMode: boolean;
   
   // Data maps for tracking changes
-  movedFixtures: Map<string, { originalPosition: [number, number, number]; newPosition: [number, number, number] }>;
-  rotatedFixtures: Map<string, { originalRotation: [number, number, number]; rotationOffset: number }>;
-  modifiedFixtureBrands: Map<string, { originalBrand: string; newBrand: string }>;
-  modifiedFixtureCounts?: Map<string, { originalCount: number; newCount: number }>;
-  modifiedFixtureHierarchies?: Map<string, { originalHierarchy: number; newHierarchy: number }>;
   modifiedFloorPlates: Map<string, any>;
   fixtureTypeMap: Map<string, string>;
   
@@ -68,11 +83,6 @@ export function RightInfoPanel({
   selectedFloorPlate,
   editMode,
   editFloorplatesMode,
-  movedFixtures,
-  rotatedFixtures,
-  modifiedFixtureBrands,
-  modifiedFixtureCounts,
-  modifiedFixtureHierarchies,
   modifiedFloorPlates,
   fixtureTypeMap,
   onCloseLocation,
@@ -172,18 +182,14 @@ export function RightInfoPanel({
   
   // Location Info Panel
   if (selectedLocation && !editFloorplatesMode) {
-    const key = `${selectedLocation.blockName}-${selectedLocation.posX}-${selectedLocation.posY}-${selectedLocation.posZ}`;
-    const movedData = movedFixtures.get(key);
-    const rotatedData = rotatedFixtures.get(key);
-    const brandData = modifiedFixtureBrands.get(key);
-    const countData = modifiedFixtureCounts?.get(key);
-    const hierarchyData = modifiedFixtureHierarchies?.get(key);
-    const hasMoved = movedData !== undefined;
-    const hasRotated = rotatedData !== undefined;
-    const hasBrandChanged = brandData !== undefined;
-    const hasCountChanged = countData !== undefined;
-    const hasHierarchyChanged = hierarchyData !== undefined;
-    const hasChanges = hasMoved || hasRotated || hasBrandChanged || hasCountChanged || hasHierarchyChanged;
+    // Use embedded modification flags
+    const hasMoved = selectedLocation.wasMoved || false;
+    const hasRotated = selectedLocation.wasRotated || false;
+    const hasBrandChanged = selectedLocation.wasBrandChanged || false;
+    const hasCountChanged = selectedLocation.wasCountChanged || false;
+    const hasHierarchyChanged = selectedLocation.wasHierarchyChanged || false;
+    const hasTypeChanged = selectedLocation.wasTypeChanged || false;
+    const hasChanges = hasMoved || hasRotated || hasBrandChanged || hasCountChanged || hasHierarchyChanged || hasTypeChanged;
     
     return (
       <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
@@ -212,7 +218,7 @@ export function RightInfoPanel({
           </div>
           <div className="flex items-center justify-between">
             <div style={{ color: hasBrandChanged ? '#ef4444' : 'inherit' }}>
-              <span className="font-medium">Brand:</span> {hasBrandChanged ? brandData?.originalBrand : selectedLocation.brand}
+              <span className="font-medium">Brand:</span> {hasBrandChanged ? selectedLocation.originalBrand : selectedLocation.brand}
             </div>
             {editMode && (
               <button
@@ -226,13 +232,13 @@ export function RightInfoPanel({
           </div>
           {hasBrandChanged && (
             <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Brand:</span> {brandData?.newBrand}
+              <span className="font-medium">New Brand:</span> {selectedLocation.brand}
             </div>
           )}
           <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
           <div className="flex items-center justify-between">
             <div style={{ color: hasCountChanged ? '#ef4444' : 'inherit' }}>
-              <span className="font-medium">Count:</span> {hasCountChanged ? countData?.originalCount : selectedLocation.count}
+              <span className="font-medium">Count:</span> {hasCountChanged ? selectedLocation.originalCount : selectedLocation.count}
             </div>
             {editMode && onCountChange && (
               <button
@@ -246,12 +252,12 @@ export function RightInfoPanel({
           </div>
           {hasCountChanged && (
             <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Count:</span> {countData?.newCount}
+              <span className="font-medium">New Count:</span> {selectedLocation.count}
             </div>
           )}
           <div className="flex items-center justify-between">
             <div style={{ color: hasHierarchyChanged ? '#ef4444' : 'inherit' }}>
-              <span className="font-medium">Hierarchy:</span> {hasHierarchyChanged ? hierarchyData?.originalHierarchy : selectedLocation.hierarchy}
+              <span className="font-medium">Hierarchy:</span> {hasHierarchyChanged ? selectedLocation.originalHierarchy : selectedLocation.hierarchy}
             </div>
             {editMode && onHierarchyChange && (
               <button
@@ -265,23 +271,23 @@ export function RightInfoPanel({
           </div>
           {hasHierarchyChanged && (
             <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Hierarchy:</span> {hierarchyData?.newHierarchy}
+              <span className="font-medium">New Hierarchy:</span> {selectedLocation.hierarchy}
             </div>
           )}
           <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
-            <span className="font-medium">Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
+            <span className="font-medium">Position:</span> ({hasMoved && selectedLocation.originalPosX !== undefined ? selectedLocation.originalPosX.toFixed(2) : selectedLocation.posX.toFixed(2)}, {hasMoved && selectedLocation.originalPosY !== undefined ? selectedLocation.originalPosY.toFixed(2) : selectedLocation.posY.toFixed(2)}, {hasMoved && selectedLocation.originalPosZ !== undefined ? selectedLocation.originalPosZ.toFixed(2) : selectedLocation.posZ.toFixed(2)})
           </div>
-          {hasMoved && movedData && (
+          {hasMoved && (
             <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Position:</span> ({movedData.newPosition[0].toFixed(2)}, {movedData.newPosition[1].toFixed(2)}, {movedData.newPosition[2].toFixed(2)})
+              <span className="font-medium">New Position:</span> ({selectedLocation.posX.toFixed(2)}, {selectedLocation.posY.toFixed(2)}, {selectedLocation.posZ.toFixed(2)})
             </div>
           )}
           <div style={{ color: hasRotated ? '#ef4444' : 'inherit' }}>
-            <span className="font-medium">Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
+            <span className="font-medium">Rotation:</span> ({hasRotated && selectedLocation.originalRotationX !== undefined ? selectedLocation.originalRotationX.toFixed(2) : selectedLocation.rotationX.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationY !== undefined ? selectedLocation.originalRotationY.toFixed(2) : selectedLocation.rotationY.toFixed(2)}°, {hasRotated && selectedLocation.originalRotationZ !== undefined ? selectedLocation.originalRotationZ.toFixed(2) : selectedLocation.rotationZ.toFixed(2)}°)
           </div>
-          {hasRotated && rotatedData && (
+          {hasRotated && (
             <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {((selectedLocation.rotationY + rotatedData.rotationOffset) % 360).toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
+              <span className="font-medium">New Rotation:</span> ({selectedLocation.rotationX.toFixed(2)}°, {selectedLocation.rotationY.toFixed(2)}°, {selectedLocation.rotationZ.toFixed(2)}°)
             </div>
           )}
         </div>

@@ -1,0 +1,769 @@
+import { useState, useEffect, Suspense, Component, useRef, useMemo, memo } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } from '@react-three/drei';
+import * as THREE from 'three';
+import type { ExtractedFile } from '../utils/zipUtils';
+import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
+
+interface LocationSphereProps {
+  location: LocationData;
+  color?: string;
+  onClick?: (location: LocationData, event?: any) => void;
+  isSelected?: boolean;
+}
+
+function LocationSphere({ location, color = "#ff6b6b", onClick, isSelected }: LocationSphereProps) {
+  return (
+    <group position={[location.posX, location.posZ, -location.posY]}>
+      <mesh onClick={(event) => {
+        event.stopPropagation();
+        onClick?.(location, {
+          shiftKey: event.nativeEvent.shiftKey,
+          metaKey: event.nativeEvent.metaKey,
+          ctrlKey: event.nativeEvent.ctrlKey
+        });
+      }}>
+        <sphereGeometry args={[0.2]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      
+      {/* Red bounding box when selected */}
+      {isSelected && (
+        <lineSegments renderOrder={999}>
+          <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
+          <lineBasicMaterial color="red" />
+        </lineSegments>
+      )}
+    </group>
+  );
+}
+
+interface LocationGLBProps {
+  location: LocationData;
+  onError?: (blockName: string, url: string) => void;
+  onClick?: (location: LocationData, event?: any) => void;
+  isSelected?: boolean;
+  editMode?: boolean;
+  isSingleSelection?: boolean;
+  onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
+  isTransforming?: boolean;
+}
+
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false }: LocationGLBProps) {
+  // This component should only be called when location.glbUrl exists
+  // Calculate bounding box once when GLB loads
+  const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
+  
+  // Local state to store pending position during transform (prevents re-renders during drag)
+  const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
+  
+  // Handle GLB URL changes (for fixture type changes) - force reload
+  const [currentGlbUrl, setCurrentGlbUrl] = useState<string | undefined>(location.glbUrl);
+  const prevGlbUrl = useRef(location.glbUrl);
+  
+  useEffect(() => {
+    if (prevGlbUrl.current !== location.glbUrl && prevGlbUrl.current) {
+      // Clear old cache and force reload
+      useGLTF.clear(prevGlbUrl.current);
+      setCurrentGlbUrl(undefined); // Force unmount
+      setTimeout(() => setCurrentGlbUrl(location.glbUrl), 10); // Remount with new URL
+    } else if (!currentGlbUrl) {
+      setCurrentGlbUrl(location.glbUrl);
+    }
+    prevGlbUrl.current = location.glbUrl;
+  }, [location.glbUrl, currentGlbUrl]);
+  
+  if (!currentGlbUrl) return null; // Don't render during URL transition
+  
+  const gltfResult = useGLTF(currentGlbUrl);
+  const scene = gltfResult?.scene;
+  
+  // If no scene loaded yet, return null (let Suspense handle loading)
+  if (!scene) {
+    return null;
+  }
+    
+    const groupRef = useRef<THREE.Group>(null);
+    
+    // Memoize expensive calculations and lookups
+    const memoizedData = useMemo(() => {
+      // Use embedded data directly from location object
+      const currentPosition = [location.posX, location.posZ, -location.posY];
+      
+      const rotationX = (location.rotationX * Math.PI) / 180;
+      const rotationY = (location.rotationY * Math.PI) / 180;
+      const rotationZ = (location.rotationZ * Math.PI) / 180;
+      
+      return {
+        currentPosition: currentPosition as [number, number, number],
+        rotationX,
+        rotationY,
+        rotationZ
+      };
+    }, [location]);
+    
+    const { currentPosition, rotationX, rotationY, rotationZ } = memoizedData;
+    
+    // Use isTransforming parameter to satisfy TypeScript (it's used in memo comparison)
+    void isTransforming;
+    
+    // Calculate bounding box when scene loads or rotation changes
+    useEffect(() => {
+      if (scene) {
+        const clonedScene = scene.clone();
+        
+        // Apply base rotation
+        clonedScene.rotation.set(
+          (location.rotationX * Math.PI) / 180,
+          (location.rotationZ * Math.PI) / 180,
+          (location.rotationY * Math.PI) / 180
+        );
+        
+        // Apply additional Y rotation if present
+        
+        clonedScene.updateMatrixWorld(true);
+        
+        const box = new THREE.Box3().setFromObject(clonedScene);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        setBoundingBox({ 
+          size: [size.x, size.y, size.z], 
+          center: [center.x, center.y, center.z] 
+        });
+      }
+    }, [scene, rotationY]); // Now depends on both scene and rotation changes
+    
+    const handleTransformChange = () => {
+      // Store position locally during transform to avoid global state updates (prevents re-renders)
+      if (groupRef.current) {
+        const newPosition = groupRef.current.position;
+        setPendingPosition([newPosition.x, -newPosition.z, newPosition.y]);
+      }
+    };
+    
+    const handleTransformEnd = () => {
+      // Apply pending position to global state after transform ends
+      if (pendingPosition && onPositionChange) {
+        onPositionChange(location, pendingPosition);
+        setPendingPosition(null);
+        
+        // Clear isTransforming flag AFTER position update's render cycle completes
+        // This ensures memo comparison blocks re-render before flag is cleared
+        setTimeout(() => {
+          onTransformEnd?.();
+        }, 0);
+      } else {
+        // No position changes, clear flag immediately
+        onTransformEnd?.();
+      }
+    };
+    
+    return (
+      <>
+        <group ref={groupRef} position={currentPosition as [number, number, number]}>
+          <primitive 
+            object={scene.clone()} 
+            rotation={[rotationX, rotationZ, rotationY]}
+            scale={[1, 1, 1]}
+          />
+          {/* Transparent bounding box for clicking */}
+          <mesh
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick?.(location, {
+                shiftKey: event.nativeEvent.shiftKey,
+                metaKey: event.nativeEvent.metaKey,
+                ctrlKey: event.nativeEvent.ctrlKey
+              });
+            }}
+            position={boundingBox.center as [number,number,number]}
+          >
+            <boxGeometry args={boundingBox.size as [number,number,number]} />
+            <meshBasicMaterial transparent opacity={0} />
+          </mesh>
+          
+          {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use calculated bounding box */}
+          {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged) && !isSelected && !location.wasMoved && !location.wasRotated && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={997}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="yellow" />
+            </lineSegments>
+          )}
+          
+          {/* Orange edge outline for moved/rotated fixtures - use calculated bounding box */}
+          {(location.wasMoved || location.wasRotated) && !isSelected && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={998}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="orange" />
+            </lineSegments>
+          )}
+          
+          {/* Red edge outline when selected - use calculated bounding box */}
+          {isSelected && (
+            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
+              <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
+              <lineBasicMaterial color="red" />
+            </lineSegments>
+          )}
+        </group>
+        
+        {/* Transform controls for editing mode - only show for single selection */}
+        {editMode && isSelected && groupRef.current && isSingleSelection && (
+          <TransformControls
+            object={groupRef.current}
+            mode="translate"
+            space="world"
+            showY={false}
+            onObjectChange={handleTransformChange}
+            onMouseDown={onTransformStart}
+            onMouseUp={handleTransformEnd}
+          />
+        )}
+      </>
+    );
+}, (prevProps, nextProps) => {
+  // Custom comparison function using embedded data
+  const prevLocation = prevProps.location;
+  const nextLocation = nextProps.location;
+  
+  // If we're currently transforming, ignore position changes to prevent re-renders
+  // that would break the TransformControls attachment
+  const shouldIgnorePositionChanges = prevProps.isTransforming || nextProps.isTransforming;
+  
+  const positionsEqual = shouldIgnorePositionChanges || (
+    prevLocation.posX === nextLocation.posX &&
+    prevLocation.posY === nextLocation.posY &&
+    prevLocation.posZ === nextLocation.posZ
+  );
+  
+  return (
+    prevLocation.blockName === nextLocation.blockName &&
+    positionsEqual &&
+    prevLocation.rotationX === nextLocation.rotationX &&
+    prevLocation.rotationY === nextLocation.rotationY &&
+    prevLocation.rotationZ === nextLocation.rotationZ &&
+    prevLocation.glbUrl === nextLocation.glbUrl &&
+    prevLocation.brand === nextLocation.brand &&
+    prevLocation.count === nextLocation.count &&
+    prevLocation.hierarchy === nextLocation.hierarchy &&
+    prevLocation._updateTimestamp === nextLocation._updateTimestamp &&
+    prevLocation.wasMoved === nextLocation.wasMoved &&
+    prevLocation.wasRotated === nextLocation.wasRotated &&
+    prevLocation.wasTypeChanged === nextLocation.wasTypeChanged &&
+    prevLocation.wasBrandChanged === nextLocation.wasBrandChanged &&
+    prevLocation.wasCountChanged === nextLocation.wasCountChanged &&
+    prevLocation.wasHierarchyChanged === nextLocation.wasHierarchyChanged &&
+    prevProps.editMode === nextProps.editMode &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.isSingleSelection === nextProps.isSingleSelection &&
+    prevProps.isTransforming === nextProps.isTransforming
+  );
+});
+
+interface GLBModelProps {
+  file: ExtractedFile;
+  onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
+}
+
+function GLBModel({ file, onBoundsCalculated }: GLBModelProps) {
+  const gltf = useGLTF(file.url);
+  
+  useEffect(() => {
+    if (gltf?.scene) {
+      // Make all meshes in the floor GLB non-interactive
+      gltf.scene.traverse((child: any) => {
+        if (child.isMesh) {
+          child.userData.interactive = false;
+        }
+      });
+      
+      // Calculate bounding box once for camera positioning
+      if (onBoundsCalculated) {
+        const box = new THREE.Box3().setFromObject(gltf.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        onBoundsCalculated([center.x, center.y, center.z], [size.x, size.y, size.z]);
+      }
+    }
+  }, [gltf, onBoundsCalculated]);
+  
+  // Cleanup function to clear cache when component unmounts
+  useEffect(() => {
+    return () => {
+      useGLTF.clear(file.url);
+    };
+  }, [file.url]);
+  
+  if (!gltf?.scene) {
+    return null;
+  }
+  
+  return <primitive object={gltf.scene.clone()} />;
+}
+
+// Generate consistent colors for brands
+function getBrandColor(brand: string): number {
+  const category = getBrandCategory(brand);
+  
+  switch (category) {
+    case 'oth': return 0xff0000; // Red for unassigned/OTH-
+    case 'arx': return 0x808080; // Gray for arch/ARX-
+    case 'pvl': return 0x4169e1; // Royal Blue for Private Label
+    case 'ext': return 0x32cd32; // Lime Green for External brands
+    case 'gen': return 0xffa500; // Orange for General retail
+    case 'legacy':
+    default:
+      // For legacy brands without prefixes, use hash-based colors
+      let hash = 5381; // djb2 hash initial value
+      for (let i = 0; i < brand.length; i++) {
+        hash = ((hash << 5) + hash) + brand.charCodeAt(i); // hash * 33 + c
+      }
+      
+      // Use a diverse color palette for legacy brands
+      const legacyColors = [
+        0x00ff00, // Green
+        0x0000ff, // Blue  
+        0xff00ff, // Magenta
+        0xffff00, // Yellow
+        0x00ffff, // Cyan
+        0x800080, // Purple
+        0xffc0cb, // Pink
+        0xa52a2a, // Brown
+        0x90ee90, // Light Green
+        0x87ceeb, // Sky Blue
+        0xdda0dd, // Plum
+        0xff6347, // Tomato
+        0xda70d6, // Orchid
+        0xff1493, // Deep Pink
+        0x00ced1, // Dark Turquoise
+        0xffd700, // Gold
+        0x9370db, // Medium Purple
+        0x20b2aa, // Light Sea Green
+        0xff4500, // Orange Red
+        0x7b68ee, // Medium Slate Blue
+        0x48d1cc, // Medium Turquoise
+      ];
+      
+      return legacyColors[Math.abs(hash) % legacyColors.length];
+  }
+}
+
+// Helper function to get brand category
+function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' | 'legacy' {
+  if (!brand) return 'oth';
+  
+  const normalizedBrand = brand.toLowerCase().trim();
+  
+  // Handle empty or unassigned cases
+  if (normalizedBrand === '' || 
+      normalizedBrand === 'unknown' || 
+      normalizedBrand === 'unassigned' ||
+      normalizedBrand === 'na' ||
+      normalizedBrand === 'null' ||
+      normalizedBrand === 'undefined') {
+    return 'oth';
+  }
+  
+  // Handle prefixed brands
+  if (normalizedBrand.startsWith('pvl-')) return 'pvl';
+  if (normalizedBrand.startsWith('ext-')) return 'ext';
+  if (normalizedBrand.startsWith('gen-')) return 'gen';
+  if (normalizedBrand.startsWith('arx-')) return 'arx';
+  if (normalizedBrand.startsWith('oth-')) return 'oth';
+  
+  // Handle legacy arch
+  if (normalizedBrand === 'arch') return 'arx';
+  
+  // Everything else is legacy brand
+  return 'legacy';
+}
+
+interface ShatteredFloorModelProps {
+  file: ExtractedFile;
+  floorPlatesData: Record<string, any[]>;
+  onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
+  onFloorPlateClick?: (plateData: any) => void;
+  showWireframe?: boolean;
+  modifiedFloorPlates?: Map<string, any>;
+}
+
+function ShatteredFloorModel({ file, floorPlatesData, onBoundsCalculated, onFloorPlateClick, showWireframe = false, modifiedFloorPlates }: ShatteredFloorModelProps) {
+  const gltf = useGLTF(file.url);
+  const [floorPlateMeshes, setFloorPlateMeshes] = useState<any[]>([]);
+  
+  useEffect(() => {
+    if (gltf?.scene) {
+      const meshes: any[] = [];
+      const brandColorMap = new Map<string, number>();
+      
+      // Collect all unique brands from CSV data first  
+      Object.keys(floorPlatesData).forEach(brand => {
+        if (brand && !brandColorMap.has(brand)) {
+          const color = getBrandColor(brand);
+          brandColorMap.set(brand, color);
+        }
+      });
+      
+      // Process floor plate meshes
+      gltf.scene.traverse((child: any) => {
+        if (child.isMesh && child.name.startsWith('floorplate_')) {
+          child.userData.interactive = true;
+          
+          // Recompute bounding box for this mesh after loading
+          child.geometry.computeBoundingBox();
+          child.geometry.computeBoundingSphere();
+          
+          // Find the CSV data for this mesh
+          let surfaceData = null;
+          let brand = 'unknown';
+          
+          // Search through brand data to find this mesh
+          for (const [brandName, surfaces] of Object.entries(floorPlatesData)) {
+            const found = surfaces.find((surface: any) => surface.meshName === child.name);
+            if (found) {
+              surfaceData = found;
+              brand = brandName;
+              break;
+            }
+          }
+          
+          // Set user data
+          if (surfaceData) {
+            child.userData = { 
+              ...child.userData, 
+              ...surfaceData,
+              brand: brand,
+              meshName: child.name
+            };
+          } else {
+            // Fallback - extract from mesh name
+            const parts = child.name.split('_');
+            brand = parts[1] || 'unknown';
+            child.userData = {
+              ...child.userData,
+              brand: brand,
+              meshName: child.name,
+              surfaceId: parts[2] || 'unknown',
+              area: 0,
+              centroid: [0, 0, 0]
+            };
+          }
+          
+          // Check for modified brand
+          const modifiedData = modifiedFloorPlates?.get(child.name);
+          if (modifiedData) {
+            child.userData = { ...child.userData, ...modifiedData };
+          }
+          
+          // Apply brand color
+          const brandColor = brandColorMap.get(child.userData.brand) || getBrandColor(child.userData.brand);
+          
+          if (child.material) {
+            // Create new material with color and wireframe support
+            const newMat = new THREE.MeshStandardMaterial({ 
+              color: brandColor,
+              wireframe: showWireframe
+            });
+            child.material = newMat;
+          }
+          
+          // Store mesh for clickable overlays
+          meshes.push(child);
+        }
+      });
+      
+      setFloorPlateMeshes(meshes);
+      
+      // Calculate bounding box once for camera positioning
+      if (onBoundsCalculated) {
+        const box = new THREE.Box3().setFromObject(gltf.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        onBoundsCalculated([center.x, center.y, center.z], [size.x, size.y, size.z]);
+      }
+    }
+  }, [gltf, floorPlatesData, onBoundsCalculated, modifiedFloorPlates]);
+  
+  // Cleanup function to clear cache when component unmounts
+  useEffect(() => {
+    return () => {
+        useGLTF.clear(file.url);
+    };
+  }, [file.url]);
+  
+  if (!gltf?.scene) {
+    return null;
+  }
+  
+  return (
+    <>
+      <primitive object={gltf.scene} />
+      
+      {/* Add clickable overlays - use floorPlateMeshes (meshes that had CSV matches) */}
+      {floorPlateMeshes.map((mesh, index) => (
+        <mesh
+          key={`${mesh.name || `mesh-${index}`}-clickable`}
+          geometry={mesh.geometry}
+          position={[mesh.position.x, mesh.position.y + 0.01, mesh.position.z]}
+          rotation={[mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]}
+          scale={[mesh.scale.x, mesh.scale.y, mesh.scale.z]}
+          onClick={(event) => {
+            if (event.face && onFloorPlateClick) {
+              event.stopPropagation();
+              onFloorPlateClick(mesh.userData);
+            }
+          }}
+        >
+          <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <mesh>
+      <boxGeometry args={[2, 0.1, 2]} />
+      <meshStandardMaterial color="gray" />
+    </mesh>
+  );
+}
+
+function ErrorFallback() {
+  return (
+    <group>
+      <mesh>
+        <boxGeometry args={[4, 0.2, 4]} />
+        <meshStandardMaterial color="red" />
+      </mesh>
+      <Text
+        position={[0, 1, 0]}
+        fontSize={0.5}
+        color="white"
+        anchorX="center"
+        anchorY="middle"
+      >
+        Failed to load 3D model
+      </Text>
+    </group>
+  );
+}
+
+class ModelErrorBoundary extends Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('GLB Model Error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+
+    return this.props.children;
+  }
+}
+
+interface Canvas3DProps {
+  cameraPosition: [number, number, number];
+  orbitTarget: [number, number, number];
+  selectedFile: ExtractedFile | null;
+  selectedFloorFile: ExtractedFile | null;
+  locationData: LocationData[];
+  showSpheres: boolean;
+  editFloorplatesMode: boolean;
+  selectedFixtureType: string;
+  fixtureTypeMap: Map<string, string>;
+  deletedFixtures: Set<string>;
+  editMode: boolean;
+  isTransforming: boolean;
+  floorPlatesData: Record<string, Record<string, any[]>>;
+  modifiedFloorPlates: Map<string, any>;
+  showWireframe: boolean;
+  selectedLocations: LocationData[];
+  onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
+  onGLBError: (blockName: string, url: string) => void;
+  onFixtureClick: (location: LocationData, event?: any) => void;
+  isLocationSelected: (location: LocationData) => boolean;
+  onPositionChange: (location: LocationData, newPosition: [number, number, number]) => void;
+  onFloorPlateClick: (plateData: any) => void;
+  onPointerMissed: () => void;
+  setIsTransforming: (transforming: boolean) => void;
+}
+
+export function Canvas3D({ 
+  cameraPosition, 
+  orbitTarget, 
+  selectedFile, 
+  selectedFloorFile, 
+  locationData, 
+  showSpheres, 
+  editFloorplatesMode, 
+  selectedFixtureType, 
+  fixtureTypeMap, 
+  deletedFixtures, 
+  editMode, 
+  isTransforming, 
+  floorPlatesData, 
+  modifiedFloorPlates, 
+  showWireframe, 
+ 
+  selectedLocations, 
+  onBoundsCalculated, 
+  onGLBError, 
+  onFixtureClick, 
+  isLocationSelected, 
+  onPositionChange, 
+  onFloorPlateClick, 
+  onPointerMissed,
+  setIsTransforming
+}: Canvas3DProps) {
+  return (
+    <Canvas
+      camera={{ position: cameraPosition, fov: 50 }}
+      shadows
+      className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
+      onPointerMissed={onPointerMissed}
+    >
+      <ambientLight intensity={0.4} />
+      <directionalLight 
+        position={[10, 10, 5]} 
+        intensity={1} 
+        castShadow 
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+      />
+      <pointLight position={[-10, -10, -10]} intensity={0.3} />
+      
+      <Environment preset="city" />
+      
+      <Grid 
+        position={[0, -0.01, 0]} 
+        args={[50, 50]} 
+        cellSize={1} 
+        cellThickness={0.5} 
+        sectionSize={5} 
+        sectionThickness={1} 
+        fadeDistance={30} 
+        fadeStrength={1} 
+      />
+      
+      <ModelErrorBoundary fallback={<ErrorFallback />}>
+        <Suspense fallback={<LoadingFallback />}>
+          {selectedFile && (() => {
+            // Check if this is a shattered floor file
+            const isShatteredFloor = selectedFile.name.includes('dg2n-shattered-floor-plates-');
+            
+            if (isShatteredFloor && editFloorplatesMode) {
+              // Extract floor number for floor plates data
+              const floorMatch = selectedFile.name.match(/floor[_-]plates[_-](\d+)/i) || selectedFile.name.match(/(\d+)/i);
+              const currentFloor = floorMatch ? floorMatch[1] : '0';
+              const currentFloorPlatesData = floorPlatesData[currentFloor] || {};
+              
+              return (
+                <ShatteredFloorModel 
+                  key={selectedFile.url} 
+                  file={selectedFile} 
+                  floorPlatesData={currentFloorPlatesData}
+                  onBoundsCalculated={onBoundsCalculated}
+                  onFloorPlateClick={onFloorPlateClick}
+                  showWireframe={showWireframe}
+                  modifiedFloorPlates={modifiedFloorPlates}
+                />
+              );
+            }
+            
+            // Default to regular GLB model
+            return (
+              <GLBModel 
+                key={selectedFile.url} 
+                file={selectedFile} 
+                onBoundsCalculated={onBoundsCalculated} 
+              />
+            );
+          })()}
+        </Suspense>
+      </ModelErrorBoundary>
+      
+      {/* Render location objects (GLBs or spheres) for currently selected floor */}
+      {showSpheres && (selectedFloorFile || selectedFile) && locationData.length > 0 && (() => {
+        // Extract floor index from the logical floor selection (not the actual GLB being rendered)
+        const fileForFloorExtraction = selectedFloorFile || selectedFile;
+        const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+        
+        return locationData
+          .filter(location => location.floorIndex === currentFloor)
+          .filter(location => {
+            // Exclude deleted fixtures
+            const key = generateFixtureUID(location);
+            return !deletedFixtures.has(key);
+          })
+          .filter(location => {
+            // Apply fixture type filter if not "all"
+            if (selectedFixtureType === 'all') return true;
+            
+            // Use actual fixture type from API response
+            const fixtureType = fixtureTypeMap.get(location.blockName);
+            return fixtureType === selectedFixtureType;
+          })
+          .map((location, index) => (
+            location.glbUrl ? (
+              <LocationGLB 
+                key={generateFixtureUID(location)} 
+                location={location}
+                onClick={editFloorplatesMode ? undefined : onFixtureClick}
+                isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
+                isSingleSelection={selectedLocations.length === 1}
+                onError={onGLBError}
+                editMode={editMode}
+                isTransforming={isTransforming}
+                onPositionChange={editMode ? onPositionChange : undefined}
+                {...(editMode && {
+                  onTransformStart: () => {
+                    setIsTransforming(true);
+                  },
+                  onTransformEnd: () => {
+                    setIsTransforming(false);
+                  }
+                })}
+              />
+            ) : (
+              <LocationSphere 
+                key={`${location.blockName}-${index}`} 
+                location={location}
+                color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
+                onClick={editFloorplatesMode ? undefined : onFixtureClick}
+                isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
+              />
+            )
+          ));
+      })()}
+      
+      <OrbitControls 
+        target={orbitTarget}
+        enablePan={true} 
+        enableZoom={true} 
+        enableRotate={true} 
+        dampingFactor={0.05}
+        rotateSpeed={0.5}
+        zoomSpeed={0.5}
+        enabled={!isTransforming}
+      />
+    </Canvas>
+  );
+}
