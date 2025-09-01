@@ -110,23 +110,12 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     // Use isTransforming parameter to satisfy TypeScript (it's used in memo comparison)
     void isTransforming;
     
-    // Calculate bounding box when scene loads or rotation changes
+    // Calculate bounding box from unrotated scene (since rotation is applied to the group, not the GLB)
     useEffect(() => {
       if (scene) {
-        const clonedScene = scene.clone();
-        
-        // Apply base rotation
-        clonedScene.rotation.set(
-          (location.rotationX * Math.PI) / 180,
-          (location.rotationZ * Math.PI) / 180,
-          (location.rotationY * Math.PI) / 180
-        );
-        
-        // Apply additional Y rotation if present
-        
-        clonedScene.updateMatrixWorld(true);
-        
-        const box = new THREE.Box3().setFromObject(clonedScene);
+        // Don't apply rotations to the scene - calculate bounding box from unrotated GLB
+        // The rotation is applied to the containing group at render time
+        const box = new THREE.Box3().setFromObject(scene);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
         setBoundingBox({ 
@@ -134,7 +123,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           center: [center.x, center.y, center.z] 
         });
       }
-    }, [scene, rotationY]); // Now depends on both scene and rotation changes
+    }, [scene]); // Only depends on scene loading, not rotations
     
     const handleTransformChange = () => {
       // Store position locally during transform to avoid global state updates (prevents re-renders)
@@ -267,7 +256,8 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     prevProps.editMode === nextProps.editMode &&
     prevProps.isSelected === nextProps.isSelected &&
     prevProps.isSingleSelection === nextProps.isSingleSelection &&
-    prevProps.isTransforming === nextProps.isTransforming
+    prevProps.isTransforming === nextProps.isTransforming &&
+    prevProps.transformSpace === nextProps.transformSpace
   );
 });
 
