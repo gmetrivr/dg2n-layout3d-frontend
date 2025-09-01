@@ -47,6 +47,18 @@ export function generateFixtureUID(location: LocationData): string {
   return `${location.blockName}-${location.posX.toFixed(3)}-${location.posY.toFixed(3)}-${location.posZ.toFixed(3)}-${timestamp}`;
 }
 
+export function generateOriginalUID(location: LocationData): string {
+  // Use original position and ingestion timestamp for CSV matching
+  // This ensures moved fixtures can be matched back to their original CSV rows
+  const originalPosX = location.originalPosX ?? location.posX;
+  const originalPosY = location.originalPosY ?? location.posY;
+  const originalPosZ = location.originalPosZ ?? location.posZ;
+  const originalBlockName = location.originalBlockName ?? location.blockName;
+  const timestamp = location._ingestionTimestamp || location._updateTimestamp || Date.now();
+  
+  return `${originalBlockName}-${originalPosX.toFixed(3)}-${originalPosY.toFixed(3)}-${originalPosZ.toFixed(3)}-${timestamp}`;
+}
+
 export function useFixtureSelection(editFloorplatesMode: boolean = false) {
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
   const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);

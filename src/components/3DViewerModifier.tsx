@@ -16,7 +16,7 @@ import { RightInfoPanel } from './RightInfoPanel';
 import { MultiRightInfoPanel } from './MultiRightInfoPanel';
 import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
 import { Canvas3D } from './Canvas3D';
-import { useFixtureSelection, type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
+import { useFixtureSelection, type LocationData, generateFixtureUID, generateOriginalUID } from '../hooks/useFixtureSelection';
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
 
 // Fixture type mapping
@@ -608,12 +608,28 @@ export function ThreeDViewerModifier() {
       }
       
       // Find matching location data to get the correct UID
-      const matchingLocation = locationData.find(loc => 
-        loc.blockName === blockName &&
-        Math.abs(loc.posX - posX) < 0.001 &&
-        Math.abs(loc.posY - posY) < 0.001 &&
-        Math.abs(loc.posZ - posZ) < 0.001
-      );
+      // First try to match by original position (for moved fixtures)
+      let matchingLocation = locationData.find(loc => {
+        const originalPosX = loc.originalPosX ?? loc.posX;
+        const originalPosY = loc.originalPosY ?? loc.posY;
+        const originalPosZ = loc.originalPosZ ?? loc.posZ;
+        const originalBlockName = loc.originalBlockName ?? loc.blockName;
+        
+        return originalBlockName === blockName &&
+               Math.abs(originalPosX - posX) < 0.001 &&
+               Math.abs(originalPosY - posY) < 0.001 &&
+               Math.abs(originalPosZ - posZ) < 0.001;
+      });
+      
+      // If no match by original position, try matching by current position (for unmoved fixtures)
+      if (!matchingLocation) {
+        matchingLocation = locationData.find(loc => 
+          loc.blockName === blockName &&
+          Math.abs(loc.posX - posX) < 0.001 &&
+          Math.abs(loc.posY - posY) < 0.001 &&
+          Math.abs(loc.posZ - posZ) < 0.001
+        );
+      }
       
       if (!matchingLocation) {
         // If no matching location found, keep the original line
@@ -621,21 +637,21 @@ export function ThreeDViewerModifier() {
         continue;
       }
       
-      const originalKey = generateFixtureUID(matchingLocation);
+      // Use original UID for tracking which fixtures we've processed
+      const originalKey = generateOriginalUID(matchingLocation);
       originalFixtures.add(originalKey);
       
       // Check if this fixture has been deleted - skip if so
-      if (deletedFixtures.has(originalKey)) {
+      // Check both original UID and current UID for deletion since deletion uses current UID
+      const currentKey = generateFixtureUID(matchingLocation);
+      if (deletedFixtures.has(originalKey) || deletedFixtures.has(currentKey)) {
         continue; // Skip deleted fixtures
       }
       
-      // Find the current location data that matches this CSV row
-      // Use the current values from locationData (which has embedded modifications)
-      const currentLocationData = locationData.find(loc => 
-        generateFixtureUID(loc) === originalKey
-      );
+      // Use the matched location directly (it already contains current values)
+      const currentLocationData = matchingLocation;
       
-      // Update position and rotation if we found matching current data
+      // Update position and rotation with current values from the matched location
       if (currentLocationData) {
         // Use current position (which includes any moves)
         values[5] = currentLocationData.posX.toFixed(12);  // Pos X (m)
@@ -671,10 +687,10 @@ export function ThreeDViewerModifier() {
     
     // Add any duplicated fixtures that weren't in the original CSV
     locationData.forEach(location => {
-      const locationKey = generateFixtureUID(location);
+      const originalLocationKey = generateOriginalUID(location);
       
-      // If this fixture wasn't in the original CSV, it's a duplicate
-      if (!originalFixtures.has(locationKey)) {
+      // If this fixture wasn't in the original CSV (by original UID), it's a duplicate
+      if (!originalFixtures.has(originalLocationKey)) {
         // Create CSV line for duplicated fixture using correct 14-column structure
         const csvLine = [
           location.blockName,             // 0: Block Name
