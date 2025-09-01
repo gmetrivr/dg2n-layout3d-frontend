@@ -44,6 +44,7 @@ interface LocationGLBProps {
   onClick?: (location: LocationData, event?: any) => void;
   isSelected?: boolean;
   editMode?: boolean;
+  transformSpace?: 'world' | 'local';
   isSingleSelection?: boolean;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
   onTransformStart?: () => void;
@@ -51,7 +52,7 @@ interface LocationGLBProps {
   isTransforming?: boolean;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -162,10 +163,9 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     
     return (
       <>
-        <group ref={groupRef} position={currentPosition as [number, number, number]}>
+        <group ref={groupRef} position={currentPosition as [number, number, number]} rotation={[rotationX, rotationZ, rotationY]}>
           <primitive 
             object={scene.clone()} 
-            rotation={[rotationX, rotationZ, rotationY]}
             scale={[1, 1, 1]}
           />
           {/* Transparent bounding box for clicking */}
@@ -186,7 +186,10 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           
           {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use calculated bounding box */}
           {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged) && !isSelected && !location.wasMoved && !location.wasRotated && (
-            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={997}>
+            <lineSegments 
+              position={boundingBox.center as [number,number,number]} 
+              renderOrder={997}
+            >
               <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
               <lineBasicMaterial color="yellow" />
             </lineSegments>
@@ -194,7 +197,10 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           
           {/* Orange edge outline for moved/rotated fixtures - use calculated bounding box */}
           {(location.wasMoved || location.wasRotated) && !isSelected && (
-            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={998}>
+            <lineSegments 
+              position={boundingBox.center as [number,number,number]} 
+              renderOrder={998}
+            >
               <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
               <lineBasicMaterial color="orange" />
             </lineSegments>
@@ -202,7 +208,10 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           
           {/* Red edge outline when selected - use calculated bounding box */}
           {isSelected && (
-            <lineSegments position={boundingBox.center as [number,number,number]} renderOrder={999}>
+            <lineSegments 
+              position={boundingBox.center as [number,number,number]} 
+              renderOrder={999}
+            >
               <edgesGeometry args={[new THREE.BoxGeometry(...boundingBox.size)]} />
               <lineBasicMaterial color="red" />
             </lineSegments>
@@ -214,7 +223,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           <TransformControls
             object={groupRef.current}
             mode="translate"
-            space="world"
+            space={transformSpace}
             showY={false}
             onObjectChange={handleTransformChange}
             onMouseDown={onTransformStart}
@@ -590,6 +599,7 @@ interface Canvas3DProps {
   fixtureTypeMap: Map<string, string>;
   deletedFixtures: Set<string>;
   editMode: boolean;
+  transformSpace: 'world' | 'local';
   isTransforming: boolean;
   floorPlatesData: Record<string, Record<string, any[]>>;
   modifiedFloorPlates: Map<string, any>;
@@ -617,6 +627,7 @@ export function Canvas3D({
   fixtureTypeMap, 
   deletedFixtures, 
   editMode, 
+  transformSpace,
   isTransforming, 
   floorPlatesData, 
   modifiedFloorPlates, 
@@ -731,6 +742,7 @@ export function Canvas3D({
                 isSingleSelection={selectedLocations.length === 1}
                 onError={onGLBError}
                 editMode={editMode}
+                transformSpace={transformSpace}
                 isTransforming={isTransforming}
                 onPositionChange={editMode ? onPositionChange : undefined}
                 {...(editMode && {

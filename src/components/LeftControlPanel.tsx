@@ -15,6 +15,7 @@ interface LeftControlPanelProps {
   showWireframe: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
+  transformSpace: 'world' | 'local';
   
   // Fixture data
   fixtureTypes: string[];
@@ -42,6 +43,7 @@ interface LeftControlPanelProps {
   onFixtureTypeChange: (type: string) => void;
   onShowWireframeChange: (show: boolean) => void;
   onEditModeChange: (mode: 'off' | 'fixtures' | 'floorplates') => void;
+  onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
 }
@@ -55,6 +57,7 @@ export function LeftControlPanel({
   showWireframe,
   editMode,
   editFloorplatesMode,
+  transformSpace,
   fixtureTypes,
   selectedFixtureType,
   floorPlatesData,
@@ -70,6 +73,7 @@ export function LeftControlPanel({
   onFixtureTypeChange,
   onShowWireframeChange,
   onEditModeChange,
+  onTransformSpaceChange,
   onDownloadGLB,
   onDownloadModifiedZip,
 }: LeftControlPanelProps) {
@@ -319,6 +323,29 @@ export function LeftControlPanel({
           <div className="text-xs text-muted-foreground">
             Downloads all original files with edited CSV values updated in place.
           </div>
+          
+          {/* Transform Space Toggle */}
+          {editMode && (
+            <div className="pt-2 border-t border-border">
+              <label className="flex items-center justify-between text-sm">
+                <span>Transform Axes:</span>
+                <select 
+                  value={transformSpace}
+                  onChange={(e) => onTransformSpaceChange(e.target.value as 'world' | 'local')}
+                  className="text-xs bg-background border border-border rounded px-1 py-0.5"
+                >
+                  <option value="world">Global</option>
+                  <option value="local">Local</option>
+                </select>
+              </label>
+              <div className="text-xs text-muted-foreground mt-1">
+                {transformSpace === 'world' 
+                  ? 'Move along world X/Z axes' 
+                  : 'Move along object\'s local axes'
+                }
+              </div>
+            </div>
+          )}
         </div>
         
         {/* Job Info */}
