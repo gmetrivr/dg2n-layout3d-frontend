@@ -387,8 +387,8 @@ export function useFixtureModifications(
     // Create duplicate with current position/properties (all modifications are embedded in location object)
     const duplicatedFixture: LocationData = {
       ...location,
-      // Use current position + 1.0 offset (current position includes any moves)
-      posX: location.posX + 1.0,  // Offset by 1.0 from current position
+      // Use current position (current position includes any moves)
+      posX: location.posX,  // Duplicate in place
       posY: location.posY,
       posZ: location.posZ,
       // Keep current blockName, rotation, brand, count, hierarchy (includes all modifications)
@@ -412,9 +412,9 @@ export function useFixtureModifications(
       originalCount: location.count,
       originalHierarchy: location.hierarchy,
       originalGlbUrl: location.glbUrl,
-      // Generate new timestamps
-      _updateTimestamp: Date.now(), 
-      _ingestionTimestamp: Date.now() // New unique timestamp for the duplicate
+      // Generate new unique timestamps to ensure unique UID even at same position
+      _updateTimestamp: Date.now() + Math.random() * 1000, 
+      _ingestionTimestamp: Date.now() + Math.random() * 1000 // New unique timestamp for the duplicate
     };
     
     // Add the duplicated fixture to the location data

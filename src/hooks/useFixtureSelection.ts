@@ -94,11 +94,9 @@ export function useFixtureSelection(editFloorplatesMode: boolean = false) {
 
   // Check if a location is selected (check selectedLocations array as single source of truth)
   const isLocationSelected = useCallback((location: LocationData) => {
+    const locationUID = generateFixtureUID(location);
     return selectedLocations.some(loc => 
-      loc.blockName === location.blockName &&
-      Math.abs(loc.posX - location.posX) < 0.001 &&
-      Math.abs(loc.posY - location.posY) < 0.001 &&
-      Math.abs(loc.posZ - location.posZ) < 0.001
+      generateFixtureUID(loc) === locationUID
     );
   }, [selectedLocations]);
 
