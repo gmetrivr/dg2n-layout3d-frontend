@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Check } from 'lucide-react';
+import { Pencil, Trash2, Check, Link } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import { useState } from 'react';
 
@@ -47,6 +47,8 @@ interface MultiRightInfoPanelProps {
   onRotateFixture?: (angle: number) => void;
   onResetLocation?: (location: LocationData) => void;
   onDeleteFixtures?: (locations: LocationData[]) => void;
+  onMergeFixtures?: (locations: LocationData[]) => void;
+  canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
   onCountChange?: (locations: LocationData[], newCount: number) => void;
   onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
 }
@@ -74,6 +76,8 @@ export function MultiRightInfoPanel({
   onRotateFixture,
   onResetLocation,
   onDeleteFixtures,
+  onMergeFixtures,
+  canMergeFixtures,
   onCountChange,
   onHierarchyChange,
 }: MultiRightInfoPanelProps) {
@@ -413,6 +417,17 @@ export function MultiRightInfoPanel({
               </div>
             )}
           </div>
+          {canMergeFixtures && onMergeFixtures && canMergeFixtures(selectedLocations, fixtureTypeMap) && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onMergeFixtures(selectedLocations)}
+              className="w-full text-xs flex items-center justify-center gap-1 mt-2"
+            >
+              <Link className="h-3 w-3" />
+              Merge ({selectedLocations.length})
+            </Button>
+          )}
           {onDeleteFixtures && (
             <Button
               size="sm"

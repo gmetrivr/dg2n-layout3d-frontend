@@ -116,6 +116,7 @@ export function ThreeDViewerModifier() {
   const {
     modifiedFloorPlates,
     deletedFixtures,
+    deletedFixturePositions,
     deleteConfirmationOpen,
     fixturesToDelete,
     setModifiedFloorPlates,
@@ -135,6 +136,8 @@ export function ThreeDViewerModifier() {
     handleDeleteFixtures,
     handleConfirmDelete,
     handleSplitFixture,
+    canMergeFixtures,
+    handleMergeFixtures,
   } = useFixtureModifications(
     selectedLocation,
     selectedLocations,
@@ -428,7 +431,7 @@ export function ThreeDViewerModifier() {
       }
       
       // Create modified location-master.csv
-      await createModifiedLocationMasterCSV(zip);
+      await createModifiedLocationMasterCSV(zip, deletedFixturePositions);
       
       // Create modified floor plates CSV if there are floor plate changes
       if (modifiedFloorPlates.size > 0) {
@@ -551,7 +554,7 @@ export function ThreeDViewerModifier() {
     setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
   }, []);
 
-  const createModifiedLocationMasterCSV = async (zip: JSZip) => {
+  const createModifiedLocationMasterCSV = async (zip: JSZip, deletedPositions: Set<string>) => {
     
     // Find original location-master.csv
     const originalFile = extractedFiles.find(file => 
@@ -633,7 +636,14 @@ export function ThreeDViewerModifier() {
       }
       
       if (!matchingLocation) {
-        // If no matching location found, keep the original line
+        // If no matching location found, check if this CSV row represents a deleted fixture
+        const csvPositionKey = `${blockName}-${posX.toFixed(3)}-${posY.toFixed(3)}-${posZ.toFixed(3)}`;
+        
+        if (deletedPositions.has(csvPositionKey)) {
+          continue; // Skip this CSV row as it represents a deleted fixture
+        }
+        
+        // If not deleted, keep the original line
         modifiedLines.push(line);
         continue;
       }
@@ -1286,6 +1296,8 @@ export function ThreeDViewerModifier() {
             onRotateFixture={handleMultiRotateFixture}
             onResetLocation={handleResetPosition}
             onDeleteFixtures={handleDeleteFixtures}
+            onMergeFixtures={handleMergeFixtures}
+            canMergeFixtures={canMergeFixtures}
             onCountChange={handleFixtureCountChangeMulti}
             onHierarchyChange={handleFixtureHierarchyChangeMulti}
           />

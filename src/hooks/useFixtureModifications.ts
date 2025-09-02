@@ -48,6 +48,7 @@ export function useFixtureModifications(
   // No more separate Maps needed
   const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
   const [deletedFixtures, setDeletedFixtures] = useState<Set<string>>(new Set());
+  const [deletedFixturePositions, setDeletedFixturePositions] = useState<Set<string>>(new Set());
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [fixturesToDelete, setFixturesToDelete] = useState<LocationData[]>([]);
 
@@ -541,10 +542,142 @@ export function useFixtureModifications(
     setSelectedLocations([]);
   }, [setLocationData, setSelectedLocation, setSelectedLocations, setDeletedFixtures]);
 
+  const canMergeFixtures = useCallback((fixtures: LocationData[], fixtureTypeMap: Map<string, string>): boolean => {
+    // Fast early exits for performance
+    if (fixtures.length !== 2) return false;
+    
+    const [fixtureA, fixtureB] = fixtures;
+    
+    // Check types first (cheapest check)
+    const typeA = fixtureTypeMap.get(fixtureA.blockName);
+    const typeB = fixtureTypeMap.get(fixtureB.blockName);
+    if (typeA !== "WALL-BAY" || typeB !== "WALL-BAY") return false;
+    
+    // Check rotation alignment (also cheap)
+    const rotationDiff = Math.abs(fixtureA.rotationZ - fixtureB.rotationZ);
+    if (rotationDiff > 1 && rotationDiff < 359) return false;
+    
+    // Only do expensive position calculations if basic checks pass
+    const fixtureLength = 0.6;
+    const rotationZ = (fixtureA.rotationZ * Math.PI) / 180;
+    
+    const cosRot = Math.cos(rotationZ);
+    const sinRot = Math.sin(rotationZ);
+    
+    const tolerance = 0.2;
+    
+    // New approach: Check if the fixtures are actually touching edge-to-edge
+    // Calculate the edges of each fixture along the orientation axis
+    const projA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
+    const projB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
+    
+    // Calculate the edges of each fixture
+    const aLeftEdge = projA - (fixtureA.count * fixtureLength * 0.5);
+    const aRightEdge = projA + (fixtureA.count * fixtureLength * 0.5);
+    const bLeftEdge = projB - (fixtureB.count * fixtureLength * 0.5);
+    const bRightEdge = projB + (fixtureB.count * fixtureLength * 0.5);
+    
+    // Check if they're touching: A's right edge touches B's left edge OR B's right edge touches A's left edge
+    const gapAB = Math.abs(aRightEdge - bLeftEdge);
+    const gapBA = Math.abs(bRightEdge - aLeftEdge);
+    
+    // Also check if they're on the same perpendicular line (same position perpendicular to orientation)
+    const perpA = -fixtureA.posX * sinRot + fixtureA.posY * cosRot;
+    const perpB = -fixtureB.posX * sinRot + fixtureB.posY * cosRot;
+    const perpGap = Math.abs(perpA - perpB);
+    
+    // They're adjacent if: 
+    // 1. One of the edge gaps is very small (touching)
+    // 2. They're aligned perpendicular to the orientation
+    return (gapAB < tolerance || gapBA < tolerance) && perpGap < tolerance;
+  }, []);
+
+  const handleMergeFixtures = useCallback((fixtures: LocationData[]) => {
+    if (fixtures.length !== 2) return;
+    
+    const [fixtureA, fixtureB] = fixtures;
+    
+    // Generate keys IMMEDIATELY to avoid any reference issues
+    const keyA = generateFixtureUID(fixtureA);
+    const keyB = generateFixtureUID(fixtureB);
+    
+    const totalCount = fixtureA.count + fixtureB.count;
+    
+    // Calculate the actual center of the combined stack
+    // The GLB positions should remain unchanged, so we need to find where
+    // the center of the totalCount stack would be to keep all GLBs in place
+    const fixtureLength = 0.6;
+    const rotationZ = (fixtureA.rotationZ * Math.PI) / 180;
+    const cosRot = Math.cos(rotationZ);
+    const sinRot = Math.sin(rotationZ);
+    
+    // Determine which fixture is leftmost along the orientation axis
+    const projectionA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
+    const projectionB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
+    
+    const leftFixture = projectionA < projectionB ? fixtureA : fixtureB;
+    
+    // Calculate where the center of the merged stack should be
+    // Find the leftmost edge of the leftmost fixture's stack
+    const totalSpan = totalCount * fixtureLength;
+    const leftEdgeX = leftFixture.posX - (leftFixture.count * fixtureLength * 0.5 * cosRot);
+    const leftEdgeY = leftFixture.posY - (leftFixture.count * fixtureLength * 0.5 * sinRot);
+    
+    // The center of the merged stack is at the leftmost edge + half the total span
+    const centerX = leftEdgeX + (totalSpan * 0.5 * cosRot);
+    const centerY = leftEdgeY + (totalSpan * 0.5 * sinRot);
+    
+    // Create merged fixture at the center point
+    const mergedFixture: LocationData = {
+      ...fixtureA, // Use first fixture as base
+      posX: centerX,
+      posY: centerY,
+      count: totalCount,
+      wasMerged: true, // New flag to track merged fixtures
+      originalCount: totalCount, // Set original count to the merged value
+      // Generate new unique identifier
+      _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+      _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+      // Clear other modification flags since this is a new fixture
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false,
+      wasSplit: false
+    };
+    
+    
+    setLocationData(prev => {
+      // Remove both original fixtures and add merged fixture
+      const withoutOriginals = prev.filter(loc => {
+        const key = generateFixtureUID(loc);
+        return key !== keyA && key !== keyB;
+      });
+      
+      return [...withoutOriginals, mergedFixture];
+    });
+    
+    // Mark both original fixtures as deleted for export purposes
+    setDeletedFixtures(prev => new Set([...prev, keyA, keyB]));
+    
+    // Store original positions of deleted fixtures for export matching
+    const positionKeyA = `${fixtureA.originalBlockName || fixtureA.blockName}-${(fixtureA.originalPosX || fixtureA.posX).toFixed(3)}-${(fixtureA.originalPosY || fixtureA.posY).toFixed(3)}-${(fixtureA.originalPosZ || fixtureA.posZ).toFixed(3)}`;
+    const positionKeyB = `${fixtureB.originalBlockName || fixtureB.blockName}-${(fixtureB.originalPosX || fixtureB.posX).toFixed(3)}-${(fixtureB.originalPosY || fixtureB.posY).toFixed(3)}-${(fixtureB.originalPosZ || fixtureB.posZ).toFixed(3)}`;
+    setDeletedFixturePositions(prev => new Set([...prev, positionKeyA, positionKeyB]));
+    
+    // Clear selection
+    setSelectedLocation(null);
+    setSelectedLocations([]);
+  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+
   return {
     // State  
     modifiedFloorPlates,
     deletedFixtures,
+    deletedFixturePositions,
     deleteConfirmationOpen,
     fixturesToDelete,
     
@@ -568,5 +701,7 @@ export function useFixtureModifications(
     handleDeleteFixtures,
     handleConfirmDelete,
     handleSplitFixture,
+    canMergeFixtures,
+    handleMergeFixtures,
   };
 }

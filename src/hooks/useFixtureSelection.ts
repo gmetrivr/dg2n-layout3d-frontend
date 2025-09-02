@@ -37,6 +37,7 @@ export interface LocationData {
   wasHierarchyChanged?: boolean;
   wasDuplicated?: boolean;
   wasSplit?: boolean;
+  wasMerged?: boolean;
   
   // Internal tracking
   _updateTimestamp?: number;
