@@ -134,6 +134,7 @@ export function ThreeDViewerModifier() {
     handleDeleteFixture,
     handleDeleteFixtures,
     handleConfirmDelete,
+    handleSplitFixture,
   } = useFixtureModifications(
     selectedLocation,
     selectedLocations,
@@ -1308,6 +1309,7 @@ export function ThreeDViewerModifier() {
             onResetFloorPlate={handleResetFloorPlate}
             onDuplicateFixture={handleDuplicateFixture}
             onDeleteFixture={handleDeleteFixture}
+            onSplitFixture={handleSplitFixture}
             onCountChange={handleFixtureCountChange}
             onHierarchyChange={handleFixtureHierarchyChange}
             onPositionChange={handlePositionChange}

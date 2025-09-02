@@ -1,6 +1,7 @@
-import { Pencil, Copy, Trash2, Check } from 'lucide-react';
+import { Pencil, Copy, Trash2, Check, SeparatorHorizontal } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import { useState, useEffect } from 'react';
+import { SplitFixtureModal } from './SplitFixtureModal';
 
 interface LocationData {
   blockName: string;
@@ -74,6 +75,7 @@ interface RightInfoPanelProps {
   onResetFloorPlate: (plateData: FloorPlateData, modifiedData: any) => void;
   onDuplicateFixture?: (location: LocationData) => void;
   onDeleteFixture?: (location: LocationData) => void;
+  onSplitFixture?: (location: LocationData, leftCount: number, rightCount: number) => void;
   onCountChange?: (location: LocationData, newCount: number) => void;
   onHierarchyChange?: (location: LocationData, newHierarchy: number) => void;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
@@ -96,6 +98,7 @@ export function RightInfoPanel({
   onResetFloorPlate,
   onDuplicateFixture,
   onDeleteFixture,
+  onSplitFixture,
   onCountChange,
   onHierarchyChange,
   onPositionChange,
@@ -111,6 +114,7 @@ export function RightInfoPanel({
   const [positionValues, setPositionValues] = useState({ x: '', y: '', z: '' });
   const [isEditingRotation, setIsEditingRotation] = useState(false);
   const [rotationValues, setRotationValues] = useState({ x: '', y: '', z: '' });
+  const [showSplitModal, setShowSplitModal] = useState(false);
   
   // Reset all editing states when selectedLocation changes
   useEffect(() => {
@@ -124,6 +128,7 @@ export function RightInfoPanel({
     setRotationValues({ x: '', y: '', z: '' });
     setIsCustomRotationMode(false);
     setCustomRotationValue('');
+    setShowSplitModal(false);
   }, [selectedLocation]);
   
   const handleCustomRotation = () => {
@@ -261,6 +266,12 @@ export function RightInfoPanel({
     setIsEditingRotation(false);
     setRotationValues({ x: '', y: '', z: '' });
   };
+
+  const handleSplitConfirm = (leftCount: number, rightCount: number) => {
+    if (selectedLocation && onSplitFixture) {
+      onSplitFixture(selectedLocation, leftCount, rightCount);
+    }
+  };
   
   const handleRotationKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -282,7 +293,8 @@ export function RightInfoPanel({
     const hasChanges = hasMoved || hasRotated || hasBrandChanged || hasCountChanged || hasHierarchyChanged || hasTypeChanged;
     
     return (
-      <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
+      <>
+        <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold text-sm">Location Info</h3>
           <button 
@@ -597,30 +609,47 @@ export function RightInfoPanel({
                 </div>
               </div>
             )}
-            <div className="flex gap-1">
-              {onDuplicateFixture && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onDuplicateFixture(selectedLocation)}
-                  className="text-xs flex items-center justify-center gap-1 flex-1"
-                >
-                  <Copy className="h-3 w-3" />
-                  Duplicate
-                </Button>
+            {editMode && (
+            <>
+              {onSplitFixture && selectedLocation && selectedLocation.count > 1 && fixtureTypeMap.get(selectedLocation.blockName) === "WALL-BAY" && (
+                <div className="flex gap-1 mb-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowSplitModal(true)}
+                    className="text-xs flex items-center justify-center gap-1 w-full"
+                  >
+                    <SeparatorHorizontal className="h-3 w-3" />
+                    Split
+                  </Button>
+                </div>
               )}
-              {onDeleteFixture && (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => onDeleteFixture(selectedLocation)}
-                  className="text-xs flex items-center justify-center gap-1 flex-1"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  Delete
-                </Button>
-              )}
-            </div>
+              <div className="flex gap-1">
+                {onDuplicateFixture && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onDuplicateFixture(selectedLocation)}
+                    className="text-xs flex items-center justify-center gap-1 flex-1"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Duplicate
+                  </Button>
+                )}
+                {onDeleteFixture && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => onDeleteFixture(selectedLocation)}
+                    className="text-xs flex items-center justify-center gap-1 flex-1"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Delete
+                  </Button>
+                )}
+              </div>
+            </>
+            )}
           </div>
         )}
         {hasChanges && (
@@ -635,7 +664,17 @@ export function RightInfoPanel({
             </Button>
           </div>
         )}
-      </div>
+        </div>
+        
+        {/* Split Modal */}
+        <SplitFixtureModal
+          isOpen={showSplitModal}
+          onClose={() => setShowSplitModal(false)}
+          onConfirm={handleSplitConfirm}
+          totalCount={selectedLocation.count}
+          fixtureName={selectedLocation.blockName}
+        />
+      </>
     );
   }
   

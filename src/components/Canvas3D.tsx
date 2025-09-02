@@ -205,7 +205,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           </mesh>
           
           {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use stack bounding box */}
-          {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged) && !isSelected && !location.wasMoved && !location.wasRotated && (
+          {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged || location.wasSplit) && !isSelected && !location.wasMoved && !location.wasRotated && (
             <lineSegments 
               position={stackBoundingBox.center as [number,number,number]} 
               renderOrder={997}
@@ -284,6 +284,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     prevLocation.wasBrandChanged === nextLocation.wasBrandChanged &&
     prevLocation.wasCountChanged === nextLocation.wasCountChanged &&
     prevLocation.wasHierarchyChanged === nextLocation.wasHierarchyChanged &&
+    prevLocation.wasSplit === nextLocation.wasSplit &&
     prevProps.editMode === nextProps.editMode &&
     prevProps.isSelected === nextProps.isSelected &&
     prevProps.isSingleSelection === nextProps.isSingleSelection &&

@@ -452,6 +452,95 @@ export function useFixtureModifications(
     setFixturesToDelete([]);
   }, [fixturesToDelete, setSelectedLocation, setSelectedLocations]);
 
+  const handleSplitFixture = useCallback((location: LocationData, leftCount: number, rightCount: number) => {
+    // Calculate positioning for the split fixtures
+    // Take the center point and create a line with total length = count * 0.6 units
+    // Split this line into two segments based on the split counts
+    
+    const fixtureLength = 0.6; // Length of one fixture in units
+    const originalTotalLength = location.count * fixtureLength;
+    const leftSegmentLength = leftCount * fixtureLength;
+    const rightSegmentLength = rightCount * fixtureLength;
+    
+    // Calculate the midpoints of each segment
+    // Left segment: starts at -originalTotalLength/2, midpoint at start + leftSegmentLength/2
+    const leftMidpointOffset = (-originalTotalLength / 2) + (leftSegmentLength / 2);
+    // Right segment: starts at -originalTotalLength/2 + leftSegmentLength, midpoint at start + rightSegmentLength/2  
+    const rightMidpointOffset = (-originalTotalLength / 2) + leftSegmentLength + (rightSegmentLength / 2);
+    
+    // Apply rotation to the offsets (if fixture is rotated)
+    const rotationZ = (location.rotationZ * Math.PI) / 180; // Convert to radians
+    
+    // Calculate final positions considering rotation
+    const leftGroupX = location.posX + (leftMidpointOffset * Math.cos(rotationZ));
+    const leftGroupY = location.posY + (leftMidpointOffset * Math.sin(rotationZ));
+    
+    const rightGroupX = location.posX + (rightMidpointOffset * Math.cos(rotationZ));
+    const rightGroupY = location.posY + (rightMidpointOffset * Math.sin(rotationZ));
+    
+    // Create left split fixture
+    const leftSplitFixture: LocationData = {
+      ...location,
+      posX: leftGroupX,
+      posY: leftGroupY,
+      posZ: location.posZ, // Keep same Z position
+      count: leftCount,
+      wasSplit: true,
+      originalCount: leftCount, // New fixture's original count is the split value
+      // Generate new unique identifiers with sufficient separation
+      _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+      _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+      // Clear other modification flags since this is a new fixture
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false
+    };
+    
+    // Create right split fixture
+    const rightSplitFixture: LocationData = {
+      ...location,
+      posX: rightGroupX,
+      posY: rightGroupY,
+      posZ: location.posZ, // Keep same Z position
+      count: rightCount,
+      wasSplit: true,
+      originalCount: rightCount, // New fixture's original count is the split value
+      // Generate new unique identifiers with sufficient separation
+      _updateTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
+      _ingestionTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
+      // Clear other modification flags since this is a new fixture
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false
+    };
+    
+    // Remove the original fixture and add the split fixtures in a single update
+    const originalKey = generateFixtureUID(location);
+    
+    // Single atomic update: remove original and add split fixtures
+    setLocationData(prev => {
+      // Remove the original fixture from the data
+      const withoutOriginal = prev.filter(loc => generateFixtureUID(loc) !== originalKey);
+      
+      // Add the new split fixtures
+      const newData = [...withoutOriginal, leftSplitFixture, rightSplitFixture];
+      
+      return newData;
+    });
+    
+    // Clear selection
+    setSelectedLocation(null);
+    setSelectedLocations([]);
+  }, [setLocationData, setSelectedLocation, setSelectedLocations, setDeletedFixtures]);
+
   return {
     // State  
     modifiedFloorPlates,
@@ -478,5 +567,6 @@ export function useFixtureModifications(
     handleDeleteFixture,
     handleDeleteFixtures,
     handleConfirmDelete,
+    handleSplitFixture,
   };
 }
