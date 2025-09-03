@@ -111,11 +111,14 @@ export function MultiRightInfoPanel({
   };
   
   const handleCountEdit = () => {
-    setIsEditingCount(true);
-    if (commonCount !== "Multiple Values" && commonCount !== "N/A") {
-      setCountValue(commonCount.toString());
-    } else {
-      setCountValue('');
+    // Allow editing count only when all selected are WALL-BAY
+    if (commonFixtureType === 'WALL-BAY') {
+      setIsEditingCount(true);
+      if (commonCount !== "Multiple Values" && commonCount !== "N/A") {
+        setCountValue(commonCount.toString());
+      } else {
+        setCountValue('');
+      }
     }
   };
   
@@ -289,7 +292,7 @@ export function MultiRightInfoPanel({
           <div style={{ color: hasAnyCountChanges ? '#ef4444' : 'inherit' }}>
             <span className="font-medium">Count:</span> {commonCount === "Multiple Values" || commonCount === "N/A" ? commonCount : String(commonCount)}
           </div>
-          {editMode && onCountChange && (
+          {editMode && onCountChange && commonFixtureType === 'WALL-BAY' && (
             <button
               onClick={handleCountEdit}
               className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
@@ -316,7 +319,7 @@ export function MultiRightInfoPanel({
         </div>
       </div>
       
-      {isEditingCount && (
+      {isEditingCount && commonFixtureType === 'WALL-BAY' && (
         <div className="mt-3 pt-2 border-t border-border">
           <div className="flex gap-1 mb-2">
             <input

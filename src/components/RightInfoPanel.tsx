@@ -154,8 +154,12 @@ export function RightInfoPanel({
   };
   
   const handleCountEdit = () => {
-    setIsEditingCount(true);
-    setCountValue(selectedLocation?.count?.toString() || '1');
+    // Allow editing count only for WALL-BAY type
+    const type = selectedLocation ? fixtureTypeMap.get(selectedLocation.blockName) : undefined;
+    if (type === 'WALL-BAY') {
+      setIsEditingCount(true);
+      setCountValue(selectedLocation?.count?.toString() || '1');
+    }
   };
   
   const handleCountSave = () => {
@@ -342,7 +346,7 @@ export function RightInfoPanel({
             <div style={{ color: hasCountChanged ? '#ef4444' : 'inherit' }}>
               <span className="font-medium">Count:</span> {hasCountChanged ? selectedLocation.originalCount : selectedLocation.count}
             </div>
-            {editMode && onCountChange && (
+            {editMode && onCountChange && fixtureTypeMap.get(selectedLocation.blockName) === 'WALL-BAY' && (
               <button
                 onClick={handleCountEdit}
                 className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
