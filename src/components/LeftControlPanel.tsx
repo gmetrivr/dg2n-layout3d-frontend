@@ -13,6 +13,8 @@ interface LeftControlPanelProps {
   // UI state
   showSpheres: boolean;
   showWireframe: boolean;
+  showFixtureLabels: boolean;
+  showWalls: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
   transformSpace: 'world' | 'local';
@@ -20,6 +22,8 @@ interface LeftControlPanelProps {
   // Fixture data
   fixtureTypes: string[];
   selectedFixtureType: string;
+  brands: string[];
+  selectedBrand: string;
   
   // Floor plates data
   floorPlatesData: Record<string, Record<string, any[]>>;
@@ -41,7 +45,10 @@ interface LeftControlPanelProps {
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
   onFixtureTypeChange: (type: string) => void;
+  onBrandChange: (brand: string) => void;
   onShowWireframeChange: (show: boolean) => void;
+  onShowFixtureLabelsChange: (show: boolean) => void;
+  onShowWallsChange: (show: boolean) => void;
   onEditModeChange: (mode: 'off' | 'fixtures' | 'floorplates') => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
@@ -55,11 +62,15 @@ export function LeftControlPanel({
   extractedFiles,
   showSpheres,
   showWireframe,
+  showFixtureLabels,
+  showWalls,
   editMode,
   editFloorplatesMode,
   transformSpace,
   fixtureTypes,
   selectedFixtureType,
+  brands,
+  selectedBrand,
   floorPlatesData,
   modifiedFloorPlates,
   getBrandCategory,
@@ -71,7 +82,10 @@ export function LeftControlPanel({
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
+  onBrandChange,
   onShowWireframeChange,
+  onShowFixtureLabelsChange,
+  onShowWallsChange,
   onEditModeChange,
   onTransformSpaceChange,
   onDownloadGLB,
@@ -117,6 +131,18 @@ export function LeftControlPanel({
           </Select>
         </div>
         
+        {/* Show Walls Checkbox */}
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            id="showWalls" 
+            checked={showWalls}
+            onChange={(e) => onShowWallsChange(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="showWalls" className="text-sm font-medium">Show Walls</label>
+        </div>
+        
         {/* Show Locations Checkbox */}
         <div className="flex items-center gap-2">
           <input 
@@ -127,6 +153,18 @@ export function LeftControlPanel({
             className="w-4 h-4"
           />
           <label htmlFor="showSpheres" className="text-sm font-medium">Show Fixtures</label>
+        </div>
+        
+        {/* Show Fixture Labels Checkbox */}
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            id="showFixtureLabels" 
+            checked={showFixtureLabels}
+            onChange={(e) => onShowFixtureLabelsChange(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="showFixtureLabels" className="text-sm font-medium">Show Fixture Labels</label>
         </div>
         
         {/* Fixture Type Filter */}
@@ -142,6 +180,25 @@ export function LeftControlPanel({
               {fixtureTypes.map((type) => (
                 <option key={type} value={type}>
                   {type}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        {/* Brand Filter */}
+        {brands.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium">Brand:</label>
+            <Select 
+              value={selectedBrand} 
+              onChange={(e) => onBrandChange(e.target.value)}
+              className="w-48"
+            >
+              <option value="all">All Brands</option>
+              {brands.map((brand) => (
+                <option key={brand} value={brand}>
+                  {brand}
                 </option>
               ))}
             </Select>

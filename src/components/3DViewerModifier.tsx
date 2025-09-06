@@ -91,6 +91,8 @@ export function ThreeDViewerModifier() {
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
+  const [showFixtureLabels, setShowFixtureLabels] = useState(false);
+  const [showWalls, setShowWalls] = useState(true);
   const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('world');
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
@@ -101,6 +103,8 @@ export function ThreeDViewerModifier() {
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
+  const [brands, setBrands] = useState<string[]>([]);
+  const [selectedBrand, setSelectedBrand] = useState<string>('all');
 
   // Use custom hooks for fixture selection and modifications
   const {
@@ -929,6 +933,34 @@ export function ThreeDViewerModifier() {
     }
   }, [fixtureTypeMap]);
 
+  // Extract unique brands from location data for current floor
+  useEffect(() => {
+    if (locationData.length > 0 && (selectedFloorFile || selectedFile)) {
+      // Extract floor index from the selected floor file
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+      
+      // Get unique brands for the current floor, excluding deleted fixtures
+      const floorBrands = new Set<string>();
+      locationData
+        .filter(location => location.floorIndex === currentFloor)
+        .filter(location => {
+          const key = generateFixtureUID(location);
+          return !deletedFixtures.has(key);
+        })
+        .forEach(location => {
+          if (location.brand && location.brand.trim() !== '') {
+            floorBrands.add(location.brand);
+          }
+        });
+      
+      setBrands(Array.from(floorBrands).sort());
+    } else {
+      setBrands([]);
+    }
+  }, [locationData, selectedFloorFile, selectedFile, deletedFixtures]);
+
 
   // Load and parse CSV data from extracted files
   useEffect(() => {
@@ -1228,11 +1260,15 @@ export function ThreeDViewerModifier() {
           extractedFiles={extractedFiles}
           showSpheres={showSpheres}
           showWireframe={showWireframe}
+          showFixtureLabels={showFixtureLabels}
+          showWalls={showWalls}
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
           transformSpace={transformSpace}
           fixtureTypes={fixtureTypes}
           selectedFixtureType={selectedFixtureType}
+          brands={brands}
+          selectedBrand={selectedBrand}
           floorPlatesData={floorPlatesData}
           modifiedFloorPlates={modifiedFloorPlates}
           getBrandCategory={getBrandCategory}
@@ -1244,7 +1280,10 @@ export function ThreeDViewerModifier() {
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
+          onBrandChange={setSelectedBrand}
           onShowWireframeChange={setShowWireframe}
+          onShowFixtureLabelsChange={setShowFixtureLabels}
+          onShowWallsChange={setShowWalls}
           onEditModeChange={handleEditModeChange}
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
@@ -1259,6 +1298,7 @@ export function ThreeDViewerModifier() {
           showSpheres={showSpheres}
           editFloorplatesMode={editFloorplatesMode}
           selectedFixtureType={selectedFixtureType}
+          selectedBrand={selectedBrand}
           fixtureTypeMap={fixtureTypeMap}
           deletedFixtures={deletedFixtures}
           editMode={editMode}
@@ -1267,6 +1307,8 @@ export function ThreeDViewerModifier() {
           floorPlatesData={floorPlatesData}
           modifiedFloorPlates={modifiedFloorPlates}
           showWireframe={showWireframe}
+          showFixtureLabels={showFixtureLabels}
+          showWalls={showWalls}
           selectedLocations={selectedLocations}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
