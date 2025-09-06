@@ -698,6 +698,7 @@ interface Canvas3DProps {
   showSpheres: boolean;
   editFloorplatesMode: boolean;
   selectedFixtureType: string;
+  selectedBrand: string;
   fixtureTypeMap: Map<string, string>;
   deletedFixtures: Set<string>;
   editMode: boolean;
@@ -728,6 +729,7 @@ export function Canvas3D({
   showSpheres,
   editFloorplatesMode,
   selectedFixtureType,
+  selectedBrand,
   fixtureTypeMap,
   deletedFixtures,
   editMode,
@@ -837,6 +839,11 @@ export function Canvas3D({
             // Use actual fixture type from API response
             const fixtureType = fixtureTypeMap.get(location.blockName);
             return fixtureType === selectedFixtureType;
+          })
+          .filter(location => {
+            // Apply brand filter if not "all"
+            if (selectedBrand === 'all') return true;
+            return location.brand === selectedBrand;
           })
           .map((location, index) => (
             location.glbUrl ? (

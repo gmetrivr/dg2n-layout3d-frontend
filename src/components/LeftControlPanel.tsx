@@ -22,6 +22,8 @@ interface LeftControlPanelProps {
   // Fixture data
   fixtureTypes: string[];
   selectedFixtureType: string;
+  brands: string[];
+  selectedBrand: string;
   
   // Floor plates data
   floorPlatesData: Record<string, Record<string, any[]>>;
@@ -43,6 +45,7 @@ interface LeftControlPanelProps {
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
   onFixtureTypeChange: (type: string) => void;
+  onBrandChange: (brand: string) => void;
   onShowWireframeChange: (show: boolean) => void;
   onShowFixtureLabelsChange: (show: boolean) => void;
   onShowWallsChange: (show: boolean) => void;
@@ -66,6 +69,8 @@ export function LeftControlPanel({
   transformSpace,
   fixtureTypes,
   selectedFixtureType,
+  brands,
+  selectedBrand,
   floorPlatesData,
   modifiedFloorPlates,
   getBrandCategory,
@@ -77,6 +82,7 @@ export function LeftControlPanel({
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
+  onBrandChange,
   onShowWireframeChange,
   onShowFixtureLabelsChange,
   onShowWallsChange,
@@ -174,6 +180,25 @@ export function LeftControlPanel({
               {fixtureTypes.map((type) => (
                 <option key={type} value={type}>
                   {type}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        {/* Brand Filter */}
+        {brands.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium">Brand:</label>
+            <Select 
+              value={selectedBrand} 
+              onChange={(e) => onBrandChange(e.target.value)}
+              className="w-48"
+            >
+              <option value="all">All Brands</option>
+              {brands.map((brand) => (
+                <option key={brand} value={brand}>
+                  {brand}
                 </option>
               ))}
             </Select>
