@@ -13,6 +13,7 @@ interface LeftControlPanelProps {
   // UI state
   showSpheres: boolean;
   showWireframe: boolean;
+  showFixtureLabels: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
   transformSpace: 'world' | 'local';
@@ -42,6 +43,7 @@ interface LeftControlPanelProps {
   onShowSpheresChange: (show: boolean) => void;
   onFixtureTypeChange: (type: string) => void;
   onShowWireframeChange: (show: boolean) => void;
+  onShowFixtureLabelsChange: (show: boolean) => void;
   onEditModeChange: (mode: 'off' | 'fixtures' | 'floorplates') => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
@@ -55,6 +57,7 @@ export function LeftControlPanel({
   extractedFiles,
   showSpheres,
   showWireframe,
+  showFixtureLabels,
   editMode,
   editFloorplatesMode,
   transformSpace,
@@ -72,6 +75,7 @@ export function LeftControlPanel({
   onShowSpheresChange,
   onFixtureTypeChange,
   onShowWireframeChange,
+  onShowFixtureLabelsChange,
   onEditModeChange,
   onTransformSpaceChange,
   onDownloadGLB,
@@ -127,6 +131,18 @@ export function LeftControlPanel({
             className="w-4 h-4"
           />
           <label htmlFor="showSpheres" className="text-sm font-medium">Show Fixtures</label>
+        </div>
+        
+        {/* Show Fixture Labels Checkbox */}
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            id="showFixtureLabels" 
+            checked={showFixtureLabels}
+            onChange={(e) => onShowFixtureLabelsChange(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="showFixtureLabels" className="text-sm font-medium">Show Fixture Labels</label>
         </div>
         
         {/* Fixture Type Filter */}
