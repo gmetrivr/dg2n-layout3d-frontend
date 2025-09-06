@@ -14,6 +14,7 @@ interface LeftControlPanelProps {
   showSpheres: boolean;
   showWireframe: boolean;
   showFixtureLabels: boolean;
+  showWalls: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
   transformSpace: 'world' | 'local';
@@ -44,6 +45,7 @@ interface LeftControlPanelProps {
   onFixtureTypeChange: (type: string) => void;
   onShowWireframeChange: (show: boolean) => void;
   onShowFixtureLabelsChange: (show: boolean) => void;
+  onShowWallsChange: (show: boolean) => void;
   onEditModeChange: (mode: 'off' | 'fixtures' | 'floorplates') => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
@@ -58,6 +60,7 @@ export function LeftControlPanel({
   showSpheres,
   showWireframe,
   showFixtureLabels,
+  showWalls,
   editMode,
   editFloorplatesMode,
   transformSpace,
@@ -76,6 +79,7 @@ export function LeftControlPanel({
   onFixtureTypeChange,
   onShowWireframeChange,
   onShowFixtureLabelsChange,
+  onShowWallsChange,
   onEditModeChange,
   onTransformSpaceChange,
   onDownloadGLB,
@@ -119,6 +123,18 @@ export function LeftControlPanel({
               ))
             }
           </Select>
+        </div>
+        
+        {/* Show Walls Checkbox */}
+        <div className="flex items-center gap-2">
+          <input 
+            type="checkbox" 
+            id="showWalls" 
+            checked={showWalls}
+            onChange={(e) => onShowWallsChange(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="showWalls" className="text-sm font-medium">Show Walls</label>
         </div>
         
         {/* Show Locations Checkbox */}

@@ -352,17 +352,41 @@ ${location.hierarchy}`}
 interface GLBModelProps {
   file: ExtractedFile;
   onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
+  showWalls?: boolean;
 }
 
-function GLBModel({ file, onBoundsCalculated }: GLBModelProps) {
+function GLBModel({ file, onBoundsCalculated, showWalls = true }: GLBModelProps) {
   const gltf = useGLTF(file.url);
 
   useEffect(() => {
     if (gltf?.scene) {
-      // Make all meshes in the floor GLB non-interactive
+      // Make all meshes in the floor GLB non-interactive and conditionally hide walls
       gltf.scene.traverse((child: any) => {
         if (child.isMesh) {
           child.userData.interactive = false;
+          
+          // Hide wall and column meshes if showWalls is disabled
+          if (!showWalls && child.name) {
+            const meshName = child.name.toLowerCase();
+            // Common patterns for wall and column mesh names
+            const isWallOrColumn = meshName.includes('wall') || 
+                                  meshName.includes('column') || 
+                                  meshName.includes('pillar') || 
+                                  meshName.includes('structural') ||
+                                  meshName.includes('beam') ||
+                                  meshName.includes('ceiling') ||
+                                  meshName.includes('roof');
+            
+            // Hide the mesh by setting visible to false
+            if (isWallOrColumn) {
+              child.visible = false;
+            } else {
+              child.visible = true; // Ensure other meshes are visible
+            }
+          } else {
+            // If showWalls is true, make sure all meshes are visible
+            child.visible = true;
+          }
         }
       });
 
@@ -374,7 +398,7 @@ function GLBModel({ file, onBoundsCalculated }: GLBModelProps) {
         onBoundsCalculated([center.x, center.y, center.z], [size.x, size.y, size.z]);
       }
     }
-  }, [gltf, onBoundsCalculated]);
+  }, [gltf, onBoundsCalculated, showWalls]);
 
   // Cleanup function to clear cache when component unmounts
   useEffect(() => {
@@ -683,6 +707,7 @@ interface Canvas3DProps {
   modifiedFloorPlates: Map<string, any>;
   showWireframe: boolean;
   showFixtureLabels: boolean;
+  showWalls: boolean;
   selectedLocations: LocationData[];
   onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
   onGLBError: (blockName: string, url: string) => void;
@@ -712,6 +737,7 @@ export function Canvas3D({
   modifiedFloorPlates,
   showWireframe,
   showFixtureLabels,
+  showWalls,
   selectedLocations,
   onBoundsCalculated,
   onGLBError,
@@ -783,6 +809,7 @@ export function Canvas3D({
                 key={selectedFile.url}
                 file={selectedFile}
                 onBoundsCalculated={onBoundsCalculated}
+                showWalls={showWalls}
               />
             );
           })()}

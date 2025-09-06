@@ -92,6 +92,7 @@ export function ThreeDViewerModifier() {
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
   const [showFixtureLabels, setShowFixtureLabels] = useState(false);
+  const [showWalls, setShowWalls] = useState(true);
   const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('world');
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
@@ -1230,6 +1231,7 @@ export function ThreeDViewerModifier() {
           showSpheres={showSpheres}
           showWireframe={showWireframe}
           showFixtureLabels={showFixtureLabels}
+          showWalls={showWalls}
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
           transformSpace={transformSpace}
@@ -1248,6 +1250,7 @@ export function ThreeDViewerModifier() {
           onFixtureTypeChange={setSelectedFixtureType}
           onShowWireframeChange={setShowWireframe}
           onShowFixtureLabelsChange={setShowFixtureLabels}
+          onShowWallsChange={setShowWalls}
           onEditModeChange={handleEditModeChange}
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
@@ -1271,6 +1274,7 @@ export function ThreeDViewerModifier() {
           modifiedFloorPlates={modifiedFloorPlates}
           showWireframe={showWireframe}
           showFixtureLabels={showFixtureLabels}
+          showWalls={showWalls}
           selectedLocations={selectedLocations}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
