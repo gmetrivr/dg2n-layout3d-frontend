@@ -924,14 +924,21 @@ export function ThreeDViewerModifier() {
     fetchBrandCategories();
   }, []);
 
-  // Extract fixture types from API response data
+  // Load all available fixture types from API
   useEffect(() => {
-    // Extract unique fixture types from the fixture data we got from API
-    if (fixtureTypeMap.size > 0) {
-      const types = new Set(fixtureTypeMap.values());
-      setFixtureTypes(Array.from(types));
-    }
-  }, [fixtureTypeMap]);
+    const loadAllFixtureTypes = async () => {
+      try {
+        const allTypes = await apiService.getAllFixtureTypes();
+        setFixtureTypes(allTypes);
+      } catch (error) {
+        console.warn('Failed to load fixture types from API:', error);
+        // Fallback to hardcoded types from mapping
+        setFixtureTypes(Object.values(FIXTURE_TYPE_MAPPING));
+      }
+    };
+
+    loadAllFixtureTypes();
+  }, []); // Only run once on component mount
 
   // Extract unique brands from location data for current floor
   useEffect(() => {

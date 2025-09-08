@@ -248,5 +248,16 @@ export const apiService = {
     }
 
     return response.json();
+  },
+
+  async getAllFixtureTypes(): Promise<string[]> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/types`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get all fixture types: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.fixture_types;
   }
 };
