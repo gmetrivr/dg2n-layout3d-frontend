@@ -264,7 +264,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
         {showFixtureLabels && (
           <Billboard position={[
             stackBoundingBox.center[0],
-            stackBoundingBox.center[1] + stackBoundingBox.size[1] / 2 + 0.3,
+            stackBoundingBox.center[1] + stackBoundingBox.size[1] / 2 + 0.5,
             stackBoundingBox.center[2]
           ]}>
             {/* Black background box */}

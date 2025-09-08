@@ -1,4 +1,5 @@
-import { Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Select } from "./ui/select";
 import { getGlbTitle } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
@@ -91,6 +92,9 @@ export function LeftControlPanel({
   onDownloadGLB,
   onDownloadModifiedZip,
 }: LeftControlPanelProps) {
+  // Collapsible state
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  
   // Function to detect if there are duplicated fixtures
   // Duplicated fixtures are those with _updateTimestamp (added after initial load)
   const hasDuplicatedFixtures = () => {
@@ -107,7 +111,27 @@ export function LeftControlPanel({
 
   return (
     <div className="absolute top-4 left-4 z-50">
-      <div className="flex flex-col gap-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg">
+      <div className="bg-background/90 backdrop-blur-sm border border-border rounded-lg shadow-lg">
+        {/* Controls Header */}
+        <div 
+          className="flex items-center justify-between p-3 cursor-pointer hover:bg-background/60 transition-colors rounded-t-lg"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+        >
+          <h3 className="text-sm font-semibold text-foreground">Controls</h3>
+          <div className="text-muted-foreground hover:text-foreground transition-colors">
+            {isCollapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </div>
+        </div>
+        
+        {/* Collapsible Content */}
+        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
+          isCollapsed ? 'max-h-0' : 'max-h-[800px]'
+        }`}>
+          <div className="flex flex-col gap-4 p-4 pt-0">
         
         {/* Model Selector */}
         <div className="flex flex-col gap-2">
@@ -140,7 +164,7 @@ export function LeftControlPanel({
             onChange={(e) => onShowWallsChange(e.target.checked)}
             className="w-4 h-4"
           />
-          <label htmlFor="showWalls" className="text-sm font-medium">Show Walls</label>
+          <label htmlFor="showWalls" className="text-sm font-medium">Show Walls / Columns</label>
         </div>
         
         {/* Show Locations Checkbox */}
@@ -417,6 +441,8 @@ export function LeftControlPanel({
             )}
           </div>
         )}
+          </div>
+        </div>
       </div>
     </div>
   );
