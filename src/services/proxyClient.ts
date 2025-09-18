@@ -2,7 +2,18 @@ import { useMemo } from 'react';
 
 import { useAuth } from '../contexts/AuthContext';
 
-const baseUrl = (import.meta.env.VITE_PROXY_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+// Prefer same-origin in non-local environments to avoid CORS.
+// This lets Vercel rewrites (see vercel.json) proxy /api/* to the guard.
+// In local dev, fall back to VITE_PROXY_BASE_URL if provided.
+const computeBaseUrl = () => {
+  const envUrl = (import.meta.env.VITE_PROXY_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+  if (typeof window === 'undefined') return envUrl;
+  const host = window.location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  return isLocal ? envUrl : '';
+};
+
+const baseUrl = computeBaseUrl();
 
 export type Operator =
   | 'eq'
