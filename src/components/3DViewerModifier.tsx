@@ -16,8 +16,10 @@ import { RightInfoPanel } from './RightInfoPanel';
 import { MultiRightInfoPanel } from './MultiRightInfoPanel';
 import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
 import { Canvas3D } from './Canvas3D';
-import { useFixtureSelection, type LocationData, generateFixtureUID, generateOriginalUID } from '../hooks/useFixtureSelection';
+import { useFixtureSelection, type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/shadcn/components/ui/dialog';
+import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -71,6 +73,9 @@ function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' 
 export function ThreeDViewerModifier() {
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get('jobId');
+  const zipUrl = searchParams.get('zipUrl');
+  const zipPath = searchParams.get('zipPath');
+  const bucketParam = searchParams.get('bucket');
   const [, setJob] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +103,10 @@ export function ThreeDViewerModifier() {
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
+  const [isSavingStore, setIsSavingStore] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveStoreId, setSaveStoreId] = useState('');
+  const [saveStoreName, setSaveStoreName] = useState('');
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
@@ -105,6 +114,8 @@ export function ThreeDViewerModifier() {
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
   const [brands, setBrands] = useState<string[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
+
+  const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
   // Use custom hooks for fixture selection and modifications
   const {
@@ -415,45 +426,63 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedFile, selectedFloorFile, locationData, deletedFixtures, isExporting]);
 
+  
+
+  // Build a modified ZIP Blob (without downloading)
+// Helpers to recognize CSV filenames across underscore/hyphen variants
+// Simple scoped logger for ZIP/save flow
+const log = (...args: any[]) => {
+  // eslint-disable-next-line no-console
+  console.debug('[ZIP]', ...args);
+};
+
+const isLocationCsv = (name: string) => {
+  const n = name.toLowerCase().replace(/_/g, '-');
+  return n.endsWith('.csv') && n.includes('location-master');
+};
+const isFloorPlatesCsv = (name: string) => {
+  const n = name.toLowerCase().replace(/_/g, '-');
+  return n.endsWith('.csv') && (n.includes('floor-plate-master') || n.includes('floor-plates'));
+};
+
+const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
+    const zip = new JSZip();
+    log('Building modified ZIP...');
+    log('Extracted files:', extractedFiles.map(f => f.name));
+
+    // Add all original files except the CSVs that need to be modified
+    for (const file of extractedFiles) {
+      if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
+        log('Skipping original CSV in bundle:', file.name);
+        continue;
+      }
+      zip.file(file.name, file.blob);
+    }
+
+    // Create modified location-master.csv
+    await createModifiedLocationMasterCSV(zip, deletedFixturePositions);
+
+    // Create modified floor plates CSV if there are floor plate changes, otherwise preserve original
+    if (modifiedFloorPlates.size > 0) {
+      await createModifiedFloorPlatesCSV(zip);
+    } else {
+      const originalFloorPlatesFile = extractedFiles.find((file) => isFloorPlatesCsv(file.name));
+      if (originalFloorPlatesFile) {
+        log('No floor plate edits; keeping original:', originalFloorPlatesFile.name);
+        zip.file(originalFloorPlatesFile.name, originalFloorPlatesFile.blob);
+      }
+    }
+    log('Modified ZIP built.');
+    const blob = await zip.generateAsync({ type: 'blob' });
+    return blob;
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures]);
+
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
-    
     setIsExportingZip(true);
-    
     try {
-      const zip = new JSZip();
-      
-      
-      // Add all original files except the CSVs that need to be modified
-      for (const file of extractedFiles) {
-        if (file.name.toLowerCase().includes('location-master.csv') || 
-            file.name.toLowerCase().includes('floor-plate-master.csv') ||
-            file.name.toLowerCase().includes('floor-plates-all.csv')) {
-          continue; // Skip these, we'll add modified versions
-        }
-        zip.file(file.name, file.blob);
-      }
-      
-      // Create modified location-master.csv
-      await createModifiedLocationMasterCSV(zip, deletedFixturePositions);
-      
-      // Create modified floor plates CSV if there are floor plate changes
-      if (modifiedFloorPlates.size > 0) {
-        await createModifiedFloorPlatesCSV(zip);
-      } else {
-        // Add original floor plates CSV
-        const originalFloorPlatesFile = extractedFiles.find(file => 
-          file.name.toLowerCase().includes('floor-plate-master.csv') ||
-          file.name.toLowerCase().includes('floor-plates-all.csv')
-        );
-        if (originalFloorPlatesFile) {
-          zip.file(originalFloorPlatesFile.name, originalFloorPlatesFile.blob);
-        }
-      }
-      
-      // Generate and download the ZIP
-      const content = await zip.generateAsync({ type: 'blob' });
-      const url = URL.createObjectURL(content);
+      const blob = await createModifiedZipBlob();
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       const dateStr = new Date().toISOString().slice(0, 10);
@@ -463,14 +492,56 @@ export function ThreeDViewerModifier() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
     } catch (error) {
       console.error('Failed to create modified ZIP:', error);
       alert('Failed to create modified ZIP file');
     } finally {
       setIsExportingZip(false);
     }
-  }, [extractedFiles, modifiedFloorPlates, locationData, deletedFixtures, isExportingZip, jobId]);
+  }, [createModifiedZipBlob, isExportingZip, jobId]);
+
+
+  const handleSaveStore = useCallback(async () => {
+    if (!saveStoreId.trim() || !saveStoreName.trim()) {
+      alert('Please provide both Store ID and Store Name');
+      return;
+    }
+
+    try {
+      setIsSavingStore(true);
+      log('Save Store: building ZIP...');
+      const blob = await createModifiedZipBlob();
+      const size = blob.size;
+      const ts = new Date();
+      const dateStr = ts.toISOString().replace(/[:.]/g, '-');
+      const jobIdPrefix = jobId ? `${jobId}-` : '';
+      const fileName = `${jobIdPrefix}layout-${dateStr}.zip`;
+      const path = `${saveStoreId}/${fileName}`;
+
+      // Upload to storage
+      await uploadStoreZip(path, blob);
+      log('Save Store: uploaded to', path, 'size', size);
+
+      // Insert DB record
+      await insertStoreRecord({
+        store_id: saveStoreId,
+        store_name: saveStoreName,
+        zip_path: path,
+        zip_size: size,
+        job_id: jobId,
+      });
+
+      setSaveDialogOpen(false);
+      setSaveStoreId('');
+      setSaveStoreName('');
+      alert('Store saved successfully');
+    } catch (e: any) {
+      console.error('Failed to save store:', e);
+      alert(`Failed to save store: ${e?.message || e}`);
+    } finally {
+      setIsSavingStore(false);
+    }
+  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName]);
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -560,29 +631,46 @@ export function ThreeDViewerModifier() {
 
   const createModifiedLocationMasterCSV = async (zip: JSZip, deletedPositions: Set<string>) => {
     
-    // Find original location-master.csv
-    const originalFile = extractedFiles.find(file => 
-      file.name.toLowerCase().includes('location-master.csv')
-    );
+  // Find original location-master.csv (support hyphen/underscore variants)
+    const originalFile = extractedFiles.find(file => isLocationCsv(file.name));
     
     if (!originalFile) {
-      console.warn('Original location-master.csv not found');
+      console.warn('Original location-master.csv not found. Generating from current state.');
+      const generated = generateLocationCSVFromState();
+      zip.file('location-master.csv', generated);
       return;
     }
     
-    // Read original CSV content
-    const response = await fetch(originalFile.url);
-    const csvText = await response.text();
+    // Read original CSV content directly from blob (avoid URL caching issues)
+    const csvText = await originalFile.blob.text();
     const lines = csvText.split('\n');
-    
-    
     if (lines.length === 0) return;
     
     // Keep header
     const modifiedLines = [lines[0]];
     
+    // Helper to build a stable key from original CSV coordinates
+    const buildOriginalCsvKey = (block: string, x: number, y: number, z: number) =>
+      `${block}-${x.toFixed(12)}-${y.toFixed(12)}-${z.toFixed(1)}`;
+
+    const getLocationOriginalKey = (loc: LocationData) =>
+      buildOriginalCsvKey(
+        loc.originalBlockName ?? loc.blockName,
+        loc.originalPosX ?? loc.posX,
+        loc.originalPosY ?? loc.posY,
+        loc.originalPosZ ?? loc.posZ,
+      );
+
+    // Build fast lookup: current locations by their original CSV key (without timestamp)
+    const currentByOriginalKey = new Map<string, LocationData>();
+    for (const loc of locationData) {
+      const key = getLocationOriginalKey(loc);
+      currentByOriginalKey.set(key, loc);
+    }
     // Track processed fixtures to identify duplicates
     const originalFixtures = new Set<string>();
+    let updated = 0; let notFoundKept = 0; let deletedCount = 0; let duplicatesAdded = 0;
+    const unmatchedSamples: string[] = [];
     
     // Process each data line
     for (let i = 1; i < lines.length; i++) {
@@ -602,64 +690,54 @@ export function ThreeDViewerModifier() {
         continue;
       }
       
-      // Try to parse the position data (using new CSV format indices)
+      // Try to parse the position data (using current CSV format indices)
       let blockName, posX, posY, posZ;
       try {
-        blockName = values[0];
-        posX = parseFloat(values[5]) || 0;  // Pos X at index 5
-        posY = parseFloat(values[6]) || 0;  // Pos Y at index 6  
-        posZ = parseFloat(values[7]) || 0;  // Pos Z at index 7
+        const clean = (val: string) => val.replace(/"/g, '').trim();
+        blockName = clean(values[0]);
+        values[0] = blockName;
+        posX = Number.parseFloat(clean(values[5] || ''));
+        posY = Number.parseFloat(clean(values[6] || ''));
+        posZ = Number.parseFloat(clean(values[7] || ''));
+        if (!Number.isFinite(posX)) posX = 0;
+        if (!Number.isFinite(posY)) posY = 0;
+        if (!Number.isFinite(posZ)) posZ = 0;
       } catch (error) {
         // If parsing fails, keep the original line
         modifiedLines.push(line);
         continue;
       }
       
-      // Find matching location data to get the correct UID
-      // First try to match by original position (for moved fixtures)
-      let matchingLocation = locationData.find(loc => {
-        const originalPosX = loc.originalPosX ?? loc.posX;
-        const originalPosY = loc.originalPosY ?? loc.posY;
-        const originalPosZ = loc.originalPosZ ?? loc.posZ;
-        const originalBlockName = loc.originalBlockName ?? loc.blockName;
-        
-        return originalBlockName === blockName &&
-               Math.abs(originalPosX - posX) < 0.001 &&
-               Math.abs(originalPosY - posY) < 0.001 &&
-               Math.abs(originalPosZ - posZ) < 0.001;
-      });
-      
-      // If no match by original position, try matching by current position (for unmoved fixtures)
-      if (!matchingLocation) {
-        matchingLocation = locationData.find(loc => 
-          loc.blockName === blockName &&
-          Math.abs(loc.posX - posX) < 0.001 &&
-          Math.abs(loc.posY - posY) < 0.001 &&
-          Math.abs(loc.posZ - posZ) < 0.001
-        );
-      }
+      // Find matching location by original CSV key (deterministic)
+      const originalKey = buildOriginalCsvKey(blockName, posX, posY, posZ);
+      let matchingLocation = currentByOriginalKey.get(originalKey);
       
       if (!matchingLocation) {
         // If no matching location found, check if this CSV row represents a deleted fixture
         const csvPositionKey = `${blockName}-${posX.toFixed(3)}-${posY.toFixed(3)}-${posZ.toFixed(3)}`;
         
         if (deletedPositions.has(csvPositionKey)) {
+          deletedCount++;
           continue; // Skip this CSV row as it represents a deleted fixture
         }
         
         // If not deleted, keep the original line
         modifiedLines.push(line);
+        notFoundKept++;
+        if (unmatchedSamples.length < 5) {
+          unmatchedSamples.push(`${originalKey} => ${values.slice(0, 14).join(',')}`);
+        }
         continue;
       }
       
       // Use original UID for tracking which fixtures we've processed
-      const originalKey = generateOriginalUID(matchingLocation);
-      originalFixtures.add(originalKey);
+      const trackedOriginalKey = originalKey;
+      originalFixtures.add(trackedOriginalKey);
       
       // Check if this fixture has been deleted - skip if so
       // Check both original UID and current UID for deletion since deletion uses current UID
       const currentKey = generateFixtureUID(matchingLocation);
-      if (deletedFixtures.has(originalKey) || deletedFixtures.has(currentKey)) {
+      if (deletedFixtures.has(trackedOriginalKey) || deletedFixtures.has(currentKey)) {
         continue; // Skip deleted fixtures
       }
       
@@ -674,7 +752,9 @@ export function ThreeDViewerModifier() {
         values[7] = currentLocationData.posZ.toFixed(1);   // Pos Z (m)
         
         // Use current rotation (which includes any rotations)
-        values[10] = currentLocationData.rotationZ.toFixed(1); // Rotation Z at index 10
+        values[8] = currentLocationData.rotationX.toFixed(1);  // Rotation X (deg)
+        values[9] = currentLocationData.rotationY.toFixed(1);  // Rotation Y (deg)
+        values[10] = currentLocationData.rotationZ.toFixed(1); // Rotation Z (deg)
         
         // Use current brand (which includes any brand changes)
         values[11] = currentLocationData.brand;
@@ -698,11 +778,12 @@ export function ThreeDViewerModifier() {
       
       
       modifiedLines.push(values.join(','));
+      updated++;
     }
     
     // Add any duplicated fixtures that weren't in the original CSV
     locationData.forEach(location => {
-      const originalLocationKey = generateOriginalUID(location);
+      const originalLocationKey = getLocationOriginalKey(location);
       
       // If this fixture wasn't in the original CSV (by original UID), it's a duplicate
       if (!originalFixtures.has(originalLocationKey)) {
@@ -725,29 +806,51 @@ export function ThreeDViewerModifier() {
         ].join(',');
         
         modifiedLines.push(csvLine);
+        duplicatesAdded++;
       }
     });
     
     // Add modified CSV to zip - preserve original file structure
     const modifiedCSV = modifiedLines.join('\n');
     zip.file(originalFile.name, modifiedCSV);
+    if (unmatchedSamples.length > 0) {
+      log('Unmatched CSV rows (sample):', unmatchedSamples);
+    }
+    log('Location CSV summary:', { updated, notFoundKept, deleted: deletedCount, duplicatesAdded, outLines: modifiedLines.length });
+  };
+
+  const generateLocationCSVFromState = () => {
+    const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy';
+    const rows = locationData.map(loc => [
+      loc.blockName,
+      loc.floorIndex,
+      0, 0, 0,
+      Number(loc.posX.toFixed(12)),
+      Number(loc.posY.toFixed(12)),
+      Number(loc.posZ.toFixed(1)),
+      Number(loc.rotationX.toFixed(1)),
+      Number(loc.rotationY.toFixed(1)),
+      Number(loc.rotationZ.toFixed(1)),
+      loc.brand,
+      loc.count,
+      loc.hierarchy
+    ].join(','));
+    const csv = [header, ...rows].join('\n');
+    log('Generated CSV from state. Rows:', rows.length);
+    return csv;
   };
 
   const createModifiedFloorPlatesCSV = async (zip: JSZip) => {
     // Find original floor plates CSV
-    const originalFile = extractedFiles.find(file => 
-      file.name.toLowerCase().includes('floor-plate-master.csv') ||
-      file.name.toLowerCase().includes('floor-plates-all.csv')
-    );
+    const originalFile = extractedFiles.find(file => isFloorPlatesCsv(file.name));
     
     if (!originalFile) {
       console.warn('Original floor plates CSV not found');
       return;
     }
     
-    // Read original CSV content
-    const response = await fetch(originalFile.url);
-    const csvText = await response.text();
+    // Read original CSV content directly from blob (avoid URL caching issues)
+    const csvText = await originalFile.blob.text();
     const lines = csvText.split('\n');
     
     if (lines.length === 0) return;
@@ -842,14 +945,10 @@ export function ThreeDViewerModifier() {
   };
 
   useEffect(() => {
-    const fetchAndExtractFiles = async () => {
-      if (!jobId) {
-        setLoading(false);
-        return;
-      }
+    const fetchJobZip = async () => {
+      if (!jobId) return;
 
       try {
-        // First verify job exists and is completed
         const jobData = await apiService.getJobStatus(jobId);
         if (jobData.status !== 'completed') {
           setError(`Job is not completed yet. Status: ${jobData.status}`);
@@ -858,29 +957,26 @@ export function ThreeDViewerModifier() {
         }
         setJob(jobData);
 
-        // Fetch and extract ZIP file using job ID
         setExtracting(true);
         const zipBlob = await apiService.fetchJobFilesAsZip(jobData.job_id);
         const extracted = await extractZipFiles(zipBlob);
-        
+
         setExtractedFiles(extracted);
-        
-        // Filter GLB files - include both original floor files and shattered floor plates for switching
-        const glbFiles = extracted.filter(file => 
-          file.type === '3d-model' && 
-          (file.name.includes('dg2n-3d-floor-') || 
+
+        const glbFiles = extracted.filter(file =>
+          file.type === '3d-model' &&
+          (file.name.includes('dg2n-3d-floor-') ||
            file.name.includes('dg2n-shattered-floor-plates-') ||
            !file.name.includes('floor'))
         );
         setGlbFiles(glbFiles);
-        
-        // Select first original floor GLB file by default (not shattered)
+
         const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
         if (originalFloorFiles.length > 0) {
           setSelectedFile(originalFloorFiles[0]);
-          setSelectedFloorFile(originalFloorFiles[0]); // Initialize dropdown state
+          setSelectedFloorFile(originalFloorFiles[0]);
         }
-        
+
       } catch (err) {
         console.error('Failed to load job:', err);
         if (err instanceof Error) {
@@ -900,14 +996,84 @@ export function ThreeDViewerModifier() {
       }
     };
 
-    fetchAndExtractFiles();
-    
-    // Cleanup on unmount
+    const fetchZipFromUrl = async () => {
+      if (!zipUrl) return;
+      try {
+        setLoading(true);
+        setExtracting(true);
+        const resp = await fetch(zipUrl);
+        if (!resp.ok) throw new Error(`Failed to fetch ZIP (${resp.status})`);
+        const zipBlob = await resp.blob();
+        const extracted = await extractZipFiles(zipBlob);
+        setExtractedFiles(extracted);
+
+        const glbFiles = extracted.filter(file =>
+          file.type === '3d-model' &&
+          (file.name.includes('dg2n-3d-floor-') ||
+           file.name.includes('dg2n-shattered-floor-plates-') ||
+           !file.name.includes('floor'))
+        );
+        setGlbFiles(glbFiles);
+
+        const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+        if (originalFloorFiles.length > 0) {
+          setSelectedFile(originalFloorFiles[0]);
+          setSelectedFloorFile(originalFloorFiles[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load zip from URL:', err);
+        setError('Failed to load ZIP from URL.');
+      } finally {
+        setLoading(false);
+        setExtracting(false);
+      }
+    };
+    const fetchZipFromSupabase = async () => {
+      if (!zipPath) return;
+      try {
+        setLoading(true);
+        setExtracting(true);
+        const bucket = bucketParam || DEFAULT_BUCKET;
+        const blob = await downloadZip(zipPath, bucket);
+        const extracted = await extractZipFiles(blob);
+        setExtractedFiles(extracted);
+
+        const glbFiles = extracted.filter(file =>
+          file.type === '3d-model' &&
+          (file.name.includes('dg2n-3d-floor-') ||
+           file.name.includes('dg2n-shattered-floor-plates-') ||
+           !file.name.includes('floor'))
+        );
+        setGlbFiles(glbFiles);
+
+        const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+        if (originalFloorFiles.length > 0) {
+          setSelectedFile(originalFloorFiles[0]);
+          setSelectedFloorFile(originalFloorFiles[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load zip from Supabase:', err);
+        setError('Failed to load ZIP from saved store.');
+      } finally {
+        setLoading(false);
+        setExtracting(false);
+      }
+    };
+
+    if (jobId) {
+      fetchJobZip();
+    } else if (zipPath) {
+      fetchZipFromSupabase();
+    } else if (zipUrl) {
+      fetchZipFromUrl();
+    } else {
+      setLoading(false);
+    }
+
     return () => {
       cleanupExtractedFiles(extractedFiles);
-      // Note: No need to cleanup fixture cache URLs since they're direct URLs from API, not blob URLs
     };
-  }, [jobId]);
+  }, [jobId, zipUrl]);
 
   // Fetch brand categories from API
   useEffect(() => {
@@ -976,10 +1142,7 @@ export function ThreeDViewerModifier() {
       
       try {
         // Find the location-master.csv file in extracted files
-        const csvFile = extractedFiles.find(file => 
-          file.name.toLowerCase().includes('location-master.csv') ||
-          file.name.toLowerCase().includes('location_master.csv')
-        );
+        const csvFile = extractedFiles.find(file => isLocationCsv(file.name));
         
         if (!csvFile) {
           console.warn('location-master.csv not found in extracted files');
@@ -1185,7 +1348,7 @@ export function ThreeDViewerModifier() {
     );
   }
 
-  if (!jobId && extractedFiles.length === 0) {
+  if (!jobId && !zipUrl && !zipPath && extractedFiles.length === 0) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="p-6 border border-muted rounded-lg text-center max-w-md">
@@ -1295,6 +1458,7 @@ export function ThreeDViewerModifier() {
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
+          onSaveStoreClick={() => setSaveDialogOpen(true)}
         />
         <Canvas3D 
           cameraPosition={cameraPosition}
@@ -1438,6 +1602,59 @@ export function ThreeDViewerModifier() {
         fixtureCount={fixturesToDelete.length}
         onConfirmDelete={handleConfirmDelete}
       />
+
+      {/* Save Store Dialog */}
+      <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+        <DialogContent className="w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Save Store</DialogTitle>
+            <DialogClose onClick={() => setSaveDialogOpen(false)} />
+          </DialogHeader>
+          <div className="px-6 pb-6 space-y-4">
+            <DialogDescription>
+              Enter store details. A ZIP of the current dataset will be saved with a timestamp.
+            </DialogDescription>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Store ID</label>
+              <input
+                type="text"
+                value={saveStoreId}
+                onChange={(e) => setSaveStoreId(e.target.value)}
+                placeholder="e.g. 12345"
+                className="w-full px-3 py-2 rounded border border-border bg-background"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Store Name</label>
+              <input
+                type="text"
+                value={saveStoreName}
+                onChange={(e) => setSaveStoreName(e.target.value)}
+                placeholder="e.g. Downtown Flagship"
+                className="w-full px-3 py-2 rounded border border-border bg-background"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setSaveDialogOpen(false)}
+                className="text-sm px-3 py-1.5 rounded border border-border hover:bg-accent"
+                disabled={isSavingStore}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveStore}
+                disabled={isSavingStore || extractedFiles.length === 0}
+                className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {isSavingStore ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+

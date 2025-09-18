@@ -1,0 +1,164 @@
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../services/supabaseClient';
+import { DEFAULT_BUCKET, getPublicZipUrl, removeZipAndRow } from '../services/supabaseService';
+
+interface StoreSaveRow {
+  id: string;
+  created_at: string;
+  store_id: string;
+  store_name: string;
+  job_id: string | null;
+  zip_path: string;
+  zip_size: number | null;
+}
+
+function formatBytes(bytes?: number | null) {
+  if (bytes == null) return '-';
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  if (bytes === 0) return '0 B';
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const val = bytes / Math.pow(1024, i);
+  return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
+}
+
+export function MyCreatedStores() {
+  const [rows, setRows] = useState<StoreSaveRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [makingLiveId, setMakingLiveId] = useState<string | null>(null);
+
+  async function fetchRows(q?: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      let query = supabase
+        .from('store_saves')
+        .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size')
+        .order('created_at', { ascending: false });
+      if (q && q.trim()) {
+        query = query.ilike('store_id', `%${q.trim()}%`);
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      setRows(data as StoreSaveRow[]);
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchRows();
+  }, []);
+
+  const filteredRows = useMemo(() => rows, [rows]);
+
+  return (
+    <div className="container mx-auto px-4 py-6">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-semibold">My Created Stores</h1>
+        <div className="flex items-center gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') fetchRows(search); }}
+            placeholder="Search by Store ID"
+            className="px-3 py-1.5 text-sm rounded border border-border bg-background"
+          />
+          <button
+            onClick={() => fetchRows(search)}
+            className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground"
+          >Search</button>
+          <button
+            onClick={() => { setSearch(''); fetchRows(''); }}
+            className="text-sm px-3 py-1.5 rounded border border-border"
+          >Reset</button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 text-sm text-destructive">{error}</div>
+      )}
+
+      <div className="border border-border rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left px-3 py-2">Created</th>
+              <th className="text-left px-3 py-2">Store ID</th>
+              <th className="text-left px-3 py-2">Store Name</th>
+              <th className="text-left px-3 py-2">Job ID</th>
+              <th className="text-left px-3 py-2">ZIP Size</th>
+              <th className="text-left px-3 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td className="px-3 py-4" colSpan={6}>Loading…</td></tr>
+            ) : filteredRows.length === 0 ? (
+              <tr><td className="px-3 py-4" colSpan={6}>No rows</td></tr>
+            ) : (
+              filteredRows.map((r) => {
+                const url = getPublicZipUrl(r.zip_path, DEFAULT_BUCKET);
+                return (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="px-3 py-2 align-top">{new Date(r.created_at).toLocaleString()}</td>
+                    <td className="px-3 py-2 align-top font-mono">{r.store_id}</td>
+                    <td className="px-3 py-2 align-top">{r.store_name}</td>
+                    <td className="px-3 py-2 align-top font-mono">{r.job_id || '-'}</td>
+                    <td className="px-3 py-2 align-top">{formatBytes(r.zip_size)}</td>
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline"
+                        >Download</a>
+                        <button
+                          className="text-destructive underline disabled:opacity-50"
+                          disabled={deletingId === r.id}
+                          onClick={async () => {
+                            if (!confirm('Delete this record and its ZIP?')) return;
+                            try {
+                              setDeletingId(r.id);
+                              await removeZipAndRow(r.id, r.zip_path, DEFAULT_BUCKET);
+                              setRows((prev) => prev.filter((x) => x.id !== r.id));
+                            } catch (e: any) {
+                              setError(e?.message || String(e));
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          }}
+                        >Delete</button>
+                        <button
+                          className="underline disabled:opacity-50"
+                          disabled={makingLiveId === r.id}
+                          onClick={async () => {
+                            const ok = confirm('Only one version can be live per Store ID. Make this live and override any existing live version?');
+                            if (!ok) return;
+                            setMakingLiveId(r.id);
+                            // Placeholder – server-side/live flag to be added later
+                            setTimeout(() => setMakingLiveId(null), 600);
+                            alert('Make Live is not implemented yet. We will wire this next.');
+                          }}
+                        >Make Live</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export default MyCreatedStores;
+
+

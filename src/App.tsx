@@ -1,64 +1,46 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+
+import './App.css';
+import Navbar from './components/Navbar';
+import { AuthGate } from './components/AuthGate';
 import { Home } from './components/Home';
 import { CadTo3D } from './components/CadTo3D';
 import { ThreeDViewerModifier } from './components/3DViewerModifier';
-import dg2nLogo from './assets/dg2n_logo_wb.png';
-import './App.css';
+import { MyCreatedStores } from './components/MyCreatedStores';
+import { AuthProvider } from './contexts/AuthContext';
 
 function App() {
   return (
-    <Router>
-      <div className="dark bg-background min-h-screen text-foreground">
-        <header className="border-b border-border">
-          <div className="px-5 py-3">
-            <div className="flex items-center justify-between">
-              <Link to="/">
-                <img 
-                  src={dg2nLogo} 
-                  alt="dg2n" 
-                  className="h-12 w-auto object-contain"
-                />
-              </Link>
-              <nav className="flex items-center gap-6">
-                <Link 
-                  to="/cad-to-3d" 
-                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  CAD to 3D
-                </Link>
-                <Link 
-                  to="/3d-viewer-modifier" 
-                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  3D Viewer Modifier
-                </Link>
-              </nav>
-            </div>
-          </div>
-        </header>
+    <AuthProvider>
+      <Router>
+        <AuthGate>
+          <div className="dark bg-background min-h-screen text-foreground">
+            <Navbar />
+            <div className="pt-24" />
 
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/cad-to-3d" element={<CadTo3D />} />
-          <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
-        </Routes>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/cad-to-3d" element={<CadTo3D />} />
+              <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
+              <Route path="/my-stores" element={<MyCreatedStores />} />
+            </Routes>
 
-        <footer className="border-t border-border mt-auto">
-          <div className="container mx-auto px-4 py-6">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                © 2025 dg2n | Physical Twin
-              </p>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Powered by</span>
-                <span className="font-medium text-primary">dg2n</span>
+            <footer className="border-t border-border mt-auto">
+              <div className="container mx-auto px-4 py-6">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">Ac 2025 dg2n | Physical Twin</p>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Powered by</span>
+                    <span className="font-medium text-primary">dg2n</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            </footer>
           </div>
-        </footer>
-      </div>
-    </Router>
-  )
+        </AuthGate>
+      </Router>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;

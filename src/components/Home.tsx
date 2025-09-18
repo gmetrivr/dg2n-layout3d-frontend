@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Upload, Layers3, Eye, ArrowRight, Building2, Box } from 'lucide-react';
+import { Upload, Layers3, Eye, ArrowRight, Building2, Box, Archive } from 'lucide-react';
 
 export function Home() {
   return (
@@ -7,7 +7,7 @@ export function Home() {
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-16">
           <h1 className="text-5xl font-bold text-foreground mb-6">
-            dg2n Physical Twin Platform
+            dg2n Digital Twin Platform
           </h1>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
             Transform your CAD files into intelligent 3D models with advanced visualization and modification capabilities. 
@@ -15,7 +15,7 @@ export function Home() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {/* CAD to 3D Cards */}
           <Link
             to="/cad-to-3d"
@@ -85,6 +85,42 @@ export function Home() {
                 <div className="flex items-center gap-2">
                   <Eye className="h-4 w-4 text-primary" />
                   <span className="text-muted-foreground">Interactive</span>
+                </div>
+              </div>
+            </div>
+          </Link>
+
+          {/* My Created Stores Card */}
+          <Link
+            to="/my-stores"
+            className="group relative overflow-hidden rounded-2xl bg-card border border-border p-8 transition-all duration-300 hover:shadow-xl hover:shadow-primary/10 hover:border-primary/50"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-primary/10 rounded-2xl group-hover:bg-primary/20 transition-colors">
+                  <Archive className="h-8 w-8 text-primary" />
+                </div>
+                <ArrowRight className="h-6 w-6 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+              </div>
+
+              <h2 className="text-2xl font-bold text-foreground mb-3">
+                My Created Stores
+              </h2>
+
+              <p className="text-muted-foreground mb-6 leading-relaxed">
+                View all saved store ZIPs, download archives, delete unwanted versions, or mark one as live (coming soon).
+              </p>
+
+              <div className="flex items-center gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <Archive className="h-4 w-4 text-primary" />
+                  <span className="text-muted-foreground">Saved Archives</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Box className="h-4 w-4 text-primary" />
+                  <span className="text-muted-foreground">Download & Manage</span>
                 </div>
               </div>
             </div>

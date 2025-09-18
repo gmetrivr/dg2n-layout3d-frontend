@@ -54,6 +54,7 @@ interface LeftControlPanelProps {
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
+  onSaveStoreClick?: () => void;
 }
 
 export function LeftControlPanel({
@@ -91,6 +92,7 @@ export function LeftControlPanel({
   onTransformSpaceChange,
   onDownloadGLB,
   onDownloadModifiedZip,
+  onSaveStoreClick,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -132,6 +134,16 @@ export function LeftControlPanel({
           isCollapsed ? 'max-h-0' : 'max-h-[800px]'
         }`}>
           <div className="flex flex-col gap-4 p-4 pt-0">
+            {/* Save Store */}
+            <div className="flex">
+              <button
+                onClick={onSaveStoreClick}
+                disabled={extractedFiles.length === 0}
+                className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Store
+              </button>
+            </div>
         
         {/* Model Selector */}
         <div className="flex flex-col gap-2">
