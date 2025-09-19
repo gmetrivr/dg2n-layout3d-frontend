@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 import { Button } from '@/shadcn/components/ui/button';
@@ -62,7 +62,7 @@ export function Navbar() {
 
         <div className="hidden md:flex items-center gap-4">
           {username && <span className="text-sm text-muted-foreground">{username}</span>}
-          <Button size="sm" variant="outline" onClick={logout}>
+          <Button size="sm" variant="outline" onClick={() => void logout()}>
             Log out
           </Button>
         </div>
@@ -136,7 +136,7 @@ export function Navbar() {
           </div>
           <div className="mt-auto flex flex-col gap-3">
             {username && <span className="text-sm text-muted-foreground">Signed in as {username}</span>}
-            <Button variant="outline" onClick={logout}>
+            <Button variant="outline" onClick={() => void logout()}>
               Log out
             </Button>
           </div>

@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+﻿import { useMemo } from 'react';
 
-import { useProxyClient } from './proxyClient';
+import { supabase } from '../lib/supabaseClient';
 
 export const DEFAULT_BUCKET = (import.meta as any).env?.VITE_SUPABASE_BUCKET || 'store-archives';
 
@@ -23,67 +23,88 @@ type UploadOptions = {
 };
 
 export const useSupabaseService = () => {
-  const client = useProxyClient();
-
   return useMemo(
     () => ({
-      client,
-      async insertStoreRecord(record: StoreSaveRecord) {
-        const rows = await client.db<StoreSaveRow[]>(
-          {
-            table: 'store_saves',
-            action: 'insert',
-            payload: {
-              store_id: record.store_id,
-              store_name: record.store_name,
-              zip_path: record.zip_path,
-              zip_size: record.zip_size ?? null,
-              job_id: record.job_id ?? null,
-            },
-          }
-        );
+      async listStoreRecords(search?: string) {
+        const trimmed = search?.trim();
+        let query = supabase
+          .from('store_saves')
+          .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size');
 
-        return rows[0];
+        if (trimmed) {
+          query = query.ilike('store_id', `%${trimmed}%`);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          throw new Error(error.message || 'Failed to load stores');
+        }
+
+        return (data ?? []).sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      },
+      async insertStoreRecord(record: StoreSaveRecord) {
+        const { data, error } = await supabase
+          .from('store_saves')
+          .insert({
+            store_id: record.store_id,
+            store_name: record.store_name,
+            zip_path: record.zip_path,
+            zip_size: record.zip_size ?? null,
+            job_id: record.job_id ?? null,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          throw new Error(error.message || 'Failed to save store record');
+        }
+
+        return data as StoreSaveRow;
       },
       async uploadStoreZip(
         filePath: string,
         blob: Blob,
         { bucket = DEFAULT_BUCKET, contentType = 'application/zip' }: UploadOptions = {}
       ) {
-        return client.storage.upload({
-          bucket,
-          path: filePath,
-          body: blob,
+        const { error } = await supabase.storage.from(bucket).upload(filePath, blob, {
           contentType,
           upsert: true,
         });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to upload ZIP');
+        }
       },
       async getPublicZipUrl(path: string, bucket: string = DEFAULT_BUCKET) {
-        return client.storage.publicUrl({ bucket, path });
-      },
-      async downloadZip(path: string, bucket: string = DEFAULT_BUCKET) {
-        return client.storage.download({ bucket, path });
-      },
-      async removeZipAndRow(id: string, path: string, bucket: string = DEFAULT_BUCKET) {
-        try {
-          await client.storage.remove({ bucket, paths: [path] });
-        } catch (error) {
-          console.warn('Failed to remove object from storage, continuing to delete DB row', error);
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        if (!data?.publicUrl) {
+          throw new Error('Failed to get public URL');
         }
 
-        await client.db({
-          table: 'store_saves',
-          action: 'delete',
-          filters: [
-            {
-              column: 'id',
-              operator: 'eq',
-              value: id,
-            },
-          ],
-        });
+        return data.publicUrl;
+      },
+      async downloadZip(path: string, bucket: string = DEFAULT_BUCKET) {
+        const { data, error } = await supabase.storage.from(bucket).download(path);
+        if (error) {
+          throw new Error(error.message || 'Failed to download ZIP');
+        }
+
+        return data;
+      },
+      async removeZipAndRow(id: string, path: string, bucket: string = DEFAULT_BUCKET) {
+        const { error: storageError } = await supabase.storage.from(bucket).remove([path]);
+        if (storageError) {
+          console.warn('Failed to remove object from storage, continuing to delete DB row', storageError);
+        }
+
+        const { error } = await supabase.from('store_saves').delete().eq('id', id);
+        if (error) {
+          throw new Error(error.message || 'Failed to delete record');
+        }
       },
     }),
-    [client]
+    []
   );
 };

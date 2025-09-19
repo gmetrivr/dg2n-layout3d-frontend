@@ -1,12 +1,12 @@
+ï»¿import type { FormEvent, ReactNode } from 'react';
 import { useState } from 'react';
-import type { FormEvent } from 'react';
 
 import { Button } from '@/shadcn/components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
 
-export const AuthGate = ({ children }: { children: React.ReactNode }) => {
+export const AuthGate = ({ children }: { children: ReactNode }) => {
   const { status, login, error, clearError } = useAuth();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -18,7 +18,7 @@ export const AuthGate = ({ children }: { children: React.ReactNode }) => {
     clearError();
 
     try {
-      await login(username, password);
+      await login(email, password);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to authenticate';
       setLocalError(message || 'Unauthorized');
@@ -31,7 +31,7 @@ export const AuthGate = ({ children }: { children: React.ReactNode }) => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
-          <div className="text-lg font-medium text-foreground">Checking credentials…</div>
+          <div className="text-lg font-medium text-foreground">Checking credentials.</div>
           <div className="text-sm text-muted-foreground">Hang tight while we verify access.</div>
         </div>
       </div>
@@ -45,15 +45,16 @@ export const AuthGate = ({ children }: { children: React.ReactNode }) => {
           <h1 className="text-xl font-semibold text-foreground mb-6">Sign in to dg2n Layout3D</h1>
           <form className="space-y-5" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <label htmlFor="username" className="text-sm font-medium text-foreground">
-                Username
+              <label htmlFor="email" className="text-sm font-medium text-foreground">
+                Email
               </label>
               <input
-                id="username"
+                id="email"
+                type="email"
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="email"
                 required
               />
             </div>
@@ -77,7 +78,7 @@ export const AuthGate = ({ children }: { children: React.ReactNode }) => {
               </div>
             )}
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? 'Signing in…' : 'Sign in'}
+              {submitting ? 'Signing in.' : 'Sign in'}
             </Button>
           </form>
         </div>

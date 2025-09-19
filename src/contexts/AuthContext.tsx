@@ -1,132 +1,111 @@
+﻿import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { User } from '@supabase/supabase-js';
 
-import { buildBasicToken, verifyToken } from '../services/proxyClient';
+import { supabase } from '../lib/supabaseClient';
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 type AuthContextValue = {
   status: AuthStatus;
-  authToken: string | null;
+  user: User | null;
   username: string | null;
   error: string | null;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   clearError: () => void;
 };
 
-const STORAGE_KEY = 'dg2n-layout3d-auth';
-
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const readStoredCredentials = (): { token: string; username: string | null } | null => {
-  if (typeof window === 'undefined') {
-    return null;
+const resolveUsername = (user: User | null) => {
+  if (!user) return null;
+  if (typeof user.email === 'string' && user.email.length > 0) {
+    return user.email;
   }
 
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw) as { token?: string; username?: string } | null;
-    if (parsed?.token) {
-      return { token: parsed.token, username: parsed.username ?? null };
-    }
-  } catch (error) {
-    console.error('Failed to parse stored auth credentials', error);
-  }
-
-  return null;
+  const { full_name: fullName } = (user.user_metadata ?? {}) as { full_name?: string };
+  return fullName ?? null;
 };
 
-const persistCredentials = (token: string, username: string | null) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.sessionStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      token,
-      username,
-    })
-  );
-};
-
-const clearStoredCredentials = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.sessionStorage.removeItem(STORAGE_KEY);
-};
-
-export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [status, setStatus] = useState<AuthStatus>('loading');
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const resumeSession = async () => {
-      const stored = readStoredCredentials();
-      if (!stored) {
+    let active = true;
+
+    const bootstrapSession = async () => {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (!active) return;
+
+      if (sessionError) {
+        console.error('Failed to restore Supabase session', sessionError);
+        setError(sessionError.message);
+        setUser(null);
         setStatus('unauthenticated');
         return;
       }
 
-      setStatus('loading');
-      try {
-        await verifyToken(stored.token);
-        setAuthToken(stored.token);
-        setUsername(stored.username ?? null);
-        setStatus('authenticated');
-      } catch (err) {
-        console.warn('Stored credentials rejected during resume', err);
-        clearStoredCredentials();
-        setAuthToken(null);
-        setUsername(null);
-        setStatus('unauthenticated');
-      }
+      setUser(data.session?.user ?? null);
+      setStatus(data.session?.user ? 'authenticated' : 'unauthenticated');
     };
 
-    void resumeSession();
+    void bootstrapSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setStatus(session?.user ? 'authenticated' : 'unauthenticated');
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const logout = useCallback(() => {
-    setAuthToken(null);
-    setUsername(null);
-    setStatus('unauthenticated');
-    setError(null);
-    clearStoredCredentials();
-  }, []);
-
-  const login = useCallback(async (user: string, password: string) => {
-    const normalizedUser = user.trim();
-    if (!normalizedUser || !password) {
-      setError('Username and password are required');
-      throw new Error('Missing credentials');
+  const login = useCallback(async (email: string, password: string) => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !password) {
+      const message = 'Email and password are required';
+      setError(message);
+      setStatus('unauthenticated');
+      throw new Error(message);
     }
 
     setStatus('loading');
     setError(null);
 
-    const token = buildBasicToken(normalizedUser, password);
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
 
-    try {
-      await verifyToken(token);
-      setAuthToken(token);
-      setUsername(normalizedUser);
-      setStatus('authenticated');
-      persistCredentials(token, normalizedUser);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to authenticate';
+    if (signInError) {
+      setError(signInError.message ?? 'Unable to authenticate');
       setStatus('unauthenticated');
-      setError(message || 'Unauthorized');
-      clearStoredCredentials();
-      throw err;
+      throw signInError;
     }
+
+    setUser(data.user ?? null);
+    setStatus(data.user ? 'authenticated' : 'unauthenticated');
+  }, []);
+
+  const logout = useCallback(async () => {
+    setStatus('loading');
+    const { error: signOutError } = await supabase.auth.signOut();
+    if (signOutError) {
+      setError(signOutError.message ?? 'Unable to log out');
+      setStatus('authenticated');
+      throw signOutError;
+    }
+
+    setUser(null);
+    setStatus('unauthenticated');
+    setError(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -134,14 +113,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
-      authToken,
-      username,
+      user,
+      username: resolveUsername(user),
       error,
       login,
       logout,
       clearError,
     }),
-    [status, authToken, username, error, login, logout, clearError]
+    [status, user, error, login, logout, clearError]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

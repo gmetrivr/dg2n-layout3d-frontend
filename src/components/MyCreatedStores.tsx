@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+ï»¿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/shadcn/components/ui/button';
@@ -22,36 +22,15 @@ export function MyCreatedStores() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [makingLiveId, setMakingLiveId] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { client, removeZipAndRow, downloadZip } = useSupabaseService();
+  const { listStoreRecords, removeZipAndRow, downloadZip } = useSupabaseService();
 
   const fetchRows = useCallback(
     async (query?: string) => {
       setLoading(true);
       setError(null);
       try {
-        const trimmed = query?.trim();
-        const filters = trimmed
-          ? [{
-              column: 'store_id',
-              operator: 'ilike' as const,
-              value: `%${trimmed}%`,
-            }]
-          : undefined;
-
-        const data = await client.db<StoreSaveRow[]>(
-          {
-            table: 'store_saves',
-            action: 'select',
-            columns: 'id, created_at, store_id, store_name, job_id, zip_path, zip_size',
-            filters,
-          }
-        );
-
-        const sorted = [...data].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-
-        setRows(sorted);
+        const data = await listStoreRecords(query);
+        setRows(data);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load stores';
         setError(message);
@@ -59,7 +38,7 @@ export function MyCreatedStores() {
         setLoading(false);
       }
     },
-    [client]
+    [listStoreRecords]
   );
 
   useEffect(() => {
@@ -114,7 +93,7 @@ export function MyCreatedStores() {
             {loading ? (
               <tr>
                 <td className="px-3 py-4" colSpan={6}>
-                  Loading…
+                  Loading.
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (

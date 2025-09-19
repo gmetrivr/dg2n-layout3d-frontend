@@ -79,3 +79,11 @@ export default tseslint.config([
   },
 ])
 ```
+# Environment
+Create a `.env.local` with:
+```
+VITE_SUPABASE_URL=your-supabase-url
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_SUPABASE_BUCKET=store-archives
+```
+
