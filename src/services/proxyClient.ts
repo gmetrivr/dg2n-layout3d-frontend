@@ -10,7 +10,12 @@ const computeBaseUrl = () => {
   if (typeof window === 'undefined') return envUrl;
   const host = window.location.hostname;
   const isLocal = host === 'localhost' || host === '127.0.0.1';
-  return isLocal ? envUrl : '';
+
+  // If VITE_PROXY_BASE_URL is explicitly set, always use it
+  // Otherwise, use same-origin (empty string) to rely on Vercel rewrites
+  const result = envUrl ? envUrl : '';
+  console.log(`[ProxyClient] Environment: ${isLocal ? 'local' : 'production'}, envUrl: "${envUrl}", baseUrl: "${result}"`);
+  return result;
 };
 
 const baseUrl = computeBaseUrl();
@@ -113,8 +118,10 @@ const resolveUrl = (path: string, searchParams?: RequestOptions['searchParams'])
   const query = params.toString();
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   const prefix = baseUrl || '';
+  const finalUrl = `${prefix}${normalizedPath}${query ? `?${query}` : ''}`;
 
-  return `${prefix}${normalizedPath}${query ? `?${query}` : ''}`;
+  console.log(`[ProxyClient] Resolving URL: ${path} -> ${finalUrl}`);
+  return finalUrl;
 };
 
 const isJsonBody = (body: unknown): body is Record<string, unknown> | Array<unknown> =>
