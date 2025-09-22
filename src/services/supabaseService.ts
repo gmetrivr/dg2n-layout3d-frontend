@@ -41,7 +41,7 @@ export const useSupabaseService = () => {
         }
 
         return (data ?? []).sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          (a: StoreSaveRow, b: StoreSaveRow) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
       },
       async insertStoreRecord(record: StoreSaveRecord) {
