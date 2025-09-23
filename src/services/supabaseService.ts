@@ -104,6 +104,31 @@ export const useSupabaseService = () => {
           throw new Error(error.message || 'Failed to delete record');
         }
       },
+      async makeStoreLive(
+        storeId: string,
+        storeName: string,
+        zipBlob: Blob,
+        entity: string = 'trends',
+        spawnPoint: string = '0,0,0'
+      ) {
+        const formData = new FormData();
+        formData.append('entity', entity);
+        formData.append('store', storeId);
+        formData.append('store3dZip', zipBlob, `${storeName}.zip`);
+        formData.append('spawnPoint', spawnPoint);
+
+        const response = await fetch('http://localhost:4245/api/tooling/processStore3DZip', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to make store live: ${response.status} ${errorText}`);
+        }
+
+        return await response.json();
+      },
     }),
     []
   );

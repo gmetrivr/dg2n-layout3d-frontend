@@ -22,7 +22,7 @@ export function MyCreatedStores() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [makingLiveId, setMakingLiveId] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { listStoreRecords, removeZipAndRow, downloadZip } = useSupabaseService();
+  const { listStoreRecords, removeZipAndRow, downloadZip, makeStoreLive } = useSupabaseService();
 
   const fetchRows = useCallback(
     async (query?: string) => {
@@ -170,17 +170,32 @@ export function MyCreatedStores() {
                         variant="link"
                         className="px-0"
                         disabled={makingLiveId === r.id}
-                        onClick={() => {
+                        onClick={async () => {
                           const ok = confirm(
                             'Only one version can be live per Store ID. Make this live and override any existing live version?'
                           );
                           if (!ok) return;
-                          setMakingLiveId(r.id);
-                          setTimeout(() => setMakingLiveId(null), 600);
-                          alert('Make Live is not implemented yet. We will wire this next.');
+
+                          try {
+                            setMakingLiveId(r.id);
+
+                            // Download the ZIP file first
+                            const zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+
+                            // Make the store live using the API
+                            await makeStoreLive(r.store_id, r.store_name, zipBlob);
+
+                            alert(`Store "${r.store_name}" is now live!`);
+                          } catch (error) {
+                            const message = error instanceof Error ? error.message : 'Failed to make store live';
+                            alert(`Error: ${message}`);
+                            setError(message);
+                          } finally {
+                            setMakingLiveId(null);
+                          }
                         }}
                       >
-                        Make Live
+                        {makingLiveId === r.id ? 'Making Live...' : 'Make Live'}
                       </Button>
                     </div>
                   </td>
