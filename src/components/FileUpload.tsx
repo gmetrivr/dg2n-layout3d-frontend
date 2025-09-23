@@ -14,7 +14,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pipelineVersion, setPipelineVersion] = useState<string>('01');
+  const [pipelineVersion, setPipelineVersion] = useState<string>('02');
   const [toleranceOverrides, setToleranceOverrides] = useState<ToleranceOverrides>({});
   const [showToleranceModal, setShowToleranceModal] = useState(false);
 
@@ -108,7 +108,8 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
                   className="w-full p-2 border rounded bg-background text-foreground"
                   disabled={isUploading}
                 >
-                  <option value="01">01-Default (Recommended)</option>
+                  <option value="02">02 High Precision</option>
+                  <option value="01">01-Default</option>
                 </select>
               </div>
               
