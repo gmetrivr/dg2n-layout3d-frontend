@@ -117,7 +117,7 @@ export const useSupabaseService = () => {
         formData.append('store3dZip', zipBlob, `${storeName}.zip`);
         formData.append('spawnPoint', spawnPoint);
 
-        const response = await fetch('http://localhost:4245/api/tooling/processStore3DZip', {
+        const response = await fetch('https://stockflow-core.dg2n.com/api/tooling/processStore3DZip', {
           method: 'POST',
           body: formData,
         });
