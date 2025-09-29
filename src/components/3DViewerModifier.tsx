@@ -20,6 +20,7 @@ import { useFixtureSelection, type LocationData, generateFixtureUID } from '../h
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/shadcn/components/ui/dialog';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
+import { loadStoreMasterData, getUniqueStoreCodes, type StoreData } from '../utils/csvUtils';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -114,6 +115,9 @@ export function ThreeDViewerModifier() {
   const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
   const [brands, setBrands] = useState<string[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [storeData, setStoreData] = useState<StoreData[]>([]);
+  const [storeCodes, setStoreCodes] = useState<string[]>([]);
+  const [isLoadingStores, setIsLoadingStores] = useState(false);
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -507,6 +511,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       return;
     }
 
+    // Validate that the store ID exists in the master list
+    if (!storeCodes.includes(saveStoreId.trim())) {
+      alert('Invalid Store ID. Please select a valid store ID from the dropdown.');
+      return;
+    }
+
     try {
       setIsSavingStore(true);
       log('Save Store: building ZIP...');
@@ -541,7 +551,20 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } finally {
       setIsSavingStore(false);
     }
-  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName]);
+  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes]);
+
+  // Handle store selection and auto-populate store name
+  const handleStoreSelection = useCallback((selectedStoreCode: string) => {
+    setSaveStoreId(selectedStoreCode);
+
+    // Find the store data to auto-populate the store name
+    const selectedStore = storeData.find(store => store.storeCode === selectedStoreCode);
+    if (selectedStore) {
+      setSaveStoreName(selectedStore.storeName || selectedStore.sapName || selectedStore.nocName || '');
+    } else {
+      setSaveStoreName('');
+    }
+  }, [storeData]);
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -1106,6 +1129,25 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     loadAllFixtureTypes();
   }, []); // Only run once on component mount
 
+  // Load store master data
+  useEffect(() => {
+    const loadStores = async () => {
+      setIsLoadingStores(true);
+      try {
+        const stores = await loadStoreMasterData();
+        setStoreData(stores);
+        const codes = getUniqueStoreCodes(stores);
+        setStoreCodes(codes);
+      } catch (error) {
+        console.error('Failed to load store master data:', error);
+      } finally {
+        setIsLoadingStores(false);
+      }
+    };
+
+    loadStores();
+  }, []); // Only run once on component mount
+
   // Extract unique brands from location data for current floor
   useEffect(() => {
     if (locationData.length > 0 && (selectedFloorFile || selectedFile)) {
@@ -1616,13 +1658,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             </DialogDescription>
             <div className="space-y-2">
               <label className="text-sm font-medium">Store ID</label>
-              <input
-                type="text"
-                value={saveStoreId}
-                onChange={(e) => setSaveStoreId(e.target.value)}
-                placeholder="e.g. 12345"
-                className="w-full px-3 py-2 rounded border border-border bg-background"
-              />
+              {isLoadingStores ? (
+                <div className="w-full px-3 py-2 rounded border border-border bg-background text-gray-500">
+                  Loading stores...
+                </div>
+              ) : (
+                <select
+                  value={saveStoreId}
+                  onChange={(e) => handleStoreSelection(e.target.value)}
+                  className="w-full px-3 py-2 rounded border border-border bg-background"
+                >
+                  <option value="">Select a Store ID</option>
+                  {storeCodes.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Store Name</label>
@@ -1630,7 +1683,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 type="text"
                 value={saveStoreName}
                 onChange={(e) => setSaveStoreName(e.target.value)}
-                placeholder="e.g. Downtown Flagship"
+                placeholder="Store name (auto-filled from store ID)"
                 className="w-full px-3 py-2 rounded border border-border bg-background"
               />
             </div>
@@ -1644,7 +1697,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               </button>
               <button
                 onClick={handleSaveStore}
-                disabled={isSavingStore || extractedFiles.length === 0}
+                disabled={isSavingStore || extractedFiles.length === 0 || !saveStoreId.trim()}
                 className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
               >
                 {isSavingStore ? 'Saving…' : 'Save'}
