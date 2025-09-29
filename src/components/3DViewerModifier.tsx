@@ -585,17 +585,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   }, [editFloorplatesMode, glbFiles]);
 
-  const handleEditModeChange = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
+  const handleEditModeChange = useCallback((enabled: boolean) => {
+    // Call the original function with the appropriate mode
+    handleEditModeChangeOriginal(enabled ? 'fixtures' : 'off');
+  }, []);
+
+  const handleEditModeChangeOriginal = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
     if (mode === "off") {
       setEditMode(false);
       setEditFloorplatesMode(false);
-      
+
       // Switch back to original floor
       const baseFile = selectedFloorFile || selectedFile;
       if (baseFile) {
         const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
         const currentFloor = floorMatch ? floorMatch[1] : '0';
-        const originalFloorFile = glbFiles.find(file => 
+        const originalFloorFile = glbFiles.find(file =>
           file.name.includes(`dg2n-3d-floor-${currentFloor}`)
         );
         if (originalFloorFile) {
@@ -606,13 +611,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } else if (mode === "fixtures") {
       setEditMode(true);
       setEditFloorplatesMode(false);
-      
+
       // Switch back to original floor
       const baseFile = selectedFloorFile || selectedFile;
       if (baseFile) {
         const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
         const currentFloor = floorMatch ? floorMatch[1] : '0';
-        const originalFloorFile = glbFiles.find(file => 
+        const originalFloorFile = glbFiles.find(file =>
           file.name.includes(`dg2n-3d-floor-${currentFloor}`)
         );
         if (originalFloorFile) {
@@ -623,13 +628,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } else if (mode === "floorplates") {
       setEditMode(false);
       setEditFloorplatesMode(true);
-      
+
       // Switch to shattered floor
       const baseFile = selectedFloorFile || selectedFile;
       if (baseFile) {
         const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
         const currentFloor = floorMatch ? floorMatch[1] : '0';
-        const shatteredFloorFile = glbFiles.find(file => 
+        const shatteredFloorFile = glbFiles.find(file =>
           file.name.includes(`dg2n-shattered-floor-plates-${currentFloor}`)
         );
         if (shatteredFloorFile) {

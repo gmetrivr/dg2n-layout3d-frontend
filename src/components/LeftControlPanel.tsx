@@ -50,7 +50,7 @@ interface LeftControlPanelProps {
   onShowWireframeChange: (show: boolean) => void;
   onShowFixtureLabelsChange: (show: boolean) => void;
   onShowWallsChange: (show: boolean) => void;
-  onEditModeChange: (mode: 'off' | 'fixtures' | 'floorplates') => void;
+  onEditModeChange: (enabled: boolean) => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
@@ -244,18 +244,24 @@ export function LeftControlPanel({
         {/* Horizontal Separator */}
         <div className="border-t border-border"></div>
         
-        {/* Edit Mode Dropdown */}
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium">Edit:</label>
-          <Select 
-            value={editFloorplatesMode ? "floorplates" : editMode ? "fixtures" : "off"} 
-            onChange={(e) => onEditModeChange(e.target.value as 'off' | 'fixtures' | 'floorplates')}
-            className="w-48"
-          >
-            <option value="off">Off</option>
-            <option value="fixtures">Fixtures</option>
-            <option value="floorplates">Floor Plates</option>
-          </Select>
+        {/* Edit Fixtures Switch */}
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">Edit Fixtures:</label>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={editMode}
+              onChange={(e) => onEditModeChange(e.target.checked)}
+              className="sr-only"
+            />
+            <div className={`w-11 h-6 rounded-full transition-colors ${
+              editMode ? 'bg-blue-600' : 'bg-gray-300'
+            }`}>
+              <div className={`w-5 h-5 bg-white rounded-full transition-transform ${
+                editMode ? 'translate-x-5' : 'translate-x-0.5'
+              } mt-0.5`} />
+            </div>
+          </label>
         </div>
         
         {/* Floor Plates Controls */}
@@ -373,12 +379,6 @@ export function LeftControlPanel({
           );
         })()}
         
-        {/* Warning for any edit mode */}
-        {(editMode || editFloorplatesMode) && (
-          <div className="text-yellow-400 text-xs max-w-[200px]">
-            This is a feature preview. Edit changes are not saved.
-          </div>
-        )}
         
         
         {/* Download Buttons */}
