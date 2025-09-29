@@ -234,7 +234,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
             renderOrder={997}
           >
             <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
-            <lineBasicMaterial color="yellow" />
+            <lineBasicMaterial color="purple" />
           </lineSegments>
         )}
 
@@ -245,7 +245,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
             renderOrder={998}
           >
             <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
-            <lineBasicMaterial color="orange" />
+            <lineBasicMaterial color="purple" />
           </lineSegments>
         )}
 
