@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/shadcn/components/ui/button';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 import type { StoreSaveRow } from '../services/supabaseService';
+import { loadStoreMasterData, type StoreData } from '../utils/csvUtils';
 
 function formatBytes(bytes?: number | null) {
   if (bytes == null) return '-';
@@ -21,6 +22,11 @@ export function MyCreatedStores() {
   const [search, setSearch] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [makingLiveId, setMakingLiveId] = useState<string | null>(null);
+  const [storeData, setStoreData] = useState<StoreData[]>([]);
+  const [selectedRegion, setSelectedRegion] = useState<string>('all');
+  const [selectedState, setSelectedState] = useState<string>('all');
+  const [selectedCity, setSelectedCity] = useState<string>('all');
+  const [isLoadingStores, setIsLoadingStores] = useState(false);
   const navigate = useNavigate();
   const { listStoreRecords, removeZipAndRow, downloadZip, makeStoreLive } = useSupabaseService();
 
@@ -45,13 +51,174 @@ export function MyCreatedStores() {
     void fetchRows();
   }, [fetchRows]);
 
-  const filteredRows = useMemo(() => rows, [rows]);
+  // Load store master data for region filtering
+  useEffect(() => {
+    const loadStores = async () => {
+      setIsLoadingStores(true);
+      try {
+        const stores = await loadStoreMasterData();
+        setStoreData(stores);
+      } catch (error) {
+        console.error('Failed to load store master data:', error);
+      } finally {
+        setIsLoadingStores(false);
+      }
+    };
+
+    loadStores();
+  }, []);
+
+  // Reset downstream filters when upstream filters change
+  useEffect(() => {
+    // Reset state and city when region changes
+    setSelectedState('all');
+    setSelectedCity('all');
+  }, [selectedRegion]);
+
+  useEffect(() => {
+    // Reset city when state changes
+    setSelectedCity('all');
+  }, [selectedState]);
+
+  // Get unique regions from store data (case-insensitive)
+  const availableRegions = useMemo(() => {
+    const regions = storeData.map(store => store.zone).filter(Boolean);
+    // Create a map to track unique regions by lowercase version
+    const uniqueRegions = new Map<string, string>();
+    regions.forEach(region => {
+      const lowerRegion = region.toLowerCase();
+      if (!uniqueRegions.has(lowerRegion)) {
+        // Store the first occurrence (preserving original case)
+        uniqueRegions.set(lowerRegion, region);
+      }
+    });
+    return Array.from(uniqueRegions.values()).sort();
+  }, [storeData]);
+
+  // Get unique states from store data (filtered by selected region)
+  const availableStates = useMemo(() => {
+    let filteredStores = storeData;
+
+    // Filter stores by selected region first
+    if (selectedRegion !== 'all') {
+      filteredStores = storeData.filter(store =>
+        store.zone?.toLowerCase() === selectedRegion.toLowerCase()
+      );
+    }
+
+    const states = filteredStores.map(store => store.state).filter(Boolean);
+    const uniqueStates = new Map<string, string>();
+    states.forEach(state => {
+      const lowerState = state.toLowerCase();
+      if (!uniqueStates.has(lowerState)) {
+        uniqueStates.set(lowerState, state);
+      }
+    });
+    return Array.from(uniqueStates.values()).sort();
+  }, [storeData, selectedRegion]);
+
+  // Get unique cities from store data (filtered by selected region and state)
+  const availableCities = useMemo(() => {
+    let filteredStores = storeData;
+
+    // Filter stores by selected region first
+    if (selectedRegion !== 'all') {
+      filteredStores = filteredStores.filter(store =>
+        store.zone?.toLowerCase() === selectedRegion.toLowerCase()
+      );
+    }
+
+    // Then filter by selected state
+    if (selectedState !== 'all') {
+      filteredStores = filteredStores.filter(store =>
+        store.state?.toLowerCase() === selectedState.toLowerCase()
+      );
+    }
+
+    const cities = filteredStores.map(store => store.city).filter(Boolean);
+    const uniqueCities = new Map<string, string>();
+    cities.forEach(city => {
+      const lowerCity = city.toLowerCase();
+      if (!uniqueCities.has(lowerCity)) {
+        uniqueCities.set(lowerCity, city);
+      }
+    });
+    return Array.from(uniqueCities.values()).sort();
+  }, [storeData, selectedRegion, selectedState]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter(row => {
+      const storeInfo = storeData.find(store => store.storeCode === row.store_id);
+
+      // Filter by region
+      if (selectedRegion !== 'all') {
+        if (storeInfo?.zone?.toLowerCase() !== selectedRegion.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // Filter by state
+      if (selectedState !== 'all') {
+        if (storeInfo?.state?.toLowerCase() !== selectedState.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // Filter by city
+      if (selectedCity !== 'all') {
+        if (storeInfo?.city?.toLowerCase() !== selectedCity.toLowerCase()) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [rows, selectedRegion, selectedState, selectedCity, storeData]);
 
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">My Created Stores</h1>
         <div className="flex items-center gap-2">
+          <select
+            value={selectedRegion}
+            onChange={(e) => setSelectedRegion(e.target.value)}
+            className="px-3 py-1.5 text-sm rounded border border-border bg-background"
+            disabled={isLoadingStores}
+          >
+            <option value="all">All Regions</option>
+            {availableRegions.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedState}
+            onChange={(e) => setSelectedState(e.target.value)}
+            className="px-3 py-1.5 text-sm rounded border border-border bg-background"
+            disabled={isLoadingStores}
+          >
+            <option value="all">All States</option>
+            {availableStates.map((state) => (
+              <option key={state} value={state}>
+                {state}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedCity}
+            onChange={(e) => setSelectedCity(e.target.value)}
+            className="px-3 py-1.5 text-sm rounded border border-border bg-background"
+            disabled={isLoadingStores}
+          >
+            <option value="all">All Cities</option>
+            {availableCities.map((city) => (
+              <option key={city} value={city}>
+                {city}
+              </option>
+            ))}
+          </select>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -67,6 +234,9 @@ export function MyCreatedStores() {
             variant="outline"
             onClick={() => {
               setSearch('');
+              setSelectedRegion('all');
+              setSelectedState('all');
+              setSelectedCity('all');
               void fetchRows('');
             }}
           >
