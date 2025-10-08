@@ -23,6 +23,12 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
       setError('Please select a .dwg file');
       return false;
     }
+    // Check for special characters that cause backend errors
+    const specialCharsRegex = /[&,]/;
+    if (specialCharsRegex.test(file.name)) {
+      setError('Filename cannot contain special characters like & or ,');
+      return false;
+    }
     if (file.size > 100 * 1024 * 1024) { // 100MB limit
       setError('File size must be less than 100MB');
       return false;
