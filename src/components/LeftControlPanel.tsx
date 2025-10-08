@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Settings } from 'lucide-react';
 import { Select } from "./ui/select";
+import { Button } from "@/shadcn/components/ui/button";
 import { getGlbTitle } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
 
@@ -55,6 +56,7 @@ interface LeftControlPanelProps {
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
   onSaveStoreClick?: () => void;
+  onManageFloorsClick?: () => void;
 }
 
 export function LeftControlPanel({
@@ -93,6 +95,7 @@ export function LeftControlPanel({
   onDownloadGLB,
   onDownloadModifiedZip,
   onSaveStoreClick,
+  onManageFloorsClick,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -147,9 +150,20 @@ export function LeftControlPanel({
         
         {/* Model Selector */}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium">Floor:</label>
-          <Select 
-            value={selectedFloorFile?.name || selectedFile?.name || ''} 
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">Floor:</label>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onManageFloorsClick}
+              className="h-6 w-6 p-0"
+              title="Manage floors"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
+          <Select
+            value={selectedFloorFile?.name || selectedFile?.name || ''}
             onChange={(e) => {
               const file = glbFiles.find(f => f.name === e.target.value);
               onFloorFileChange(file || null);

@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
@@ -15,6 +15,7 @@ import { LeftControlPanel } from './LeftControlPanel';
 import { RightInfoPanel } from './RightInfoPanel';
 import { MultiRightInfoPanel } from './MultiRightInfoPanel';
 import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
+import { FloorManagementModal } from './FloorManagementModal';
 import { Canvas3D } from './Canvas3D';
 import { useFixtureSelection, type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
@@ -118,6 +119,7 @@ export function ThreeDViewerModifier() {
   const [storeData, setStoreData] = useState<StoreData[]>([]);
   const [storeCodes, setStoreCodes] = useState<string[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(false);
+  const [floorManagementModalOpen, setFloorManagementModalOpen] = useState(false);
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -361,7 +363,7 @@ export function ThreeDViewerModifier() {
       const fileForFloorExtraction = selectedFloorFile || selectedFile;
       const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
-      
+
       // Add all fixture GLBs for the current floor (excluding deleted fixtures)
       const currentFloorLocations = locationData.filter(location => {
         if (location.floorIndex !== currentFloor || !location.glbUrl) return false;
@@ -565,6 +567,50 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       setSaveStoreName('');
     }
   }, [storeData]);
+
+  // Floor management handlers
+  const handleDeleteFloor = useCallback((floorFile: ExtractedFile) => {
+    // Remove floor file from extracted files and GLB files
+    setExtractedFiles(prev => prev.filter(file => file.name !== floorFile.name));
+    setGlbFiles(prev => prev.filter(file => file.name !== floorFile.name));
+
+    // Extract floor number to remove associated fixtures and floor plates
+    const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i) || floorFile.name.match(/(\d+)/i);
+    const floorNumber = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Remove all fixtures on this floor
+    setLocationData(prev => prev.filter(location => location.floorIndex !== floorNumber));
+
+    // Remove floor plates data for this floor
+    setFloorPlatesData(prev => {
+      const newData = { ...prev };
+      delete newData[floorNumber.toString()];
+      return newData;
+    });
+
+    // Clear any modified floor plates for this floor
+    setModifiedFloorPlates(prev => {
+      const newMap = new Map(prev);
+      const floorPlatesForFloor = floorPlatesData[floorNumber.toString()] || {};
+      Object.values(floorPlatesForFloor).forEach(plates => {
+        (plates as any[]).forEach(plate => {
+          const key = plate.meshName || `${plate.surfaceId}-${plate.brand}`;
+          newMap.delete(key);
+        });
+      });
+      return newMap;
+    });
+  }, [floorPlatesData]);
+
+
+  const handleMoveFloorUp = useCallback((floorFile: ExtractedFile) => {
+    alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
+  }, []);
+
+  const handleMoveFloorDown = useCallback((floorFile: ExtractedFile) => {
+    alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
+  }, []);
+
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -1160,7 +1206,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const fileForFloorExtraction = selectedFloorFile || selectedFile;
       const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
-      
+
       // Get unique brands for the current floor, excluding deleted fixtures
       const floorBrands = new Set<string>();
       locationData
@@ -1506,8 +1552,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
           onSaveStoreClick={() => setSaveDialogOpen(true)}
+          onManageFloorsClick={() => setFloorManagementModalOpen(true)}
         />
-        <Canvas3D 
+        <Canvas3D
           cameraPosition={cameraPosition}
           orbitTarget={orbitTarget}
           selectedFile={selectedFile}
@@ -1648,6 +1695,18 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onOpenChange={setDeleteConfirmationOpen}
         fixtureCount={fixturesToDelete.length}
         onConfirmDelete={handleConfirmDelete}
+      />
+
+      {/* Floor Management Modal */}
+      <FloorManagementModal
+        open={floorManagementModalOpen}
+        onOpenChange={setFloorManagementModalOpen}
+        glbFiles={glbFiles}
+        selectedFloorFile={selectedFloorFile}
+        onFloorFileChange={handleFloorFileChange}
+        onDeleteFloor={handleDeleteFloor}
+        onMoveFloorUp={handleMoveFloorUp}
+        onMoveFloorDown={handleMoveFloorDown}
       />
 
       {/* Save Store Dialog */}
