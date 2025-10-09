@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
@@ -603,11 +603,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   }, [floorPlatesData]);
 
 
-  const handleMoveFloorUp = useCallback((floorFile: ExtractedFile) => {
+  const handleMoveFloorUp = useCallback((_floorFile: ExtractedFile) => {
     alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
   }, []);
 
-  const handleMoveFloorDown = useCallback((floorFile: ExtractedFile) => {
+  const handleMoveFloorDown = useCallback((_floorFile: ExtractedFile) => {
     alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
   }, []);
 

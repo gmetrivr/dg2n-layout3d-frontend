@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Trash2, MoveUp, MoveDown, Settings } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/shadcn/components/ui/dialog';
 import { Button } from "@/shadcn/components/ui/button";
@@ -68,9 +67,11 @@ export function FloorManagementModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[520px] max-h-[600px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5" />
-            Manage Floors
+          <DialogTitle>
+            <div className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Manage Floors
+            </div>
           </DialogTitle>
           <DialogClose onClick={() => onOpenChange(false)} />
         </DialogHeader>
