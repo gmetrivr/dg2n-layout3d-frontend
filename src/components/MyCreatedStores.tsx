@@ -20,7 +20,7 @@ export function MyCreatedStores() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // const [deletingId, setDeletingId] = useState<string | null>(null); // Temporarily disabled for delete functionality
   const [makingLiveId, setMakingLiveId] = useState<string | null>(null);
   const [storeData, setStoreData] = useState<StoreData[]>([]);
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
@@ -28,7 +28,8 @@ export function MyCreatedStores() {
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [isLoadingStores, setIsLoadingStores] = useState(false);
   const navigate = useNavigate();
-  const { listStoreRecords, removeZipAndRow, downloadZip, makeStoreLive } = useSupabaseService();
+  const { listStoreRecords, downloadZip, makeStoreLive } = useSupabaseService();
+  // removeZipAndRow temporarily removed - used for delete functionality
 
   const fetchRows = useCallback(
     async (query?: string) => {
