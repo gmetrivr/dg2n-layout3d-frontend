@@ -659,7 +659,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Find the store data to auto-populate the store name
     const selectedStore = storeData.find(store => store.storeCode === selectedStoreCode);
     if (selectedStore) {
-      setSaveStoreName(selectedStore.nocName || selectedStore.sapName || selectedStore.storeName || '');
+      const displayName = selectedStore.nocName || selectedStore.sapName || selectedStore.storeName || '';
+      setSaveStoreName(`${selectedStoreCode} - ${displayName}`);
     } else {
       setSaveStoreName('');
     }
