@@ -120,6 +120,8 @@ export function ThreeDViewerModifier() {
   const [storeCodes, setStoreCodes] = useState<string[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(false);
   const [floorManagementModalOpen, setFloorManagementModalOpen] = useState(false);
+  const [floorDisplayOrder, setFloorDisplayOrder] = useState<number[]>([]); // Maps display position to actual floor index
+  const [initialFloorCount, setInitialFloorCount] = useState<number>(0); // Track initial floor count
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -333,6 +335,78 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedLocation, fixtureTypeMap]);
 
+  // Helper function to get floor index mapping if floors have been reordered or deleted
+  const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
+    if (!floorDisplayOrder || floorDisplayOrder.length === 0) {
+      return null;
+    }
+
+    // Check if floors have been reordered or deleted
+    const originalOrder = [...floorDisplayOrder].sort((a, b) => a - b);
+    const isReordered = floorDisplayOrder.some((idx, i) => idx !== originalOrder[i]);
+
+    // Check if floors have been deleted (if initialFloorCount is set)
+    const hasDeleted = initialFloorCount > 0 && floorDisplayOrder.length < initialFloorCount;
+
+    // If neither reordered nor deleted, no remapping needed
+    if (!isReordered && !hasDeleted) {
+      return null;
+    }
+
+    // Create mapping from old floor index to new sequential floor index
+    const indexMapping = new Map<number, number>();
+    floorDisplayOrder.forEach((oldIndex, newIndex) => {
+      indexMapping.set(oldIndex, newIndex);
+    });
+
+    console.log('Floor index mapping:', Object.fromEntries(indexMapping));
+    return indexMapping;
+  }, [floorDisplayOrder, initialFloorCount]);
+
+  // Helper function to apply floor remapping to location data
+  const remapLocationData = useCallback((data: LocationData[], mapping: Map<number, number>): LocationData[] => {
+    return data
+      .filter(location => {
+        // Filter out fixtures from deleted floors (floors not in the mapping)
+        return mapping.has(location.floorIndex);
+      })
+      .map(location => ({
+        ...location,
+        floorIndex: mapping.get(location.floorIndex) ?? location.floorIndex
+      }));
+  }, []);
+
+  // Helper function to apply floor remapping to floor plates data
+  const remapFloorPlatesData = useCallback((data: Record<string, Record<string, any[]>>, mapping: Map<number, number>): Record<string, Record<string, any[]>> => {
+    const newData: Record<string, Record<string, any[]>> = {};
+    Object.entries(data).forEach(([oldFloorStr, brandData]) => {
+      const oldFloor = parseInt(oldFloorStr);
+      const newFloor = mapping.get(oldFloor) ?? oldFloor;
+      newData[newFloor.toString()] = brandData;
+    });
+    return newData;
+  }, []);
+
+  // Helper function to rename floor files based on mapping
+  const remapFloorFileName = useCallback((fileName: string, mapping: Map<number, number>): string => {
+    const floorMatch = fileName.match(/(floor[_-]?)(\d+)/i);
+    if (floorMatch) {
+      const oldFloorNum = parseInt(floorMatch[2]);
+      const newFloorNum = mapping.get(oldFloorNum);
+
+      if (newFloorNum !== undefined) {
+        // Replace the floor number with the new mapped number
+        // Preserve the separator (dash or underscore) and case
+        const prefix = floorMatch[1]; // e.g., "floor-", "floor_", "Floor-", etc.
+        return fileName.replace(
+          /(floor[_-]?)(\d+)/i,
+          `${prefix}${newFloorNum}`
+        );
+      }
+    }
+    return fileName;
+  }, []);
+
   const handleDownloadGLB = useCallback(async () => {
     if (!selectedFile || isExporting) return;
     
@@ -454,10 +528,33 @@ const isFloorPlatesCsv = (name: string) => {
 const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const zip = new JSZip();
     log('Building modified ZIP...');
-    log('Extracted files:', extractedFiles.map(f => f.name));
+
+    // Check if floors need to be remapped
+    const floorMapping = getFloorIndexMapping();
+
+    // Apply floor remapping to data if needed
+    let workingLocationData = locationData;
+    let workingExtractedFiles = extractedFiles;
+
+    if (floorMapping) {
+      log('Applying floor remapping to export data');
+      workingLocationData = remapLocationData(locationData, floorMapping);
+
+      // Remap file names
+      workingExtractedFiles = extractedFiles.map(file => {
+        const newName = remapFloorFileName(file.name, floorMapping);
+        if (newName !== file.name) {
+          log(`Renaming file: ${file.name} -> ${newName}`);
+          return { ...file, name: newName };
+        }
+        return file;
+      });
+    }
+
+    log('Extracted files:', workingExtractedFiles.map(f => f.name));
 
     // Add all original files except the CSVs that need to be modified
-    for (const file of extractedFiles) {
+    for (const file of workingExtractedFiles) {
       if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
         log('Skipping original CSV in bundle:', file.name);
         continue;
@@ -465,14 +562,14 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       zip.file(file.name, file.blob);
     }
 
-    // Create modified location-master.csv
-    await createModifiedLocationMasterCSV(zip, deletedFixturePositions);
+    // Create modified location-master.csv using remapped data
+    await createModifiedLocationMasterCSV(zip, deletedFixturePositions, workingLocationData, workingExtractedFiles, floorMapping);
 
-    // Create modified floor plates CSV if there are floor plate changes, otherwise preserve original
-    if (modifiedFloorPlates.size > 0) {
-      await createModifiedFloorPlatesCSV(zip);
+    // Create modified floor plates CSV if there are floor plate changes or floor remapping, otherwise preserve original
+    if (modifiedFloorPlates.size > 0 || floorMapping) {
+      await createModifiedFloorPlatesCSV(zip, workingExtractedFiles, floorMapping);
     } else {
-      const originalFloorPlatesFile = extractedFiles.find((file) => isFloorPlatesCsv(file.name));
+      const originalFloorPlatesFile = workingExtractedFiles.find((file) => isFloorPlatesCsv(file.name));
       if (originalFloorPlatesFile) {
         log('No floor plate edits; keeping original:', originalFloorPlatesFile.name);
         zip.file(originalFloorPlatesFile.name, originalFloorPlatesFile.blob);
@@ -481,7 +578,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     log('Modified ZIP built.');
     const blob = await zip.generateAsync({ type: 'blob' });
     return blob;
-  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures]);
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
@@ -578,6 +675,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i) || floorFile.name.match(/(\d+)/i);
     const floorNumber = floorMatch ? parseInt(floorMatch[1]) : 0;
 
+    // Remove from floor display order
+    setFloorDisplayOrder(prev => prev.filter(idx => idx !== floorNumber));
+
     // Remove all fixtures on this floor
     setLocationData(prev => prev.filter(location => location.floorIndex !== floorNumber));
 
@@ -603,13 +703,45 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   }, [floorPlatesData]);
 
 
-  const handleMoveFloorUp = useCallback((_floorFile: ExtractedFile) => {
-    alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
-  }, []);
+  const handleMoveFloorUp = useCallback((floorFile: ExtractedFile) => {
+    // Extract floor index from the file
+    const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i) || floorFile.name.match(/(\d+)/i);
+    const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
 
-  const handleMoveFloorDown = useCallback((_floorFile: ExtractedFile) => {
-    alert('Floor reordering will be implemented in a future update. This would require renumbering floor indices in all related data.');
-  }, []);
+    // Find the position of this floor in the display order
+    const displayPosition = floorDisplayOrder.indexOf(floorIndex);
+
+    if (displayPosition <= 0) {
+      return; // Already at the top or not found
+    }
+
+    // Swap with the floor above
+    const newOrder = [...floorDisplayOrder];
+    [newOrder[displayPosition - 1], newOrder[displayPosition]] =
+      [newOrder[displayPosition], newOrder[displayPosition - 1]];
+
+    setFloorDisplayOrder(newOrder);
+  }, [floorDisplayOrder]);
+
+  const handleMoveFloorDown = useCallback((floorFile: ExtractedFile) => {
+    // Extract floor index from the file
+    const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i) || floorFile.name.match(/(\d+)/i);
+    const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Find the position of this floor in the display order
+    const displayPosition = floorDisplayOrder.indexOf(floorIndex);
+
+    if (displayPosition < 0 || displayPosition >= floorDisplayOrder.length - 1) {
+      return; // Already at the bottom or not found
+    }
+
+    // Swap with the floor below
+    const newOrder = [...floorDisplayOrder];
+    [newOrder[displayPosition], newOrder[displayPosition + 1]] =
+      [newOrder[displayPosition + 1], newOrder[displayPosition]];
+
+    setFloorDisplayOrder(newOrder);
+  }, [floorDisplayOrder]);
 
 
   // Event handlers for LeftControlPanel
@@ -703,26 +835,32 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: originalBrand } : null);
   }, []);
 
-  const createModifiedLocationMasterCSV = async (zip: JSZip, deletedPositions: Set<string>) => {
-    
+  const createModifiedLocationMasterCSV = async (
+    zip: JSZip,
+    deletedPositions: Set<string>,
+    workingLocationData: LocationData[] = locationData,
+    workingExtractedFiles: ExtractedFile[] = extractedFiles,
+    floorMapping?: Map<number, number> | null
+  ) => {
+
   // Find original location-master.csv (support hyphen/underscore variants)
-    const originalFile = extractedFiles.find(file => isLocationCsv(file.name));
-    
+    const originalFile = workingExtractedFiles.find(file => isLocationCsv(file.name));
+
     if (!originalFile) {
       console.warn('Original location-master.csv not found. Generating from current state.');
-      const generated = generateLocationCSVFromState();
+      const generated = generateLocationCSVFromState(workingLocationData);
       zip.file('location-master.csv', generated);
       return;
     }
-    
+
     // Read original CSV content directly from blob (avoid URL caching issues)
     const csvText = await originalFile.blob.text();
     const lines = csvText.split('\n');
     if (lines.length === 0) return;
-    
+
     // Keep header
     const modifiedLines = [lines[0]];
-    
+
     // Helper to build a stable key from original CSV coordinates
     const buildOriginalCsvKey = (block: string, x: number, y: number, z: number) =>
       `${block}-${x.toFixed(12)}-${y.toFixed(12)}-${z.toFixed(1)}`;
@@ -737,39 +875,40 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     // Build fast lookup: current locations by their original CSV key (without timestamp)
     const currentByOriginalKey = new Map<string, LocationData>();
-    for (const loc of locationData) {
+    for (const loc of workingLocationData) {
       const key = getLocationOriginalKey(loc);
       currentByOriginalKey.set(key, loc);
     }
     // Track processed fixtures to identify duplicates
     const originalFixtures = new Set<string>();
-    let updated = 0; let notFoundKept = 0; let deletedCount = 0; let duplicatesAdded = 0;
+    let updated = 0; let notFoundKept = 0; let deletedCount = 0; let duplicatesAdded = 0; let deletedFloorCount = 0;
     const unmatchedSamples: string[] = [];
-    
+
     // Process each data line
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
-      
+
       // Always keep empty lines and lines that don't parse correctly
       if (!line.trim()) {
         modifiedLines.push(line);
         continue;
       }
-      
+
       const values = line.split(',');
-      
+
       // Always keep the line, even if it doesn't have enough columns
       if (values.length < 12) {
         modifiedLines.push(line);
         continue;
       }
-      
+
       // Try to parse the position data (using current CSV format indices)
-      let blockName, posX, posY, posZ;
+      let blockName, posX, posY, posZ, floorIndex;
       try {
         const clean = (val: string) => val.replace(/"/g, '').trim();
         blockName = clean(values[0]);
         values[0] = blockName;
+        floorIndex = parseInt(clean(values[1] || '0'));
         posX = Number.parseFloat(clean(values[5] || ''));
         posY = Number.parseFloat(clean(values[6] || ''));
         posZ = Number.parseFloat(clean(values[7] || ''));
@@ -781,20 +920,27 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         modifiedLines.push(line);
         continue;
       }
-      
+
+      // If floor mapping exists, check if this fixture's floor has been deleted
+      if (floorMapping && !floorMapping.has(floorIndex)) {
+        // This fixture is on a deleted floor, skip it
+        deletedFloorCount++;
+        continue;
+      }
+
       // Find matching location by original CSV key (deterministic)
       const originalKey = buildOriginalCsvKey(blockName, posX, posY, posZ);
       let matchingLocation = currentByOriginalKey.get(originalKey);
-      
+
       if (!matchingLocation) {
         // If no matching location found, check if this CSV row represents a deleted fixture
         const csvPositionKey = `${blockName}-${posX.toFixed(3)}-${posY.toFixed(3)}-${posZ.toFixed(3)}`;
-        
+
         if (deletedPositions.has(csvPositionKey)) {
           deletedCount++;
           continue; // Skip this CSV row as it represents a deleted fixture
         }
-        
+
         // If not deleted, keep the original line
         modifiedLines.push(line);
         notFoundKept++;
@@ -820,24 +966,27 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       
       // Update position and rotation with current values from the matched location
       if (currentLocationData) {
+        // Use current floor index (which includes any floor reordering)
+        values[1] = currentLocationData.floorIndex.toString();  // Floor Index
+
         // Use current position (which includes any moves)
         values[5] = currentLocationData.posX.toFixed(12);  // Pos X (m)
         values[6] = currentLocationData.posY.toFixed(12);  // Pos Y (m)
         values[7] = currentLocationData.posZ.toFixed(1);   // Pos Z (m)
-        
+
         // Use current rotation (which includes any rotations)
         values[8] = currentLocationData.rotationX.toFixed(1);  // Rotation X (deg)
         values[9] = currentLocationData.rotationY.toFixed(1);  // Rotation Y (deg)
         values[10] = currentLocationData.rotationZ.toFixed(1); // Rotation Z (deg)
-        
+
         // Use current brand (which includes any brand changes)
         values[11] = currentLocationData.brand;
-        
+
         // Use current count (which includes any count changes)
         if (values.length > 12) {
           values[12] = currentLocationData.count.toString();
         }
-        
+
         // Use current hierarchy (which includes any hierarchy changes)
         if (values.length > 13) {
           values[13] = currentLocationData.hierarchy.toString();
@@ -856,9 +1005,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
     
     // Add any duplicated fixtures that weren't in the original CSV
-    locationData.forEach(location => {
+    workingLocationData.forEach(location => {
       const originalLocationKey = getLocationOriginalKey(location);
-      
+
       // If this fixture wasn't in the original CSV (by original UID), it's a duplicate
       if (!originalFixtures.has(originalLocationKey)) {
         // Create CSV line for duplicated fixture using correct 14-column structure
@@ -878,7 +1027,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           location.count.toString(),     // 12: Count
           location.hierarchy.toString()  // 13: Hierarchy
         ].join(',');
-        
+
         modifiedLines.push(csvLine);
         duplicatesAdded++;
       }
@@ -890,12 +1039,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     if (unmatchedSamples.length > 0) {
       log('Unmatched CSV rows (sample):', unmatchedSamples);
     }
-    log('Location CSV summary:', { updated, notFoundKept, deleted: deletedCount, duplicatesAdded, outLines: modifiedLines.length });
+    log('Location CSV summary:', { updated, notFoundKept, deleted: deletedCount, deletedFloorCount, duplicatesAdded, outLines: modifiedLines.length });
   };
 
-  const generateLocationCSVFromState = () => {
+  const generateLocationCSVFromState = (data: LocationData[] = locationData) => {
     const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy';
-    const rows = locationData.map(loc => [
+    const rows = data.map(loc => [
       loc.blockName,
       loc.floorIndex,
       0, 0, 0,
@@ -914,46 +1063,64 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     return csv;
   };
 
-  const createModifiedFloorPlatesCSV = async (zip: JSZip) => {
+  const createModifiedFloorPlatesCSV = async (
+    zip: JSZip,
+    workingExtractedFiles: ExtractedFile[] = extractedFiles,
+    floorMapping?: Map<number, number> | null
+  ) => {
     // Find original floor plates CSV
-    const originalFile = extractedFiles.find(file => isFloorPlatesCsv(file.name));
-    
+    const originalFile = workingExtractedFiles.find(file => isFloorPlatesCsv(file.name));
+
     if (!originalFile) {
       console.warn('Original floor plates CSV not found');
       return;
     }
-    
+
     // Read original CSV content directly from blob (avoid URL caching issues)
     const csvText = await originalFile.blob.text();
     const lines = csvText.split('\n');
-    
+
     if (lines.length === 0) return;
-    
+
     // Keep header
     const modifiedLines = [lines[0]];
-    
+
     // Process each data line
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
-      
+
       // Always keep empty lines
       if (!line.trim()) {
         modifiedLines.push(line);
         continue;
       }
-      
+
       const values = line.split(',');
-      
+
       // Always keep the line, even if it doesn't have enough columns
       if (values.length < 12) {
         modifiedLines.push(line);
         continue;
       }
-      
-      // Try to update brand if this floor plate was modified
+
+      // Try to update floor index and brand
       try {
+        // Handle floor index remapping if floor mapping exists
+        if (floorMapping) {
+          const oldFloorIndex = parseInt(values[0]);
+          const newFloorIndex = floorMapping.get(oldFloorIndex);
+
+          if (newFloorIndex !== undefined) {
+            // Remap the floor index
+            values[0] = newFloorIndex.toString();
+          } else {
+            // This floor was deleted, skip this row
+            continue;
+          }
+        }
+
         const meshName = values[11]; // meshName is at index 11
-        
+
         // Check if this floor plate has been modified
         const modifiedData = modifiedFloorPlates.get(meshName);
         if (modifiedData && modifiedData.brand !== values[2]) {
@@ -965,13 +1132,14 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         modifiedLines.push(line);
         continue;
       }
-      
+
       modifiedLines.push(values.join(','));
     }
-    
+
     // Add modified CSV to zip
     const modifiedCSV = modifiedLines.join('\n');
     zip.file(originalFile.name, modifiedCSV);
+    log('Floor plates CSV summary:', { totalLines: modifiedLines.length, floorMappingApplied: !!floorMapping });
   };
 
   // Log summary of failed GLBs once
@@ -1198,6 +1366,31 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     loadStores();
   }, []); // Only run once on component mount
+
+  // Initialize floor display order when GLB files change
+  useEffect(() => {
+    if (glbFiles.length > 0) {
+      // Extract floor numbers from GLB files
+      const floorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+      const floorIndices = floorFiles.map(file => {
+        const match = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
+        return match ? parseInt(match[1]) : 0;
+      }).sort((a, b) => a - b);
+
+      // Only update if the order has changed or not yet initialized
+      const orderChanged = floorDisplayOrder.length !== floorIndices.length ||
+        floorDisplayOrder.some((idx, i) => idx !== floorIndices[i]);
+
+      if (orderChanged) {
+        setFloorDisplayOrder(floorIndices);
+
+        // Set initial floor count only on first initialization (when it's 0)
+        if (initialFloorCount === 0 && floorIndices.length > 0) {
+          setInitialFloorCount(floorIndices.length);
+        }
+      }
+    }
+  }, [glbFiles, floorDisplayOrder, initialFloorCount]);
 
   // Extract unique brands from location data for current floor
   useEffect(() => {
@@ -1540,6 +1733,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           deletedFixtures={deletedFixtures}
           locationData={locationData}
           jobId={jobId}
+          floorDisplayOrder={floorDisplayOrder}
+          initialFloorCount={initialFloorCount}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
@@ -1707,6 +1902,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onDeleteFloor={handleDeleteFloor}
         onMoveFloorUp={handleMoveFloorUp}
         onMoveFloorDown={handleMoveFloorDown}
+        floorDisplayOrder={floorDisplayOrder}
       />
 
       {/* Save Store Dialog */}

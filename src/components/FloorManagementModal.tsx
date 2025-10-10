@@ -13,6 +13,7 @@ interface FloorManagementModalProps {
   onDeleteFloor?: (floorFile: ExtractedFile) => void;
   onMoveFloorUp?: (floorFile: ExtractedFile) => void;
   onMoveFloorDown?: (floorFile: ExtractedFile) => void;
+  floorDisplayOrder?: number[]; // Optional display order for floors
 }
 
 export function FloorManagementModal({
@@ -24,16 +25,37 @@ export function FloorManagementModal({
   onDeleteFloor,
   onMoveFloorUp,
   onMoveFloorDown,
+  floorDisplayOrder,
 }: FloorManagementModalProps) {
   // Filter floor files (exclude shattered floor plates)
   const floorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
 
-  // Sort floors by floor number for consistent ordering
+  // Sort floors by display order if provided, otherwise by floor number
   const sortedFloorFiles = [...floorFiles].sort((a, b) => {
     const getFloorNumber = (filename: string) => {
       const match = filename.match(/floor[_-]?(\d+)/i) || filename.match(/(\d+)/i);
       return match ? parseInt(match[1]) : 0;
     };
+
+    if (floorDisplayOrder && floorDisplayOrder.length > 0) {
+      // Use display order for sorting
+      const aFloorNum = getFloorNumber(a.name);
+      const bFloorNum = getFloorNumber(b.name);
+      const aPos = floorDisplayOrder.indexOf(aFloorNum);
+      const bPos = floorDisplayOrder.indexOf(bFloorNum);
+
+      // If both are in the display order, sort by position
+      if (aPos >= 0 && bPos >= 0) {
+        return aPos - bPos;
+      }
+      // If only one is in the display order, it comes first
+      if (aPos >= 0) return -1;
+      if (bPos >= 0) return 1;
+      // If neither is in the display order, sort by floor number
+      return aFloorNum - bFloorNum;
+    }
+
+    // Default: sort by floor number
     return getFloorNumber(a.name) - getFloorNumber(b.name);
   });
 

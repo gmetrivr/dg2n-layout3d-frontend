@@ -11,7 +11,7 @@ interface LeftControlPanelProps {
   selectedFile: ExtractedFile | null;
   selectedFloorFile: ExtractedFile | null;
   extractedFiles: ExtractedFile[];
-  
+
   // UI state
   showSpheres: boolean;
   showWireframe: boolean;
@@ -20,29 +20,33 @@ interface LeftControlPanelProps {
   editMode: boolean;
   editFloorplatesMode: boolean;
   transformSpace: 'world' | 'local';
-  
+
   // Fixture data
   fixtureTypes: string[];
   selectedFixtureType: string;
   brands: string[];
   selectedBrand: string;
-  
+
   // Floor plates data
   floorPlatesData: Record<string, Record<string, any[]>>;
   modifiedFloorPlates: Map<string, any>;
   getBrandCategory: (brand: string) => 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' | 'legacy';
-  
+
   // Export state
   isExporting: boolean;
   isExportingZip: boolean;
-  
-  // Changed data tracking  
+
+  // Changed data tracking
   deletedFixtures: Set<string>;
   locationData: any[]; // For detecting duplicated fixtures and modifications
-  
+
   // Job info
   jobId?: string | null;
-  
+
+  // Floor display order
+  floorDisplayOrder?: number[];
+  initialFloorCount?: number;
+
   // Event handlers
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
@@ -83,6 +87,8 @@ export function LeftControlPanel({
   deletedFixtures,
   locationData,
   jobId,
+  floorDisplayOrder,
+  initialFloorCount,
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
@@ -99,20 +105,79 @@ export function LeftControlPanel({
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  // Sort floor files by display order
+  const getSortedFloorFiles = () => {
+    const floorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+
+    if (!floorDisplayOrder || floorDisplayOrder.length === 0) {
+      // No display order, sort by floor number
+      return floorFiles.sort((a, b) => {
+        const getFloorNumber = (filename: string) => {
+          const match = filename.match(/floor[_-]?(\d+)/i) || filename.match(/(\d+)/i);
+          return match ? parseInt(match[1]) : 0;
+        };
+        return getFloorNumber(a.name) - getFloorNumber(b.name);
+      });
+    }
+
+    // Sort by display order
+    return floorFiles.sort((a, b) => {
+      const getFloorNumber = (filename: string) => {
+        const match = filename.match(/floor[_-]?(\d+)/i) || filename.match(/(\d+)/i);
+        return match ? parseInt(match[1]) : 0;
+      };
+
+      const aFloorNum = getFloorNumber(a.name);
+      const bFloorNum = getFloorNumber(b.name);
+      const aPos = floorDisplayOrder.indexOf(aFloorNum);
+      const bPos = floorDisplayOrder.indexOf(bFloorNum);
+
+      // If both are in the display order, sort by position
+      if (aPos >= 0 && bPos >= 0) {
+        return aPos - bPos;
+      }
+      // If only one is in the display order, it comes first
+      if (aPos >= 0) return -1;
+      if (bPos >= 0) return 1;
+      // If neither is in the display order, sort by floor number
+      return aFloorNum - bFloorNum;
+    });
+  };
   
   // Function to detect if there are duplicated fixtures
   // Duplicated fixtures are those with _updateTimestamp (added after initial load)
   const hasDuplicatedFixtures = () => {
     return locationData.some(location => location._updateTimestamp !== undefined);
   };
-  
+
+  // Function to detect if floors have been reordered
+  const hasFloorReordering = () => {
+    if (!floorDisplayOrder || floorDisplayOrder.length === 0) return false;
+
+    // Check if the display order is different from the natural sorted order
+    const originalOrder = [...floorDisplayOrder].sort((a, b) => a - b);
+    return floorDisplayOrder.some((idx, i) => idx !== originalOrder[i]);
+  };
+
+  // Function to detect if floors have been deleted
+  const hasFloorDeletion = () => {
+    if (!floorDisplayOrder || floorDisplayOrder.length === 0) return false;
+    if (!initialFloorCount || initialFloorCount === 0) return false;
+
+    // If display order has fewer floors than the initial count, some were deleted
+    return floorDisplayOrder.length < initialFloorCount;
+  };
+
   // Check if there are any changes that warrant downloading the zip using embedded data
-  const hasChanges = locationData.some(location => 
-    location.wasMoved || location.wasRotated || location.wasTypeChanged || 
+  const hasChanges = locationData.some(location =>
+    location.wasMoved || location.wasRotated || location.wasTypeChanged ||
     location.wasBrandChanged || location.wasCountChanged || location.wasHierarchyChanged
   ) || modifiedFloorPlates.size > 0 ||
                     deletedFixtures.size > 0 ||
-                    hasDuplicatedFixtures();
+                    hasDuplicatedFixtures() ||
+                    hasFloorReordering() ||
+                    hasFloorDeletion();
 
   return (
     <div className="absolute top-4 left-4 z-50">
@@ -170,14 +235,11 @@ export function LeftControlPanel({
             }}
             className="w-48"
           >
-            {glbFiles
-              .filter(file => !file.name.includes('dg2n-shattered-floor-plates-'))
-              .map((file) => (
-                <option key={file.name} value={file.name}>
-                  {getGlbTitle(file.name)}
-                </option>
-              ))
-            }
+            {getSortedFloorFiles().map((file) => (
+              <option key={file.name} value={file.name}>
+                {getGlbTitle(file.name)}
+              </option>
+            ))}
           </Select>
         </div>
         
