@@ -1149,6 +1149,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   }, [failedGLBs]);
 
+  // Helper function to select the floor with the lowest floor number
+  const selectLowestFloorFile = (floorFiles: ExtractedFile[]) => {
+    if (floorFiles.length === 0) return null;
+
+    // Sort by floor number and pick the lowest
+    const sortedFloors = [...floorFiles].sort((a, b) => {
+      const aMatch = a.name.match(/floor[_-]?(\d+)/i) || a.name.match(/(\d+)/i);
+      const bMatch = b.name.match(/floor[_-]?(\d+)/i) || b.name.match(/(\d+)/i);
+      const aNum = aMatch ? parseInt(aMatch[1]) : 999;
+      const bNum = bMatch ? parseInt(bMatch[1]) : 999;
+      return aNum - bNum;
+    });
+
+    return sortedFloors[0];
+  };
+
   const handleFileUpload = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.zip')) {
       setError('Please upload a ZIP file');
@@ -1163,19 +1179,20 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       setExtractedFiles(files);
 
       // Filter GLB files - include both original floor files and shattered floor plates for switching
-      const glbFiles = files.filter(file => 
+      const glbFiles = files.filter(file =>
         file.name.toLowerCase().endsWith('.glb') &&
-        (file.name.includes('dg2n-3d-floor-') || 
+        (file.name.includes('dg2n-3d-floor-') ||
          file.name.includes('dg2n-shattered-floor-plates-') ||
          !file.name.includes('floor'))
       );
       setGlbFiles(glbFiles);
-      
-      // Select first original floor GLB file by default (not shattered)
+
+      // Select floor with lowest floor number by default (not shattered)
       const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
-      if (originalFloorFiles.length > 0) {
-        setSelectedFile(originalFloorFiles[0]);
-        setSelectedFloorFile(originalFloorFiles[0]); // Initialize dropdown state
+      const lowestFloor = selectLowestFloorFile(originalFloorFiles);
+      if (lowestFloor) {
+        setSelectedFile(lowestFloor);
+        setSelectedFloorFile(lowestFloor); // Initialize dropdown state
       }
     } catch (err) {
       console.error('Failed to extract zip file:', err);
@@ -1214,9 +1231,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         setGlbFiles(glbFiles);
 
         const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
-        if (originalFloorFiles.length > 0) {
-          setSelectedFile(originalFloorFiles[0]);
-          setSelectedFloorFile(originalFloorFiles[0]);
+        const lowestFloor = selectLowestFloorFile(originalFloorFiles);
+        if (lowestFloor) {
+          setSelectedFile(lowestFloor);
+          setSelectedFloorFile(lowestFloor);
         }
 
       } catch (err) {
@@ -1258,9 +1276,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         setGlbFiles(glbFiles);
 
         const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
-        if (originalFloorFiles.length > 0) {
-          setSelectedFile(originalFloorFiles[0]);
-          setSelectedFloorFile(originalFloorFiles[0]);
+        const lowestFloor = selectLowestFloorFile(originalFloorFiles);
+        if (lowestFloor) {
+          setSelectedFile(lowestFloor);
+          setSelectedFloorFile(lowestFloor);
         }
       } catch (err) {
         console.error('Failed to load zip from URL:', err);
@@ -1289,9 +1308,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         setGlbFiles(glbFiles);
 
         const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
-        if (originalFloorFiles.length > 0) {
-          setSelectedFile(originalFloorFiles[0]);
-          setSelectedFloorFile(originalFloorFiles[0]);
+        const lowestFloor = selectLowestFloorFile(originalFloorFiles);
+        if (lowestFloor) {
+          setSelectedFile(lowestFloor);
+          setSelectedFloorFile(lowestFloor);
         }
       } catch (err) {
         console.error('Failed to load zip from Supabase:', err);
@@ -1377,11 +1397,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         return match ? parseInt(match[1]) : 0;
       }).sort((a, b) => a - b);
 
-      // Only update if the order has changed or not yet initialized
-      const orderChanged = floorDisplayOrder.length !== floorIndices.length ||
-        floorDisplayOrder.some((idx, i) => idx !== floorIndices[i]);
-
-      if (orderChanged) {
+      // Only initialize if not yet set or if floor count changed (floor added/removed)
+      if (floorDisplayOrder.length === 0 || floorDisplayOrder.length !== floorIndices.length) {
         setFloorDisplayOrder(floorIndices);
 
         // Set initial floor count only on first initialization (when it's 0)
@@ -1390,7 +1407,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
       }
     }
-  }, [glbFiles, floorDisplayOrder, initialFloorCount]);
+  }, [glbFiles, initialFloorCount]);
 
   // Extract unique brands from location data for current floor
   useEffect(() => {
