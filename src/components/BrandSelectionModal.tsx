@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from "@/shadcn/components/ui/button";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   DialogDescription,
-  DialogClose 
+  DialogClose
 } from "@/shadcn/components/ui/dialog";
-import { Tag, Check, Loader2 } from 'lucide-react';
+import { Tag, Check, Loader2, Search } from 'lucide-react';
 import { apiService, type BrandCategoriesResponse } from '../services/api';
 
 interface BrandSelectionModalProps {
@@ -29,10 +29,62 @@ export function BrandSelectionModal({
   const [selectedBrand, setSelectedBrand] = useState<string>(currentBrand);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   useEffect(() => {
     setSelectedBrand(currentBrand);
+    setSearchQuery(''); // Reset search when modal opens
   }, [currentBrand, open]);
+
+  // Filter brands based on search query
+  const filteredBrandCategories = useMemo(() => {
+    if (!brandCategories || !searchQuery.trim()) {
+      return brandCategories;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filterItems = (items: string[]) =>
+      items.filter(brand => brand.toLowerCase().includes(query));
+
+    return {
+      ...brandCategories,
+      categories: {
+        brands: {
+          private_label: {
+            ...brandCategories.categories.brands.private_label,
+            items: filterItems(brandCategories.categories.brands.private_label.items)
+          },
+          external: {
+            ...brandCategories.categories.brands.external,
+            items: filterItems(brandCategories.categories.brands.external.items)
+          }
+        },
+        areas: {
+          general: {
+            ...brandCategories.categories.areas.general,
+            items: filterItems(brandCategories.categories.areas.general.items)
+          },
+          architectural: {
+            ...brandCategories.categories.areas.architectural,
+            items: filterItems(brandCategories.categories.areas.architectural.items)
+          },
+          other: {
+            ...brandCategories.categories.areas.other,
+            items: filterItems(brandCategories.categories.areas.other.items)
+          }
+        }
+      }
+    };
+  }, [brandCategories, searchQuery]);
+
+  // Filter flat brands list
+  const filteredBrands = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return brands;
+    }
+    const query = searchQuery.toLowerCase();
+    return brands.filter(brand => brand.toLowerCase().includes(query));
+  }, [brands, searchQuery]);
 
   // Fetch brands when modal opens
   useEffect(() => {
@@ -110,10 +162,22 @@ export function BrandSelectionModal({
           </div>
         </DialogHeader>
 
-        <div className="px-6 pb-4">
+        <div className="px-6 pb-4 space-y-4">
           <DialogDescription>
             Select a brand for this floor plate. The floor plate will be updated with the new brand color.
           </DialogDescription>
+
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search brands..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+            />
+          </div>
         </div>
 
         {error && (
@@ -138,71 +202,71 @@ export function BrandSelectionModal({
                 Current Brand: <span className="text-primary">{currentBrand}</span>
               </div>
               
-              <div className="max-h-96 overflow-y-auto space-y-4">
-                {brandCategories ? (
+              <div className="h-96 overflow-y-auto space-y-4">
+                {filteredBrandCategories ? (
                   // Organized by categories
                   <>
                     {/* Private Label Brands */}
-                    {brandCategories.categories.brands.private_label.items.length > 0 && (
+                    {filteredBrandCategories.categories.brands.private_label.items.length > 0 && (
                       <div>
                         <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ backgroundColor: '#4169e1' }}></div>
-                          {brandCategories.categories.brands.private_label.description}
+                          {filteredBrandCategories.categories.brands.private_label.description}
                         </h4>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                          {brandCategories.categories.brands.private_label.items.map(renderBrandButton)}
+                          {filteredBrandCategories.categories.brands.private_label.items.map(renderBrandButton)}
                         </div>
                       </div>
                     )}
-                    
+
                     {/* External Brands */}
-                    {brandCategories.categories.brands.external.items.length > 0 && (
+                    {filteredBrandCategories.categories.brands.external.items.length > 0 && (
                       <div>
                         <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ backgroundColor: '#32cd32' }}></div>
-                          {brandCategories.categories.brands.external.description}
+                          {filteredBrandCategories.categories.brands.external.description}
                         </h4>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                          {brandCategories.categories.brands.external.items.map(renderBrandButton)}
+                          {filteredBrandCategories.categories.brands.external.items.map(renderBrandButton)}
                         </div>
                       </div>
                     )}
-                    
+
                     {/* General Areas */}
-                    {brandCategories.categories.areas.general.items.length > 0 && (
+                    {filteredBrandCategories.categories.areas.general.items.length > 0 && (
                       <div>
                         <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ffa500' }}></div>
-                          {brandCategories.categories.areas.general.description}
+                          {filteredBrandCategories.categories.areas.general.description}
                         </h4>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                          {brandCategories.categories.areas.general.items.map(renderBrandButton)}
+                          {filteredBrandCategories.categories.areas.general.items.map(renderBrandButton)}
                         </div>
                       </div>
                     )}
-                    
+
                     {/* Architectural Areas */}
-                    {brandCategories.categories.areas.architectural.items.length > 0 && (
+                    {filteredBrandCategories.categories.areas.architectural.items.length > 0 && (
                       <div>
                         <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ backgroundColor: '#808080' }}></div>
-                          {brandCategories.categories.areas.architectural.description}
+                          {filteredBrandCategories.categories.areas.architectural.description}
                         </h4>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                          {brandCategories.categories.areas.architectural.items.map(renderBrandButton)}
+                          {filteredBrandCategories.categories.areas.architectural.items.map(renderBrandButton)}
                         </div>
                       </div>
                     )}
-                    
+
                     {/* Other/Unassigned */}
-                    {brandCategories.categories.areas.other.items.length > 0 && (
+                    {filteredBrandCategories.categories.areas.other.items.length > 0 && (
                       <div>
                         <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
                           <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ff0000' }}></div>
-                          {brandCategories.categories.areas.other.description}
+                          {filteredBrandCategories.categories.areas.other.description}
                         </h4>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                          {brandCategories.categories.areas.other.items.map(renderBrandButton)}
+                          {filteredBrandCategories.categories.areas.other.items.map(renderBrandButton)}
                         </div>
                       </div>
                     )}
@@ -210,7 +274,19 @@ export function BrandSelectionModal({
                 ) : (
                   // Fallback: flat list
                   <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                    {brands.map(renderBrandButton)}
+                    {filteredBrands.map(renderBrandButton)}
+                  </div>
+                )}
+
+                {/* No results message */}
+                {searchQuery.trim() && filteredBrands.length === 0 && (!filteredBrandCategories ||
+                  (filteredBrandCategories.categories.brands.private_label.items.length === 0 &&
+                   filteredBrandCategories.categories.brands.external.items.length === 0 &&
+                   filteredBrandCategories.categories.areas.general.items.length === 0 &&
+                   filteredBrandCategories.categories.areas.architectural.items.length === 0 &&
+                   filteredBrandCategories.categories.areas.other.items.length === 0)) && (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground text-sm">No brands found matching "{searchQuery}"</p>
                   </div>
                 )}
               </div>
@@ -219,7 +295,20 @@ export function BrandSelectionModal({
 
           <div className="flex items-center justify-between pt-4 border-t border-border">
             <div className="text-xs text-muted-foreground">
-              {brands.length} brands available
+              {searchQuery.trim() ? (
+                <>
+                  {filteredBrandCategories ?
+                    (filteredBrandCategories.categories.brands.private_label.items.length +
+                     filteredBrandCategories.categories.brands.external.items.length +
+                     filteredBrandCategories.categories.areas.general.items.length +
+                     filteredBrandCategories.categories.areas.architectural.items.length +
+                     filteredBrandCategories.categories.areas.other.items.length) :
+                    filteredBrands.length
+                  } of {brands.length} brands shown
+                </>
+              ) : (
+                `${brands.length} brands available`
+              )}
             </div>
             
             <div className="flex gap-2">
