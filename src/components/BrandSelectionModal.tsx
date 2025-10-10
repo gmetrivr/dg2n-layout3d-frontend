@@ -36,15 +36,19 @@ export function BrandSelectionModal({
     setSearchQuery(''); // Reset search when modal opens
   }, [currentBrand, open]);
 
-  // Filter brands based on search query
+  // Filter and sort brands based on search query
   const filteredBrandCategories = useMemo(() => {
-    if (!brandCategories || !searchQuery.trim()) {
+    if (!brandCategories) {
       return brandCategories;
     }
 
     const query = searchQuery.toLowerCase();
-    const filterItems = (items: string[]) =>
-      items.filter(brand => brand.toLowerCase().includes(query));
+    const filterAndSortItems = (items: string[]) => {
+      const filtered = searchQuery.trim()
+        ? items.filter(brand => brand.toLowerCase().includes(query))
+        : items;
+      return filtered.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    };
 
     return {
       ...brandCategories,
@@ -52,38 +56,38 @@ export function BrandSelectionModal({
         brands: {
           private_label: {
             ...brandCategories.categories.brands.private_label,
-            items: filterItems(brandCategories.categories.brands.private_label.items)
+            items: filterAndSortItems(brandCategories.categories.brands.private_label.items)
           },
           external: {
             ...brandCategories.categories.brands.external,
-            items: filterItems(brandCategories.categories.brands.external.items)
+            items: filterAndSortItems(brandCategories.categories.brands.external.items)
           }
         },
         areas: {
           general: {
             ...brandCategories.categories.areas.general,
-            items: filterItems(brandCategories.categories.areas.general.items)
+            items: filterAndSortItems(brandCategories.categories.areas.general.items)
           },
           architectural: {
             ...brandCategories.categories.areas.architectural,
-            items: filterItems(brandCategories.categories.areas.architectural.items)
+            items: filterAndSortItems(brandCategories.categories.areas.architectural.items)
           },
           other: {
             ...brandCategories.categories.areas.other,
-            items: filterItems(brandCategories.categories.areas.other.items)
+            items: filterAndSortItems(brandCategories.categories.areas.other.items)
           }
         }
       }
     };
   }, [brandCategories, searchQuery]);
 
-  // Filter flat brands list
+  // Filter and sort flat brands list
   const filteredBrands = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return brands;
-    }
     const query = searchQuery.toLowerCase();
-    return brands.filter(brand => brand.toLowerCase().includes(query));
+    const filtered = searchQuery.trim()
+      ? brands.filter(brand => brand.toLowerCase().includes(query))
+      : brands;
+    return filtered.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [brands, searchQuery]);
 
   // Fetch brands when modal opens
