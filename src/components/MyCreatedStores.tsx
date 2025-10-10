@@ -316,7 +316,7 @@ export function MyCreatedStores() {
                       >
                         Edit
                       </Button>
-                      <Button
+                      {/* <Button
                         variant="link"
                         className="px-0 text-destructive"
                         disabled={deletingId === r.id}
@@ -335,7 +335,7 @@ export function MyCreatedStores() {
                         }}
                       >
                         Delete
-                      </Button>
+                      </Button> */}
                       <Button
                         variant="link"
                         className="px-0"
