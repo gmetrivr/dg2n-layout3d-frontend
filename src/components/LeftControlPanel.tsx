@@ -181,7 +181,7 @@ export function LeftControlPanel({
 
   return (
     <div className="absolute top-4 left-4 z-50">
-      <div className="bg-background/90 backdrop-blur-sm border border-border rounded-lg shadow-lg">
+      <div className="bg-background/90 backdrop-blur-sm border border-border rounded-lg shadow-lg w-64">
         {/* Controls Header */}
         <div 
           className="flex items-center justify-between p-3 cursor-pointer hover:bg-background/60 transition-colors rounded-t-lg"
