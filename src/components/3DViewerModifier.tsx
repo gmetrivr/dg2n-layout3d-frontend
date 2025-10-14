@@ -90,6 +90,7 @@ export function ThreeDViewerModifier() {
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
+  const [currentOrbitTarget, setCurrentOrbitTarget] = useState<[number, number, number]>([0, 0, 0]); // Separate state for add fixture position
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
@@ -104,6 +105,8 @@ export function ThreeDViewerModifier() {
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
+  const [addFixtureModalOpen, setAddFixtureModalOpen] = useState(false);
+  const [isAddingFixture, setIsAddingFixture] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -334,6 +337,114 @@ export function ThreeDViewerModifier() {
       // Could add error toast here
     }
   }, [selectedLocation, fixtureTypeMap]);
+
+  const handleAddFixture = useCallback(async (fixtureType: string) => {
+    try {
+      // Get the current floor index from the selected floor file
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+      // Get the GLB URL for the fixture type
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(fixtureType);
+      const glbUrl = fixtureTypeInfo.glb_url;
+
+      // Find the mapped blockName for this fixture type
+      const mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+        blockName => FIXTURE_TYPE_MAPPING[blockName] === fixtureType
+      ) || fixtureType; // fallback to fixtureType if not found in mapping
+
+      // Preload the GLB
+      useGLTF.preload(glbUrl);
+
+      // Update the fixture cache with new GLB URL
+      setFixtureCache(prev => {
+        const newCache = new Map(prev);
+        newCache.set(mappedBlockName, glbUrl);
+        return newCache;
+      });
+
+      // Update the fixture type map
+      setFixtureTypeMap(prev => {
+        const newMap = new Map(prev);
+        newMap.set(mappedBlockName, fixtureType);
+        return newMap;
+      });
+
+      // Calculate position at screen center (currentOrbitTarget) with y=0
+      // Note: currentOrbitTarget is [x, y, z] in world space
+      // LocationData uses [posX, posY, posZ] where posY is actually the -Z world axis
+      const posX = currentOrbitTarget[0];
+      const posY = -currentOrbitTarget[2]; // World Z maps to -posY
+      const posZ = 0; // Always 0 (floor level)
+
+      // Calculate hierarchy as max+1 from current floor fixtures
+      const currentFloorFixtures = locationData.filter(loc => loc.floorIndex === currentFloor);
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const newHierarchy = maxHierarchy + 1;
+
+      // Default brand is "unassigned"
+      const defaultBrand = "unassigned";
+
+      // Default count is 1
+      const defaultCount = 1;
+
+      // Create new fixture location data
+      const newFixture: LocationData = {
+        blockName: mappedBlockName,
+        floorIndex: currentFloor,
+        posX: posX,
+        posY: posY,
+        posZ: posZ,
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
+        brand: defaultBrand,
+        count: defaultCount,
+        hierarchy: newHierarchy,
+        glbUrl: glbUrl,
+
+        // Set original values (same as current for new fixtures)
+        originalBlockName: mappedBlockName,
+        originalPosX: posX,
+        originalPosY: posY,
+        originalPosZ: posZ,
+        originalRotationX: 0,
+        originalRotationY: 0,
+        originalRotationZ: 0,
+        originalBrand: defaultBrand,
+        originalCount: defaultCount,
+        originalHierarchy: newHierarchy,
+        originalGlbUrl: glbUrl,
+
+        // Mark as new fixture
+        wasDuplicated: true, // Reuse this flag to indicate it's a newly added fixture
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+
+        // Generate unique timestamps
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000,
+      };
+
+      // Add to location data
+      setLocationData(prev => [...prev, newFixture]);
+
+      // Select the newly added fixture
+      setSelectedLocation(newFixture);
+      setSelectedLocations([newFixture]);
+
+    } catch (error) {
+      console.error('Failed to add fixture:', error);
+      alert('Failed to add fixture. Please try again.');
+    }
+  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, setFixtureCache, setFixtureTypeMap]);
 
   // Helper function to get floor index mapping if floors have been reordered or deleted
   const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
@@ -1766,6 +1877,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onDownloadModifiedZip={handleDownloadModifiedZip}
           onSaveStoreClick={() => setSaveDialogOpen(true)}
           onManageFloorsClick={() => setFloorManagementModalOpen(true)}
+          onAddFixtureClick={() => {
+            setIsAddingFixture(true);
+            setAddFixtureModalOpen(true);
+          }}
         />
         <Canvas3D
           cameraPosition={cameraPosition}
@@ -1803,6 +1918,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             }
           }}
           setIsTransforming={setIsTransforming}
+          onOrbitTargetUpdate={setCurrentOrbitTarget}
         />
         
         {/* Show MultiRightInfoPanel when multiple fixtures are selected */}
@@ -1893,15 +2009,28 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onBrandSelect={selectedFloorPlate ? handleBrandChange : handleFixtureBrandChange}
       />
       
-      {/* Fixture Type Selection Modal */}
+      {/* Fixture Type Selection Modal - used for both changing and adding fixtures */}
       <FixtureTypeSelectionModal
-        open={fixtureTypeModalOpen}
-        onOpenChange={setFixtureTypeModalOpen}
-        currentType={selectedLocation ? (fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown') : ''}
+        open={fixtureTypeModalOpen || addFixtureModalOpen}
+        onOpenChange={(open) => {
+          setFixtureTypeModalOpen(open);
+          setAddFixtureModalOpen(open);
+          if (!open) {
+            setIsAddingFixture(false);
+          }
+        }}
+        currentType={isAddingFixture ? '' : (selectedLocation ? (fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown') : '')}
         availableTypes={fixtureTypes}
-        onTypeSelect={handleFixtureTypeChange}
+        onTypeSelect={(type) => {
+          if (isAddingFixture) {
+            handleAddFixture(type);
+          } else {
+            handleFixtureTypeChange(type);
+          }
+        }}
+        isAddMode={isAddingFixture}
       />
-      
+
       {/* Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
         open={deleteConfirmationOpen}

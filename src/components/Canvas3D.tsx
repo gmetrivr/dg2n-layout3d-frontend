@@ -718,6 +718,7 @@ interface Canvas3DProps {
   onFloorPlateClick: (plateData: any) => void;
   onPointerMissed: () => void;
   setIsTransforming: (transforming: boolean) => void;
+  onOrbitTargetUpdate?: (target: [number, number, number]) => void;
 }
 
 export function Canvas3D({
@@ -748,8 +749,11 @@ export function Canvas3D({
   onPositionChange,
   onFloorPlateClick,
   onPointerMissed,
-  setIsTransforming
+  setIsTransforming,
+  onOrbitTargetUpdate
 }: Canvas3DProps) {
+  const orbitControlsRef = useRef<any>(null);
+  const lastTargetRef = useRef<[number, number, number]>(orbitTarget);
   return (
     <Canvas
       camera={{ position: cameraPosition, fov: 50 }}
@@ -881,6 +885,7 @@ export function Canvas3D({
       })()}
 
       <OrbitControls
+        ref={orbitControlsRef}
         target={orbitTarget}
         enablePan={true}
         enableZoom={true}
@@ -889,6 +894,16 @@ export function Canvas3D({
         rotateSpeed={0.5}
         zoomSpeed={0.5}
         enabled={!isTransforming}
+        onEnd={() => {
+          if (orbitControlsRef.current && onOrbitTargetUpdate) {
+            const target = orbitControlsRef.current.target;
+            const newTarget: [number, number, number] = [target.x, target.y, target.z];
+
+            // Update on both pan and rotate - always track where camera is looking
+            lastTargetRef.current = newTarget;
+            onOrbitTargetUpdate(newTarget);
+          }
+        }}
       />
     </Canvas>
   );

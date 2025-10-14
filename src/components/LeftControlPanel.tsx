@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronRight, Settings } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
 import { Select } from "./ui/select";
 import { Button } from "@/shadcn/components/ui/button";
 import { getGlbTitle } from '../utils/zipUtils';
@@ -61,6 +61,7 @@ interface LeftControlPanelProps {
   onDownloadModifiedZip: () => void;
   onSaveStoreClick?: () => void;
   onManageFloorsClick?: () => void;
+  onAddFixtureClick?: () => void;
 }
 
 export function LeftControlPanel({
@@ -102,6 +103,7 @@ export function LeftControlPanel({
   onDownloadModifiedZip,
   onSaveStoreClick,
   onManageFloorsClick,
+  onAddFixtureClick,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -339,6 +341,19 @@ export function LeftControlPanel({
             </div>
           </label>
         </div>
+
+        {/* Add Fixture Button */}
+        {editMode && (
+          <div className="flex">
+            <button
+              onClick={onAddFixtureClick}
+              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 w-full justify-center"
+            >
+              <Plus className="h-4 w-4" />
+              Add Fixture
+            </button>
+          </div>
+        )}
         
         {/* Floor Plates Controls */}
         {editFloorplatesMode && (() => {

@@ -16,14 +16,16 @@ interface FixtureTypeSelectionModalProps {
   currentType: string;
   availableTypes: string[];
   onTypeSelect: (fixtureType: string) => void;
+  isAddMode?: boolean; // New prop to indicate if we're adding a fixture
 }
 
-export function FixtureTypeSelectionModal({ 
-  open, 
-  onOpenChange, 
+export function FixtureTypeSelectionModal({
+  open,
+  onOpenChange,
   currentType,
   availableTypes,
-  onTypeSelect
+  onTypeSelect,
+  isAddMode = false
 }: FixtureTypeSelectionModalProps) {
   const [selectedType, setSelectedType] = useState<string>(currentType);
   const [loading, setLoading] = useState(false);
@@ -42,7 +44,7 @@ export function FixtureTypeSelectionModal({
     }, 100);
   };
 
-  const hasChanges = selectedType !== currentType;
+  const hasChanges = isAddMode ? selectedType !== '' : selectedType !== currentType;
 
   const renderTypeButton = (fixtureType: string) => {
     const isSelected = selectedType === fixtureType;
@@ -76,7 +78,7 @@ export function FixtureTypeSelectionModal({
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-2">
               <Box className="h-5 w-5 text-primary" />
-              <DialogTitle>Select Fixture Type</DialogTitle>
+              <DialogTitle>{isAddMode ? 'Add New Fixture' : 'Select Fixture Type'}</DialogTitle>
             </div>
             <DialogClose onClick={() => onOpenChange(false)} />
           </div>
@@ -84,14 +86,19 @@ export function FixtureTypeSelectionModal({
 
         <div className="px-6 pb-4">
           <DialogDescription>
-            Select a new fixture type. This will replace the current fixture with a different type and update the 3D model.
+            {isAddMode
+              ? 'Select a fixture type to add to the current floor. The fixture will be placed at the screen center.'
+              : 'Select a new fixture type. This will replace the current fixture with a different type and update the 3D model.'
+            }
           </DialogDescription>
         </div>
 
         <div className="px-6 pb-6 space-y-4">
-          <div className="text-sm font-medium text-foreground">
-            Current Type: <span className="text-primary">{currentType}</span>
-          </div>
+          {!isAddMode && (
+            <div className="text-sm font-medium text-foreground">
+              Current Type: <span className="text-primary">{currentType}</span>
+            </div>
+          )}
           
           <div className="max-h-80 overflow-y-auto space-y-2">
             <div className="grid grid-cols-1 gap-2">
@@ -122,11 +129,11 @@ export function FixtureTypeSelectionModal({
                 ) : (
                   <Box className="h-4 w-4" />
                 )}
-                {loading 
-                  ? 'Updating...'
-                  : hasChanges 
-                    ? `Apply Type: ${selectedType}` 
-                    : 'No Changes'
+                {loading
+                  ? (isAddMode ? 'Adding...' : 'Updating...')
+                  : hasChanges
+                    ? (isAddMode ? `Add: ${selectedType}` : `Apply Type: ${selectedType}`)
+                    : (isAddMode ? 'Select Type' : 'No Changes')
                 }
               </Button>
             </div>
