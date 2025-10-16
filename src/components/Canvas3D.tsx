@@ -832,6 +832,9 @@ export function Canvas3D({
         return locationData
           .filter(location => location.floorIndex === currentFloor)
           .filter(location => {
+            // Exclude forDelete fixtures (marked when split or type-changed)
+            if (location.forDelete) return false;
+
             // Exclude deleted fixtures
             const key = generateFixtureUID(location);
             return !deletedFixtures.has(key);

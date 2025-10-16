@@ -385,45 +385,57 @@ export function useFixtureModifications(
   }, [setSelectedLocations, setLocationData]);
 
   const handleDuplicateFixture = useCallback((location: LocationData) => {
-    // Create duplicate with current position/properties (all modifications are embedded in location object)
-    const duplicatedFixture: LocationData = {
-      ...location,
-      // Use current position (current position includes any moves)
-      posX: location.posX,  // Duplicate in place
-      posY: location.posY,
-      posZ: location.posZ,
-      // Keep current blockName, rotation, brand, count, hierarchy (includes all modifications)
-      // Reset modification flags since this is a "new" fixture
-      wasMoved: false, // Will be set to true if the duplicate is moved later
-      wasRotated: false,
-      wasTypeChanged: false,
-      wasBrandChanged: false,
-      wasCountChanged: false,
-      wasHierarchyChanged: false,
-      wasDuplicated: true, // Mark as duplicate
-      // Preserve original values for reset functionality
-      originalPosX: location.posX, // Original position of the source fixture (not the duplicate's position)
-      originalPosY: location.posY,
-      originalPosZ: location.posZ,
-      originalRotationX: location.rotationX,
-      originalRotationY: location.rotationY, 
-      originalRotationZ: location.rotationZ,
-      originalBlockName: location.blockName,
-      originalBrand: location.brand,
-      originalCount: location.count,
-      originalHierarchy: location.hierarchy,
-      originalGlbUrl: location.glbUrl,
-      // Generate new unique timestamps to ensure unique UID even at same position
-      _updateTimestamp: Date.now() + Math.random() * 1000, 
-      _ingestionTimestamp: Date.now() + Math.random() * 1000 // New unique timestamp for the duplicate
-    };
-    
-    // Add the duplicated fixture to the location data
-    // All modifications are already embedded in the duplicatedFixture object
-    
-    setLocationData(prev => [...prev, duplicatedFixture]);
-    setSelectedLocation(duplicatedFixture);
-    setSelectedLocations([duplicatedFixture]);
+    // Calculate new hierarchy as max+1 for the current floor
+    setLocationData(prev => {
+      const currentFloorFixtures = prev.filter(loc =>
+        loc.floorIndex === location.floorIndex && !loc.forDelete
+      );
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const newHierarchy = maxHierarchy + 1;
+
+      // Create duplicate with current position/properties (all modifications are embedded in location object)
+      const duplicatedFixture: LocationData = {
+        ...location,
+        // Use current position (current position includes any moves)
+        posX: location.posX,  // Duplicate in place
+        posY: location.posY,
+        posZ: location.posZ,
+        // Set new hierarchy
+        hierarchy: newHierarchy,
+        // Keep current blockName, rotation, brand, count (includes all modifications)
+        // Reset modification flags since this is a "new" fixture
+        wasMoved: false, // Will be set to true if the duplicate is moved later
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+        wasDuplicated: true, // Mark as duplicate
+        // Preserve original values for reset functionality
+        originalPosX: location.posX, // Original position of the source fixture (not the duplicate's position)
+        originalPosY: location.posY,
+        originalPosZ: location.posZ,
+        originalRotationX: location.rotationX,
+        originalRotationY: location.rotationY,
+        originalRotationZ: location.rotationZ,
+        originalBlockName: location.blockName,
+        originalBrand: location.brand,
+        originalCount: location.count,
+        originalHierarchy: newHierarchy,
+        originalGlbUrl: location.glbUrl,
+        // Generate new unique timestamps to ensure unique UID even at same position
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000 // New unique timestamp for the duplicate
+      };
+
+      setSelectedLocation(duplicatedFixture);
+      setSelectedLocations([duplicatedFixture]);
+
+      // Add the duplicated fixture to the location data
+      return [...prev, duplicatedFixture];
+    });
   }, [setLocationData, setSelectedLocation, setSelectedLocations]);
 
   const handleDeleteFixture = useCallback((location: LocationData) => {
@@ -457,90 +469,108 @@ export function useFixtureModifications(
     // Calculate positioning for the split fixtures
     // Take the center point and create a line with total length = count * 0.6 units
     // Split this line into two segments based on the split counts
-    
+
     const fixtureLength = 0.6; // Length of one fixture in units
     const originalTotalLength = location.count * fixtureLength;
     const leftSegmentLength = leftCount * fixtureLength;
     const rightSegmentLength = rightCount * fixtureLength;
-    
+
     // Calculate the midpoints of each segment
     // Left segment: starts at -originalTotalLength/2, midpoint at start + leftSegmentLength/2
     const leftMidpointOffset = (-originalTotalLength / 2) + (leftSegmentLength / 2);
-    // Right segment: starts at -originalTotalLength/2 + leftSegmentLength, midpoint at start + rightSegmentLength/2  
+    // Right segment: starts at -originalTotalLength/2 + leftSegmentLength, midpoint at start + rightSegmentLength/2
     const rightMidpointOffset = (-originalTotalLength / 2) + leftSegmentLength + (rightSegmentLength / 2);
-    
+
     // Apply rotation to the offsets (if fixture is rotated)
     const rotationZ = (location.rotationZ * Math.PI) / 180; // Convert to radians
-    
+
     // Calculate final positions considering rotation
     const leftGroupX = location.posX + (leftMidpointOffset * Math.cos(rotationZ));
     const leftGroupY = location.posY + (leftMidpointOffset * Math.sin(rotationZ));
-    
+
     const rightGroupX = location.posX + (rightMidpointOffset * Math.cos(rotationZ));
     const rightGroupY = location.posY + (rightMidpointOffset * Math.sin(rotationZ));
-    
-    // Create left split fixture
-    const leftSplitFixture: LocationData = {
-      ...location,
-      posX: leftGroupX,
-      posY: leftGroupY,
-      posZ: location.posZ, // Keep same Z position
-      count: leftCount,
-      wasSplit: true,
-      originalCount: leftCount, // New fixture's original count is the split value
-      // Generate new unique identifiers with sufficient separation
-      _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-      _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-      // Clear other modification flags since this is a new fixture
-      wasMoved: false,
-      wasRotated: false,
-      wasTypeChanged: false,
-      wasBrandChanged: false,
-      wasCountChanged: false,
-      wasHierarchyChanged: false,
-      wasDuplicated: false
-    };
-    
-    // Create right split fixture
-    const rightSplitFixture: LocationData = {
-      ...location,
-      posX: rightGroupX,
-      posY: rightGroupY,
-      posZ: location.posZ, // Keep same Z position
-      count: rightCount,
-      wasSplit: true,
-      originalCount: rightCount, // New fixture's original count is the split value
-      // Generate new unique identifiers with sufficient separation
-      _updateTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
-      _ingestionTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
-      // Clear other modification flags since this is a new fixture
-      wasMoved: false,
-      wasRotated: false,
-      wasTypeChanged: false,
-      wasBrandChanged: false,
-      wasCountChanged: false,
-      wasHierarchyChanged: false,
-      wasDuplicated: false
-    };
-    
-    // Remove the original fixture and add the split fixtures in a single update
+
+    // Mark the original fixture for deletion by capturing its UID before state update
     const originalKey = generateFixtureUID(location);
-    
-    // Single atomic update: remove original and add split fixtures
+
+    // Single atomic update: mark original for deletion and add split fixtures
     setLocationData(prev => {
-      // Remove the original fixture from the data
-      const withoutOriginal = prev.filter(loc => generateFixtureUID(loc) !== originalKey);
-      
+      // Calculate new hierarchies as max+1 and max+2 for the current floor
+      const currentFloorFixtures = prev.filter(loc =>
+        loc.floorIndex === location.floorIndex && !loc.forDelete
+      );
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const leftHierarchy = maxHierarchy + 1;
+      const rightHierarchy = maxHierarchy + 2;
+
+      // Create left split fixture
+      const leftSplitFixture: LocationData = {
+        ...location,
+        posX: leftGroupX,
+        posY: leftGroupY,
+        posZ: location.posZ, // Keep same Z position
+        count: leftCount,
+        hierarchy: leftHierarchy,
+        wasSplit: true,
+        originalCount: leftCount, // New fixture's original count is the split value
+        originalHierarchy: leftHierarchy,
+        // Generate new unique identifiers with sufficient separation
+        _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+        _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+        // Clear other modification flags since this is a new fixture
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+        wasDuplicated: false
+      };
+
+      // Create right split fixture
+      const rightSplitFixture: LocationData = {
+        ...location,
+        posX: rightGroupX,
+        posY: rightGroupY,
+        posZ: location.posZ, // Keep same Z position
+        count: rightCount,
+        hierarchy: rightHierarchy,
+        wasSplit: true,
+        originalCount: rightCount, // New fixture's original count is the split value
+        originalHierarchy: rightHierarchy,
+        // Generate new unique identifiers with sufficient separation
+        _updateTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
+        _ingestionTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
+        // Clear other modification flags since this is a new fixture
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+        wasDuplicated: false
+      };
+
+      // Mark the original fixture as forDelete (preserve all properties for UID stability)
+      const withMarkedOriginal = prev.map(loc =>
+        generateFixtureUID(loc) === originalKey
+          ? { ...loc, forDelete: true }  // Only add forDelete flag, don't change any other properties
+          : loc
+      );
+
       // Add the new split fixtures
-      const newData = [...withoutOriginal, leftSplitFixture, rightSplitFixture];
-      
+      const newData = [...withMarkedOriginal, leftSplitFixture, rightSplitFixture];
+
       return newData;
     });
-    
+
     // Clear selection
     setSelectedLocation(null);
     setSelectedLocations([]);
-  }, [setLocationData, setSelectedLocation, setSelectedLocations, setDeletedFixtures]);
+  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
 
   const canMergeFixtures = useCallback((fixtures: LocationData[], fixtureTypeMap: Map<string, string>): boolean => {
     // Fast early exits for performance
@@ -594,15 +624,15 @@ export function useFixtureModifications(
 
   const handleMergeFixtures = useCallback((fixtures: LocationData[]) => {
     if (fixtures.length !== 2) return;
-    
+
     const [fixtureA, fixtureB] = fixtures;
-    
+
     // Generate keys IMMEDIATELY to avoid any reference issues
     const keyA = generateFixtureUID(fixtureA);
     const keyB = generateFixtureUID(fixtureB);
-    
+
     const totalCount = fixtureA.count + fixtureB.count;
-    
+
     // Calculate the actual center of the combined stack
     // The GLB positions should remain unchanged, so we need to find where
     // the center of the totalCount stack would be to keep all GLBs in place
@@ -610,64 +640,75 @@ export function useFixtureModifications(
     const rotationZ = (fixtureA.rotationZ * Math.PI) / 180;
     const cosRot = Math.cos(rotationZ);
     const sinRot = Math.sin(rotationZ);
-    
+
     // Determine which fixture is leftmost along the orientation axis
     const projectionA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
     const projectionB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
-    
+
     const leftFixture = projectionA < projectionB ? fixtureA : fixtureB;
-    
+
     // Calculate where the center of the merged stack should be
     // Find the leftmost edge of the leftmost fixture's stack
     const totalSpan = totalCount * fixtureLength;
     const leftEdgeX = leftFixture.posX - (leftFixture.count * fixtureLength * 0.5 * cosRot);
     const leftEdgeY = leftFixture.posY - (leftFixture.count * fixtureLength * 0.5 * sinRot);
-    
+
     // The center of the merged stack is at the leftmost edge + half the total span
     const centerX = leftEdgeX + (totalSpan * 0.5 * cosRot);
     const centerY = leftEdgeY + (totalSpan * 0.5 * sinRot);
-    
-    // Create merged fixture at the center point
-    const mergedFixture: LocationData = {
-      ...fixtureA, // Use first fixture as base
-      posX: centerX,
-      posY: centerY,
-      count: totalCount,
-      wasMerged: true, // New flag to track merged fixtures
-      originalCount: totalCount, // Set original count to the merged value
-      // Generate new unique identifier
-      _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-      _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-      // Clear other modification flags since this is a new fixture
-      wasMoved: false,
-      wasRotated: false,
-      wasTypeChanged: false,
-      wasBrandChanged: false,
-      wasCountChanged: false,
-      wasHierarchyChanged: false,
-      wasDuplicated: false,
-      wasSplit: false
-    };
-    
-    
+
+    // Mark both original fixtures as deleted for export purposes FIRST
+    // This ensures the viewer filter catches them immediately
+    setDeletedFixtures(prev => new Set([...prev, keyA, keyB]));
+
     setLocationData(prev => {
+      // Calculate new hierarchy as max+1 for the current floor
+      const currentFloorFixtures = prev.filter(loc =>
+        loc.floorIndex === fixtureA.floorIndex && !loc.forDelete
+      );
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const newHierarchy = maxHierarchy + 1;
+
+      // Create merged fixture at the center point
+      const mergedFixture: LocationData = {
+        ...fixtureA, // Use first fixture as base
+        posX: centerX,
+        posY: centerY,
+        count: totalCount,
+        hierarchy: newHierarchy,
+        wasMerged: true, // New flag to track merged fixtures
+        originalCount: totalCount, // Set original count to the merged value
+        originalHierarchy: newHierarchy,
+        // Generate new unique identifier
+        _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+        _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
+        // Clear other modification flags since this is a new fixture
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+        wasDuplicated: false,
+        wasSplit: false
+      };
+
       // Remove both original fixtures and add merged fixture
       const withoutOriginals = prev.filter(loc => {
         const key = generateFixtureUID(loc);
         return key !== keyA && key !== keyB;
       });
-      
+
       return [...withoutOriginals, mergedFixture];
     });
-    
-    // Mark both original fixtures as deleted for export purposes
-    setDeletedFixtures(prev => new Set([...prev, keyA, keyB]));
-    
+
     // Store original positions of deleted fixtures for export matching
     const positionKeyA = `${fixtureA.originalBlockName || fixtureA.blockName}-${(fixtureA.originalPosX || fixtureA.posX).toFixed(3)}-${(fixtureA.originalPosY || fixtureA.posY).toFixed(3)}-${(fixtureA.originalPosZ || fixtureA.posZ).toFixed(3)}`;
     const positionKeyB = `${fixtureB.originalBlockName || fixtureB.blockName}-${(fixtureB.originalPosX || fixtureB.posX).toFixed(3)}-${(fixtureB.originalPosY || fixtureB.posY).toFixed(3)}-${(fixtureB.originalPosZ || fixtureB.posZ).toFixed(3)}`;
     setDeletedFixturePositions(prev => new Set([...prev, positionKeyA, positionKeyB]));
-    
+
     // Clear selection
     setSelectedLocation(null);
     setSelectedLocations([]);

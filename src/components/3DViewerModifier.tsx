@@ -101,7 +101,7 @@ export function ThreeDViewerModifier() {
   const [showWireframe, setShowWireframe] = useState(false);
   const [showFixtureLabels, setShowFixtureLabels] = useState(false);
   const [showWalls, setShowWalls] = useState(true);
-  const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('world');
+  const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('local');
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
@@ -284,53 +284,44 @@ export function ThreeDViewerModifier() {
         return newMap;
       });
       
-      // Update location data with new GLB URL and mapped block name
-      // Use the exact same fixture by UID to avoid position issues
+      // Mark the original fixture for deletion and create a new one with the new type
       const selectedUID = generateFixtureUID(selectedLocation);
-      setLocationData(prev => 
-        prev.map(loc => {
+
+      // Create a new fixture with the new type
+      const newFixture: LocationData = {
+        ...selectedLocation,
+        blockName: mappedBlockName,
+        glbUrl: newGlbUrl,
+        wasTypeChanged: true,
+        wasMoved: selectedLocation.wasMoved || false,
+        // Preserve original state
+        originalBlockName: selectedLocation.originalBlockName || selectedLocation.blockName,
+        originalPosX: selectedLocation.originalPosX ?? selectedLocation.posX,
+        originalPosY: selectedLocation.originalPosY ?? selectedLocation.posY,
+        originalPosZ: selectedLocation.originalPosZ ?? selectedLocation.posZ,
+        originalGlbUrl: selectedLocation.originalGlbUrl || selectedLocation.glbUrl,
+        // Generate new unique timestamp
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000
+      };
+
+      setLocationData(prev => {
+        // Mark the original fixture as forDelete
+        const withMarkedOriginal = prev.map(loc => {
           const locUID = generateFixtureUID(loc);
           if (locUID === selectedUID) {
-            // Use current position from embedded data (already includes any moves)
-            const currentPos = [loc.posX, loc.posY, loc.posZ];
-            
-            return { 
-              ...loc,
-              // Commit the current position (moved or original) to the actual position fields
-              posX: currentPos[0],
-              posY: currentPos[1], 
-              posZ: currentPos[2],
-              blockName: mappedBlockName, 
-              glbUrl: newGlbUrl,
-              // Set modification flags
-              wasTypeChanged: true,
-              wasMoved: loc.wasMoved || false,
-              // Preserve original state (set once)
-              originalBlockName: loc.originalBlockName || loc.blockName,
-              originalPosX: loc.originalPosX ?? loc.posX,
-              originalPosY: loc.originalPosY ?? loc.posY,
-              originalPosZ: loc.originalPosZ ?? loc.posZ,
-              originalGlbUrl: loc.originalGlbUrl || loc.glbUrl,
-              _updateTimestamp: Date.now() // Force React to see this as a new object
-            };
+            return { ...loc, forDelete: true };
           }
           return loc;
-        })
-      );
-      
-      // Update selected location - it will be updated from locationData change above
-      setSelectedLocation(prev => {
-        if (!prev) return null;
-        
-        return { 
-          ...prev, 
-          blockName: mappedBlockName, 
-          glbUrl: newGlbUrl,
-          wasTypeChanged: true,
-          originalBlockName: prev.originalBlockName || prev.blockName,
-          originalGlbUrl: prev.originalGlbUrl || prev.glbUrl
-        };
+        });
+
+        // Add the new fixture with changed type
+        return [...withMarkedOriginal, newFixture];
       });
+      
+      // Update selected location to point to the new fixture
+      setSelectedLocation(newFixture);
+      setSelectedLocations([newFixture]);
       
     } catch (error) {
       console.error('Failed to change fixture type:', error);
@@ -549,10 +540,13 @@ export function ThreeDViewerModifier() {
       const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
 
-      // Add all fixture GLBs for the current floor (excluding deleted fixtures)
+      // Add all fixture GLBs for the current floor (excluding deleted and forDelete fixtures)
       const currentFloorLocations = locationData.filter(location => {
         if (location.floorIndex !== currentFloor || !location.glbUrl) return false;
-        
+
+        // Exclude forDelete fixtures (marked when split or type-changed)
+        if (location.forDelete) return false;
+
         // Exclude deleted fixtures
         const key = generateFixtureUID(location);
         return !deletedFixtures.has(key);
@@ -986,8 +980,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       );
 
     // Build fast lookup: current locations by their original CSV key (without timestamp)
+    // ONLY include fixtures that should match to CSV rows (not duplicates, splits, or forDelete)
     const currentByOriginalKey = new Map<string, LocationData>();
     for (const loc of workingLocationData) {
+      // Skip fixtures marked for deletion (split/type-change originals)
+      if (loc.forDelete) continue;
+
+      // Skip derived fixtures (duplicates and splits) - they go to the "add new fixtures" section
+      if (loc.wasDuplicated || loc.wasSplit) continue;
+
       const key = getLocationOriginalKey(loc);
       currentByOriginalKey.set(key, loc);
     }
@@ -1045,6 +1046,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       let matchingLocation = currentByOriginalKey.get(originalKey);
 
       if (!matchingLocation) {
+        // Check if this CSV row matches a forDelete fixture (split or type-changed original)
+        // These fixtures should be removed from the CSV
+        const forDeleteMatch = workingLocationData.find(loc => {
+          if (!loc.forDelete) return false;
+          const locOriginalKey = getLocationOriginalKey(loc);
+          return locOriginalKey === originalKey;
+        });
+
+        if (forDeleteMatch) {
+          // This CSV row represents a fixture that was split or type-changed
+          // Skip it (don't include in export)
+          deletedCount++;
+          continue;
+        }
+
         // If no matching location found, check if this CSV row represents a deleted fixture
         const csvPositionKey = `${blockName}-${posX.toFixed(3)}-${posY.toFixed(3)}-${posZ.toFixed(3)}`;
 
@@ -1116,13 +1132,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       updated++;
     }
     
-    // Add any duplicated fixtures that weren't in the original CSV
+    // Add any duplicated/split/type-changed fixtures that weren't in the original CSV
     workingLocationData.forEach(location => {
+      // Skip fixtures marked for deletion
+      if (location.forDelete) return;
+
       const originalLocationKey = getLocationOriginalKey(location);
 
-      // If this fixture wasn't in the original CSV (by original UID), it's a duplicate
-      if (!originalFixtures.has(originalLocationKey)) {
-        // Create CSV line for duplicated fixture using correct 14-column structure
+      // Add fixture if:
+      // 1. It's a duplicate/split (these are new fixtures even if original position matches CSV)
+      // 2. OR it wasn't in the original CSV (by original UID)
+      const isDerivedFixture = location.wasDuplicated || location.wasSplit;
+      const wasNotInOriginalCSV = !originalFixtures.has(originalLocationKey);
+
+      if (isDerivedFixture || wasNotInOriginalCSV) {
+        // Create CSV line for new fixture using correct 14-column structure
         const csvLine = [
           location.blockName,             // 0: Block Name
           location.floorIndex.toString(), // 1: Floor Index
@@ -1529,11 +1553,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
 
-      // Get unique brands for the current floor, excluding deleted fixtures
+      // Get unique brands for the current floor, excluding deleted and forDelete fixtures
       const floorBrands = new Set<string>();
       locationData
         .filter(location => location.floorIndex === currentFloor)
         .filter(location => {
+          // Exclude forDelete fixtures
+          if (location.forDelete) return false;
+
+          // Exclude deleted fixtures
           const key = generateFixtureUID(location);
           return !deletedFixtures.has(key);
         })
@@ -1659,22 +1687,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         
         // Preserve any modified fixtures when setting new location data
         setLocationData(prev => {
-          const newData = [...dataWithGLBs];
-          
-          // Create a map of existing fixtures by their UID for fast lookup
-          const existingUIDs = new Set(newData.map(loc => generateFixtureUID(loc)));
-          
-          // Add back any modified fixtures (those with _updateTimestamp) that aren't in the CSV
-          prev.forEach(prevLocation => {
-            if (prevLocation._updateTimestamp) {
-              const prevUID = generateFixtureUID(prevLocation);
-              // Only add if this UID doesn't exist in the new data (i.e., it's a duplicate or modified fixture)
-              if (!existingUIDs.has(prevUID)) {
-                newData.push(prevLocation);
+          // If we already have location data, preserve all modifications
+          // Only reload from CSV if we have no previous data
+          if (prev.length > 0) {
+            // Don't reload - this prevents losing modifications when cache/typeMap updates
+            // Just update GLB URLs for any fixtures that need them
+            return prev.map(location => {
+              if (!location.glbUrl && location.blockName && glbUrlMap.has(location.blockName)) {
+                return { ...location, glbUrl: glbUrlMap.get(location.blockName) };
               }
-            }
-          });
-          
+              return location;
+            });
+          }
+
+          // First time loading: use CSV data
+          const newData = [...dataWithGLBs];
           return newData;
         });
         

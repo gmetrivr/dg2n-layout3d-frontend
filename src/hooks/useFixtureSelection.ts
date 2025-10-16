@@ -38,7 +38,11 @@ export interface LocationData {
   wasDuplicated?: boolean;
   wasSplit?: boolean;
   wasMerged?: boolean;
-  
+
+  // Deletion tracking (for fixtures that should not render or export)
+  // Set to true when a fixture is split or type-changed (original gets marked for deletion)
+  forDelete?: boolean;
+
   // Internal tracking
   _updateTimestamp?: number;
   _ingestionTimestamp?: number;
