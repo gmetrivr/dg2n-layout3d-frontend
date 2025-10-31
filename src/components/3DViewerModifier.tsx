@@ -110,6 +110,7 @@ export function ThreeDViewerModifier() {
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveEntity, setSaveEntity] = useState('trends');
   const [saveStoreId, setSaveStoreId] = useState('');
   const [saveStoreName, setSaveStoreName] = useState('');
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
@@ -743,9 +744,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         zip_path: path,
         zip_size: size,
         job_id: jobId,
+        entity: saveEntity,
       });
 
       setSaveDialogOpen(false);
+      setSaveEntity('trends');
       setSaveStoreId('');
       setSaveStoreName('');
       alert('Store saved successfully');
@@ -755,19 +758,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } finally {
       setIsSavingStore(false);
     }
-  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes]);
+  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord]);
 
-  // Handle store selection and auto-populate store name
+  // Handle store selection and auto-populate store name and entity
   const handleStoreSelection = useCallback((selectedStoreCode: string) => {
     setSaveStoreId(selectedStoreCode);
 
-    // Find the store data to auto-populate the store name
+    // Find the store data to auto-populate the store name and entity
     const selectedStore = storeData.find(store => store.storeCode === selectedStoreCode);
     if (selectedStore) {
       const displayName = selectedStore.nocName || selectedStore.sapName || selectedStore.storeName || '';
       setSaveStoreName(`${selectedStoreCode} - ${displayName}`);
+
+      // Set entity from formatType, defaulting to 'trends' if not found
+      const entity = selectedStore.formatType || 'trends';
+      setSaveEntity(entity);
     } else {
       setSaveStoreName('');
+      setSaveEntity('trends');
     }
   }, [storeData]);
 
@@ -2090,6 +2098,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             <DialogDescription>
               Enter store details. A ZIP of the current dataset will be saved with a timestamp.
             </DialogDescription>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Entity</label>
+              <select
+                value={saveEntity}
+                onChange={(e) => setSaveEntity(e.target.value)}
+                className="w-full px-3 py-2 rounded border border-border bg-background"
+              >
+                <option value="trends">Trends</option>
+                <option value="tst">TST</option>
+              </select>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Store ID</label>
               {isLoadingStores ? (

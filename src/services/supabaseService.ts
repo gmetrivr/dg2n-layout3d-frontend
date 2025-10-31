@@ -10,6 +10,7 @@ export interface StoreSaveRecord {
   zip_path: string;
   zip_size?: number;
   job_id?: string | null;
+  entity?: string | null;
 }
 
 export interface StoreSaveRow extends StoreSaveRecord {
@@ -29,7 +30,7 @@ export const useSupabaseService = () => {
         const trimmed = search?.trim();
         let query = supabase
           .from('store_saves')
-          .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size');
+          .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size, entity');
 
         if (trimmed) {
           query = query.ilike('store_id', `%${trimmed}%`);
@@ -53,6 +54,7 @@ export const useSupabaseService = () => {
             zip_path: record.zip_path,
             zip_size: record.zip_size ?? null,
             job_id: record.job_id ?? null,
+            entity: record.entity ?? null,
           })
           .select()
           .single();

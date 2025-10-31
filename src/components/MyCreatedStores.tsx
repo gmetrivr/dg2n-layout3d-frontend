@@ -255,6 +255,7 @@ export function MyCreatedStores() {
               <th className="text-left px-3 py-2">Created</th>
               <th className="text-left px-3 py-2">Store ID</th>
               <th className="text-left px-3 py-2">Store Name</th>
+              <th className="text-left px-3 py-2">Entity</th>
               <th className="text-left px-3 py-2">Job ID</th>
               <th className="text-left px-3 py-2">ZIP Size</th>
               <th className="text-left px-3 py-2">Actions</th>
@@ -263,13 +264,13 @@ export function MyCreatedStores() {
           <tbody>
             {loading ? (
               <tr>
-                <td className="px-3 py-4" colSpan={6}>
+                <td className="px-3 py-4" colSpan={7}>
                   Loading.
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-4" colSpan={6}>
+                <td className="px-3 py-4" colSpan={7}>
                   No rows
                 </td>
               </tr>
@@ -279,6 +280,7 @@ export function MyCreatedStores() {
                   <td className="px-3 py-2 align-top">{new Date(r.created_at).toLocaleString()}</td>
                   <td className="px-3 py-2 align-top font-mono">{r.store_id}</td>
                   <td className="px-3 py-2 align-top">{r.store_name}</td>
+                  <td className="px-3 py-2 align-top">{r.entity || '-'}</td>
                   <td className="px-3 py-2 align-top font-mono">{r.job_id || '-'}</td>
                   <td className="px-3 py-2 align-top">{formatBytes(r.zip_size)}</td>
                   <td className="px-3 py-2 align-top">
@@ -354,7 +356,7 @@ export function MyCreatedStores() {
                             const zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
 
                             // Make the store live using the API
-                            await makeStoreLive(r.store_id, r.store_name, zipBlob);
+                            await makeStoreLive(r.store_id, r.store_name, zipBlob, r.entity || 'trends');
 
                             alert(`Store "${r.store_name}" is now live!`);
                           } catch (error) {
