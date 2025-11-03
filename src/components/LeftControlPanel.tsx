@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Loader2, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
 import { Select } from "./ui/select";
 import { Button } from "@/shadcn/components/ui/button";
-import { getGlbTitle } from '../utils/zipUtils';
+import { getGlbTitle, isShatteredFloorPlateFile } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
 
 interface LeftControlPanelProps {
@@ -110,7 +110,7 @@ export function LeftControlPanel({
 
   // Sort floor files by display order
   const getSortedFloorFiles = () => {
-    const floorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+    const floorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
 
     if (!floorDisplayOrder || floorDisplayOrder.length === 0) {
       // No display order, sort by floor number

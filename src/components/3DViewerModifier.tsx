@@ -7,7 +7,7 @@ import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { apiService, type JobStatus, type BrandCategoriesResponse } from '../services/api';
-import { extractZipFiles, cleanupExtractedFiles, type ExtractedFile } from '../utils/zipUtils';
+import { extractZipFiles, cleanupExtractedFiles, isFloorFile, isShatteredFloorPlateFile, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
 import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
@@ -857,6 +857,44 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setFloorDisplayOrder(newOrder);
   }, [floorDisplayOrder]);
 
+  const handleRenameFloor = useCallback((floorFile: ExtractedFile, newName: string) => {
+    // Create a new file name by replacing the title part while keeping the extension and floor number
+    const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i);
+    const floorNumber = floorMatch ? floorMatch[0] : 'floor-0';
+
+    // Generate new file name: sanitize the new name and append floor number and extension
+    const sanitizedName = newName.replace(/[^a-zA-Z0-9-_\s]/g, '').replace(/\s+/g, '-');
+    const newFileName = `${sanitizedName}-${floorNumber}.glb`;
+
+    // Update the file in extractedFiles
+    setExtractedFiles(prev => prev.map(file =>
+      file.name === floorFile.name
+        ? { ...file, name: newFileName }
+        : file
+    ));
+
+    // Update the file in glbFiles
+    setGlbFiles(prev => prev.map(file =>
+      file.name === floorFile.name
+        ? { ...file, name: newFileName }
+        : file
+    ));
+
+    // Update selectedFile if it's the renamed file
+    setSelectedFile(prev =>
+      prev?.name === floorFile.name
+        ? { ...prev, name: newFileName }
+        : prev
+    );
+
+    // Update selectedFloorFile if it's the renamed file
+    setSelectedFloorFile(prev =>
+      prev?.name === floorFile.name
+        ? { ...prev, name: newFileName }
+        : prev
+    );
+  }, []);
+
 
   // Event handlers for LeftControlPanel
   const handleFloorFileChange = useCallback((file: ExtractedFile | null) => {
@@ -893,7 +931,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
         const currentFloor = floorMatch ? floorMatch[1] : '0';
         const originalFloorFile = glbFiles.find(file =>
-          file.name.includes(`dg2n-3d-floor-${currentFloor}`)
+          isFloorFile(file.name) && file.name.match(/floor[_-]?(\d+)/i)?.[1] === currentFloor
         );
         if (originalFloorFile) {
           setSelectedFile(originalFloorFile);
@@ -910,7 +948,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         const floorMatch = baseFile.name.match(/floor[_-]?(\d+)/i) || baseFile.name.match(/(\d+)/i);
         const currentFloor = floorMatch ? floorMatch[1] : '0';
         const originalFloorFile = glbFiles.find(file =>
-          file.name.includes(`dg2n-3d-floor-${currentFloor}`)
+          isFloorFile(file.name) && file.name.match(/floor[_-]?(\d+)/i)?.[1] === currentFloor
         );
         if (originalFloorFile) {
           setSelectedFile(originalFloorFile);
@@ -1325,14 +1363,14 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       // Filter GLB files - include both original floor files and shattered floor plates for switching
       const glbFiles = files.filter(file =>
         file.name.toLowerCase().endsWith('.glb') &&
-        (file.name.includes('dg2n-3d-floor-') ||
-         file.name.includes('dg2n-shattered-floor-plates-') ||
+        (isFloorFile(file.name) ||
+         isShatteredFloorPlateFile(file.name) ||
          !file.name.includes('floor'))
       );
       setGlbFiles(glbFiles);
 
       // Select floor with lowest floor number by default (not shattered)
-      const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+      const originalFloorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
       const lowestFloor = selectLowestFloorFile(originalFloorFiles);
       if (lowestFloor) {
         setSelectedFile(lowestFloor);
@@ -1368,13 +1406,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         const glbFiles = extracted.filter(file =>
           file.type === '3d-model' &&
-          (file.name.includes('dg2n-3d-floor-') ||
-           file.name.includes('dg2n-shattered-floor-plates-') ||
+          (isFloorFile(file.name) ||
+           isShatteredFloorPlateFile(file.name) ||
            !file.name.includes('floor'))
         );
         setGlbFiles(glbFiles);
 
-        const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+        const originalFloorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
         const lowestFloor = selectLowestFloorFile(originalFloorFiles);
         if (lowestFloor) {
           setSelectedFile(lowestFloor);
@@ -1413,13 +1451,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         const glbFiles = extracted.filter(file =>
           file.type === '3d-model' &&
-          (file.name.includes('dg2n-3d-floor-') ||
-           file.name.includes('dg2n-shattered-floor-plates-') ||
+          (isFloorFile(file.name) ||
+           isShatteredFloorPlateFile(file.name) ||
            !file.name.includes('floor'))
         );
         setGlbFiles(glbFiles);
 
-        const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+        const originalFloorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
         const lowestFloor = selectLowestFloorFile(originalFloorFiles);
         if (lowestFloor) {
           setSelectedFile(lowestFloor);
@@ -1445,13 +1483,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         const glbFiles = extracted.filter(file =>
           file.type === '3d-model' &&
-          (file.name.includes('dg2n-3d-floor-') ||
-           file.name.includes('dg2n-shattered-floor-plates-') ||
+          (isFloorFile(file.name) ||
+           isShatteredFloorPlateFile(file.name) ||
            !file.name.includes('floor'))
         );
         setGlbFiles(glbFiles);
 
-        const originalFloorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+        const originalFloorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
         const lowestFloor = selectLowestFloorFile(originalFloorFiles);
         if (lowestFloor) {
           setSelectedFile(lowestFloor);
@@ -2084,6 +2122,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onDeleteFloor={handleDeleteFloor}
         onMoveFloorUp={handleMoveFloorUp}
         onMoveFloorDown={handleMoveFloorDown}
+        onRenameFloor={handleRenameFloor}
         floorDisplayOrder={floorDisplayOrder}
       />
 

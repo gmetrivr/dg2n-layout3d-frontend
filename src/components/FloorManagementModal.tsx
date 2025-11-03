@@ -1,7 +1,8 @@
-import { Trash2, MoveUp, MoveDown, Settings } from 'lucide-react';
+import { useState } from 'react';
+import { Trash2, MoveUp, MoveDown, Settings, Pencil, Check, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from '@/shadcn/components/ui/dialog';
 import { Button } from "@/shadcn/components/ui/button";
-import { getGlbTitle } from '../utils/zipUtils';
+import { getGlbTitle, isShatteredFloorPlateFile } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
 
 interface FloorManagementModalProps {
@@ -13,6 +14,7 @@ interface FloorManagementModalProps {
   onDeleteFloor?: (floorFile: ExtractedFile) => void;
   onMoveFloorUp?: (floorFile: ExtractedFile) => void;
   onMoveFloorDown?: (floorFile: ExtractedFile) => void;
+  onRenameFloor?: (floorFile: ExtractedFile, newName: string) => void;
   floorDisplayOrder?: number[]; // Optional display order for floors
 }
 
@@ -25,10 +27,14 @@ export function FloorManagementModal({
   onDeleteFloor,
   onMoveFloorUp,
   onMoveFloorDown,
+  onRenameFloor,
   floorDisplayOrder,
 }: FloorManagementModalProps) {
+  const [editingFloorName, setEditingFloorName] = useState<string | null>(null);
+  const [editedName, setEditedName] = useState<string>('');
+
   // Filter floor files (exclude shattered floor plates)
-  const floorFiles = glbFiles.filter(file => !file.name.includes('dg2n-shattered-floor-plates-'));
+  const floorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
 
   // Sort floors by display order if provided, otherwise by floor number
   const sortedFloorFiles = [...floorFiles].sort((a, b) => {
@@ -85,6 +91,31 @@ export function FloorManagementModal({
     return getCurrentFloorIndex(floorFile) < sortedFloorFiles.length - 1;
   };
 
+  const startRenaming = (floorFile: ExtractedFile) => {
+    setEditingFloorName(floorFile.name);
+    setEditedName(getGlbTitle(floorFile.name));
+  };
+
+  const cancelRenaming = () => {
+    setEditingFloorName(null);
+    setEditedName('');
+  };
+
+  const saveRename = (floorFile: ExtractedFile) => {
+    if (editedName.trim() && editedName.trim() !== getGlbTitle(floorFile.name)) {
+      onRenameFloor?.(floorFile, editedName.trim());
+    }
+    cancelRenaming();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, floorFile: ExtractedFile) => {
+    if (e.key === 'Enter') {
+      saveRename(floorFile);
+    } else if (e.key === 'Escape') {
+      cancelRenaming();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[520px] max-h-[600px]">
@@ -101,7 +132,7 @@ export function FloorManagementModal({
         <div className="px-6 pb-6">
           <div className="mb-4">
             <p className="text-sm text-muted-foreground">
-              Manage the floors in your 3D model. You can delete floors or rearrange their order.
+              Manage the floors in your 3D model. You can rename, delete, or rearrange their order.
             </p>
           </div>
 
@@ -119,26 +150,70 @@ export function FloorManagementModal({
                       : 'border-border hover:bg-accent'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className="text-sm font-medium text-muted-foreground min-w-[20px]">
                       {floorIndex + 1}
                     </div>
-                    <button
-                      onClick={() => onFloorFileChange(floorFile)}
-                      className="text-left hover:text-primary transition-colors"
-                    >
-                      <div className="font-medium">{getGlbTitle(floorFile.name)}</div>
-                      <div className="text-xs text-muted-foreground">{floorFile.name}</div>
-                    </button>
+                    {editingFloorName === floorFile.name ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editedName}
+                          onChange={(e) => setEditedName(e.target.value)}
+                          onKeyDown={(e) => handleKeyDown(e, floorFile)}
+                          className="flex-1 px-2 py-1 text-sm border border-primary rounded focus:outline-none focus:ring-2 focus:ring-primary"
+                          autoFocus
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => saveRename(floorFile)}
+                          className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                          title="Save"
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={cancelRenaming}
+                          className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Cancel"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => onFloorFileChange(floorFile)}
+                        className="text-left hover:text-primary transition-colors flex-1 min-w-0"
+                      >
+                        <div className="font-medium truncate">{getGlbTitle(floorFile.name)}</div>
+                        <div className="text-xs text-muted-foreground truncate">{floorFile.name}</div>
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {/* Rename Button */}
+                    {editingFloorName !== floorFile.name && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => startRenaming(floorFile)}
+                        className="h-8 w-8 p-0"
+                        title="Rename floor"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+
                     {/* Move Up Button */}
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => onMoveFloorUp?.(floorFile)}
-                      disabled={!canMoveUp(floorFile)}
+                      disabled={!canMoveUp(floorFile) || editingFloorName !== null}
                       className="h-8 w-8 p-0"
                       title="Move up"
                     >
@@ -150,7 +225,7 @@ export function FloorManagementModal({
                       variant="ghost"
                       size="sm"
                       onClick={() => onMoveFloorDown?.(floorFile)}
-                      disabled={!canMoveDown(floorFile)}
+                      disabled={!canMoveDown(floorFile) || editingFloorName !== null}
                       className="h-8 w-8 p-0"
                       title="Move down"
                     >
@@ -162,7 +237,7 @@ export function FloorManagementModal({
                       variant="ghost"
                       size="sm"
                       onClick={() => handleDeleteFloor(floorFile)}
-                      disabled={sortedFloorFiles.length <= 1}
+                      disabled={sortedFloorFiles.length <= 1 || editingFloorName !== null}
                       className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                       title="Delete floor"
                     >
