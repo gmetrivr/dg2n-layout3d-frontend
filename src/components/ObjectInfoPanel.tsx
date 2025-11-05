@@ -1,7 +1,7 @@
-import { Trash2, RotateCw, RotateCcw } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Pencil, Check } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import type { ArchitecturalObject } from './3DViewerModifier';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ObjectInfoPanelProps {
   selectedObject: ArchitecturalObject | null;
@@ -9,6 +9,7 @@ interface ObjectInfoPanelProps {
   onClose: () => void;
   onRotate: (object: ArchitecturalObject, angle: number) => void;
   onHeightChange: (object: ArchitecturalObject, height: number) => void;
+  onPositionChange?: (object: ArchitecturalObject, startPoint: [number, number, number], endPoint: [number, number, number]) => void;
   onDelete: (object: ArchitecturalObject) => void;
   onReset: (object: ArchitecturalObject) => void;
 }
@@ -19,11 +20,34 @@ export function ObjectInfoPanel({
   onClose,
   onRotate,
   onHeightChange,
+  onPositionChange,
   onDelete,
   onReset
 }: ObjectInfoPanelProps) {
   const [isEditingHeight, setIsEditingHeight] = useState(false);
   const [heightValue, setHeightValue] = useState('');
+  const [isEditingLength, setIsEditingLength] = useState(false);
+  const [lengthValue, setLengthValue] = useState('');
+  const [isEditingCenterPosition, setIsEditingCenterPosition] = useState(false);
+  const [centerPositionValues, setCenterPositionValues] = useState({ x: '', y: '', z: '' });
+  const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
+  const [customRotationValue, setCustomRotationValue] = useState('');
+  const [isEditingRotation, setIsEditingRotation] = useState(false);
+  const [rotationEditValue, setRotationEditValue] = useState('');
+
+  // Reset editing states when selectedObject changes
+  useEffect(() => {
+    setIsEditingHeight(false);
+    setHeightValue('');
+    setIsEditingLength(false);
+    setLengthValue('');
+    setIsEditingCenterPosition(false);
+    setCenterPositionValues({ x: '', y: '', z: '' });
+    setIsCustomRotationMode(false);
+    setCustomRotationValue('');
+    setIsEditingRotation(false);
+    setRotationEditValue('');
+  }, [selectedObject]);
 
   if (!selectedObject) return null;
 
@@ -33,6 +57,49 @@ export function ObjectInfoPanel({
   const dx = selectedObject.endPoint[0] - selectedObject.startPoint[0];
   const dz = selectedObject.endPoint[2] - selectedObject.startPoint[2];
   const length = Math.sqrt(dx * dx + dz * dz);
+
+  // Calculate center position
+  const centerPosition: [number, number, number] = [
+    (selectedObject.startPoint[0] + selectedObject.endPoint[0]) / 2,
+    (selectedObject.startPoint[1] + selectedObject.endPoint[1]) / 2,
+    (selectedObject.startPoint[2] + selectedObject.endPoint[2]) / 2
+  ];
+
+  const originalCenterPosition: [number, number, number] | undefined =
+    (selectedObject.originalStartPoint && selectedObject.originalEndPoint)
+      ? [
+          (selectedObject.originalStartPoint[0] + selectedObject.originalEndPoint[0]) / 2,
+          (selectedObject.originalStartPoint[1] + selectedObject.originalEndPoint[1]) / 2,
+          (selectedObject.originalStartPoint[2] + selectedObject.originalEndPoint[2]) / 2
+        ]
+      : undefined;
+
+  // Calculate rotation angle based on alignment from startPoint to endPoint
+  // Using atan2 to get angle in the XZ plane (horizontal), relative to positive X axis
+  const calculateRotationAngle = (start: [number, number, number], end: [number, number, number], additionalRotation: number = 0) => {
+    const deltaX = end[0] - start[0];
+    const deltaZ = end[2] - start[2];
+    // atan2 returns angle in radians, convert to degrees
+    // Negate deltaZ to match coordinate system used in Canvas3D
+    const baseAngle = Math.atan2(-deltaZ, deltaX) * 180 / Math.PI;
+    // Add the additional rotation (convert from radians to degrees)
+    return baseAngle + (additionalRotation * 180 / Math.PI);
+  };
+
+  const currentRotation = calculateRotationAngle(
+    selectedObject.startPoint,
+    selectedObject.endPoint,
+    selectedObject.rotation || 0
+  );
+
+  const originalRotation = (selectedObject.wasRotated || selectedObject.wasMoved)
+    ? (() => {
+        const origStart = selectedObject.originalStartPoint || selectedObject.startPoint;
+        const origEnd = selectedObject.originalEndPoint || selectedObject.endPoint;
+        const origRot = selectedObject.originalRotation || 0;
+        return calculateRotationAngle(origStart, origEnd, origRot);
+      })()
+    : currentRotation;
 
   const hasHeightChanged = selectedObject.wasHeightChanged;
   const hasMoved = selectedObject.wasMoved;
@@ -65,12 +132,172 @@ export function ObjectInfoPanel({
     }
   };
 
+  // Length editing handlers
+  const handleLengthEdit = () => {
+    setIsEditingLength(true);
+    setLengthValue(length.toFixed(3));
+  };
+
+  const handleLengthSave = () => {
+    const newLength = parseFloat(lengthValue);
+    if (!isNaN(newLength) && newLength > 0 && onPositionChange) {
+      // Calculate center point
+      const centerX = (selectedObject.startPoint[0] + selectedObject.endPoint[0]) / 2;
+      const centerY = (selectedObject.startPoint[1] + selectedObject.endPoint[1]) / 2;
+      const centerZ = (selectedObject.startPoint[2] + selectedObject.endPoint[2]) / 2;
+
+      // Get current rotation angle (including additional rotation)
+      const dx = selectedObject.endPoint[0] - selectedObject.startPoint[0];
+      const dz = selectedObject.endPoint[2] - selectedObject.startPoint[2];
+      const currentAngle = Math.atan2(-dz, dx) + (selectedObject.rotation || 0);
+
+      // Calculate new start and end points with the new length
+      const halfLength = newLength / 2;
+      const newStartPoint: [number, number, number] = [
+        centerX - halfLength * Math.cos(currentAngle),
+        centerY,
+        centerZ + halfLength * Math.sin(currentAngle) // Note: + because we negated in atan2
+      ];
+      const newEndPoint: [number, number, number] = [
+        centerX + halfLength * Math.cos(currentAngle),
+        centerY,
+        centerZ - halfLength * Math.sin(currentAngle) // Note: - because we negated in atan2
+      ];
+
+      onPositionChange(selectedObject, newStartPoint, newEndPoint);
+    }
+    setIsEditingLength(false);
+    setLengthValue('');
+  };
+
+  const handleLengthCancel = () => {
+    setIsEditingLength(false);
+    setLengthValue('');
+  };
+
+  const handleLengthKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleLengthSave();
+    } else if (e.key === 'Escape') {
+      handleLengthCancel();
+    }
+  };
+
+  // Center position editing handlers
+  const handleCenterPositionEdit = () => {
+    setIsEditingCenterPosition(true);
+    setCenterPositionValues({
+      x: centerPosition[0].toString(),
+      y: centerPosition[1].toString(),
+      z: centerPosition[2].toString()
+    });
+  };
+
+  const handleCenterPositionSave = () => {
+    const newCenterX = parseFloat(centerPositionValues.x);
+    const newCenterY = parseFloat(centerPositionValues.y);
+    const newCenterZ = parseFloat(centerPositionValues.z);
+
+    if (!isNaN(newCenterX) && !isNaN(newCenterY) && !isNaN(newCenterZ) && onPositionChange) {
+      // Calculate offset from current center to new center
+      const offsetX = newCenterX - centerPosition[0];
+      const offsetY = newCenterY - centerPosition[1];
+      const offsetZ = newCenterZ - centerPosition[2];
+
+      // Apply offset to both start and end points
+      const newStartPoint: [number, number, number] = [
+        selectedObject.startPoint[0] + offsetX,
+        selectedObject.startPoint[1] + offsetY,
+        selectedObject.startPoint[2] + offsetZ
+      ];
+      const newEndPoint: [number, number, number] = [
+        selectedObject.endPoint[0] + offsetX,
+        selectedObject.endPoint[1] + offsetY,
+        selectedObject.endPoint[2] + offsetZ
+      ];
+
+      onPositionChange(selectedObject, newStartPoint, newEndPoint);
+    }
+    setIsEditingCenterPosition(false);
+    setCenterPositionValues({ x: '', y: '', z: '' });
+  };
+
+  const handleCenterPositionCancel = () => {
+    setIsEditingCenterPosition(false);
+    setCenterPositionValues({ x: '', y: '', z: '' });
+  };
+
+  const handleCenterPositionKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCenterPositionSave();
+    } else if (e.key === 'Escape') {
+      handleCenterPositionCancel();
+    }
+  };
+
+  // Custom rotation handlers
+  const handleCustomRotation = () => {
+    const angle = parseFloat(customRotationValue);
+    if (!isNaN(angle)) {
+      onRotate(selectedObject, angle * Math.PI / 180); // Convert degrees to radians
+      setIsCustomRotationMode(false);
+      setCustomRotationValue('');
+    }
+  };
+
+  const handleCancelCustomRotation = () => {
+    setIsCustomRotationMode(false);
+    setCustomRotationValue('');
+  };
+
+  const handleCustomRotationKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleCustomRotation();
+    } else if (e.key === 'Escape') {
+      handleCancelCustomRotation();
+    }
+  };
+
+  // Direct rotation editing handlers
+  const handleRotationEdit = () => {
+    setIsEditingRotation(true);
+    setRotationEditValue(currentRotation.toFixed(2));
+  };
+
+  const handleRotationSave = () => {
+    const targetAngle = parseFloat(rotationEditValue);
+    if (!isNaN(targetAngle)) {
+      // Close edit mode first
+      setIsEditingRotation(false);
+      setRotationEditValue('');
+
+      // Calculate the angle difference from current rotation
+      const angleDifference = targetAngle - currentRotation;
+      // Convert to radians and apply the rotation
+      onRotate(selectedObject, angleDifference * Math.PI / 180);
+    } else {
+      setIsEditingRotation(false);
+      setRotationEditValue('');
+    }
+  };
+
+  const handleRotationCancel = () => {
+    setIsEditingRotation(false);
+    setRotationEditValue('');
+  };
+
+  const handleRotationEditKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleRotationSave();
+    } else if (e.key === 'Escape') {
+      handleRotationCancel();
+    }
+  };
+
   return (
     <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm">
-          {selectedObject.type === 'glazing' ? 'Glazing' : 'Partition'}
-        </h3>
+        <h3 className="font-semibold text-sm">Object Info</h3>
         <button
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground text-xs"
@@ -80,12 +307,39 @@ export function ObjectInfoPanel({
       </div>
 
       <div className="space-y-1 text-xs">
-        <div><span className="font-medium">Type:</span> {selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' : 'Partition (115mm Box)'}</div>
-        <div><span className="font-medium">Length:</span> {length.toFixed(3)}m</div>
+        <div><span className="font-medium">Block:</span> {selectedObject.type === 'glazing' ? 'Glass' : 'Partition'}</div>
+        <div><span className="font-medium">Type:</span> {selectedObject.variant || (selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' : 'Partition (115mm Box)')}</div>
+
+        {/* Length */}
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="font-medium">Length:</span> {length.toFixed(3)}m
+          </div>
+          {editMode && (
+            <button
+              onClick={handleLengthEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit length"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
 
         {/* Height */}
-        <div style={{ color: hasHeightChanged ? '#ef4444' : 'inherit' }}>
-          <span className="font-medium">Height:</span> {hasHeightChanged ? (selectedObject.originalHeight || selectedObject.height).toFixed(3) : selectedObject.height.toFixed(3)}m
+        <div className="flex items-center justify-between">
+          <div style={{ color: hasHeightChanged ? '#ef4444' : 'inherit' }}>
+            <span className="font-medium">Height:</span> {hasHeightChanged ? (selectedObject.originalHeight || selectedObject.height).toFixed(3) : selectedObject.height.toFixed(3)}m
+          </div>
+          {editMode && (
+            <button
+              onClick={handleHeightEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit height"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
         </div>
         {hasHeightChanged && (
           <div style={{ color: '#22c55e' }}>
@@ -93,50 +347,57 @@ export function ObjectInfoPanel({
           </div>
         )}
 
-        {/* Position */}
-        <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
-          <span className="font-medium">Start:</span> ({
-            hasMoved && selectedObject.originalStartPoint
-              ? `${selectedObject.originalStartPoint[0].toFixed(2)}, ${selectedObject.originalStartPoint[1].toFixed(2)}, ${selectedObject.originalStartPoint[2].toFixed(2)}`
-              : `${selectedObject.startPoint[0].toFixed(2)}, ${selectedObject.startPoint[1].toFixed(2)}, ${selectedObject.startPoint[2].toFixed(2)}`
-          })
+        {/* Position (Center Point) */}
+        <div className="flex items-center justify-between">
+          <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
+            <span className="font-medium">Position:</span> ({
+              (originalCenterPosition && hasMoved)
+                ? `${originalCenterPosition[0].toFixed(2)}, ${originalCenterPosition[1].toFixed(2)}, ${originalCenterPosition[2].toFixed(2)}`
+                : `${centerPosition[0].toFixed(2)}, ${centerPosition[1].toFixed(2)}, ${centerPosition[2].toFixed(2)}`
+            })
+          </div>
+          {editMode && (
+            <button
+              onClick={handleCenterPositionEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit position"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
         </div>
-        {hasMoved && (
+        {hasMoved && originalCenterPosition && (
           <div style={{ color: '#22c55e' }}>
-            <span className="font-medium">New Start:</span> ({selectedObject.startPoint[0].toFixed(2)}, {selectedObject.startPoint[1].toFixed(2)}, {selectedObject.startPoint[2].toFixed(2)})
+            <span className="font-medium">New Position:</span> ({centerPosition[0].toFixed(2)}, {centerPosition[1].toFixed(2)}, {centerPosition[2].toFixed(2)})
           </div>
         )}
 
-        <div style={{ color: hasMoved ? '#ef4444' : 'inherit' }}>
-          <span className="font-medium">End:</span> ({
-            hasMoved && selectedObject.originalEndPoint
-              ? `${selectedObject.originalEndPoint[0].toFixed(2)}, ${selectedObject.originalEndPoint[1].toFixed(2)}, ${selectedObject.originalEndPoint[2].toFixed(2)}`
-              : `${selectedObject.endPoint[0].toFixed(2)}, ${selectedObject.endPoint[1].toFixed(2)}, ${selectedObject.endPoint[2].toFixed(2)}`
-          })
-        </div>
-        {hasMoved && (
-          <div style={{ color: '#22c55e' }}>
-            <span className="font-medium">New End:</span> ({selectedObject.endPoint[0].toFixed(2)}, {selectedObject.endPoint[1].toFixed(2)}, {selectedObject.endPoint[2].toFixed(2)})
+        {/* Rotation (based on alignment from start to end point relative to world X axis) */}
+        <div className="flex items-center justify-between">
+          <div style={{ color: hasMoved || hasRotated ? '#ef4444' : 'inherit' }}>
+            <span className="font-medium">Rotation (Y-axis):</span> {originalRotation.toFixed(2)}°
           </div>
-        )}
-
-        {/* Rotation */}
-        {hasRotated && (
-          <>
-            <div style={{ color: '#ef4444' }}>
-              <span className="font-medium">Rotation:</span> {((selectedObject.originalRotation || 0) * 180 / Math.PI).toFixed(2)}°
-            </div>
-            <div style={{ color: '#22c55e' }}>
-              <span className="font-medium">New Rotation:</span> {((selectedObject.rotation || 0) * 180 / Math.PI).toFixed(2)}°
-            </div>
-          </>
+          {editMode && (
+            <button
+              onClick={handleRotationEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Edit rotation"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        {(hasMoved || hasRotated) && Math.abs(currentRotation - originalRotation) > 0.01 && (
+          <div style={{ color: '#22c55e' }}>
+            <span className="font-medium">New Rotation:</span> {currentRotation.toFixed(2)}°
+          </div>
         )}
       </div>
 
       {editMode && (
         <div className="mt-3 pt-2 border-t border-border">
           {/* Height Edit */}
-          {isEditingHeight ? (
+          {isEditingHeight && (
             <div className="flex gap-1 mb-2">
               <input
                 type="number"
@@ -155,21 +416,116 @@ export function ObjectInfoPanel({
                 onClick={handleHeightSave}
                 className="text-xs px-2 py-1 h-auto"
               >
-                ✓
+                <Check className="h-3 w-3" />
               </Button>
             </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleHeightEdit}
-              className="text-xs px-2 py-1 h-auto w-full mb-2"
-            >
-              Edit Height
-            </Button>
           )}
 
-          {/* Rotation Controls */}
+          {/* Length Edit */}
+          {isEditingLength && (
+            <div className="flex gap-1 mb-2">
+              <input
+                type="number"
+                value={lengthValue}
+                onChange={(e) => setLengthValue(e.target.value)}
+                onKeyDown={handleLengthKeyPress}
+                placeholder="Length (m)"
+                step="0.1"
+                min="0.1"
+                className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                autoFocus
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleLengthSave}
+                className="text-xs px-2 py-1 h-auto"
+              >
+                <Check className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
+
+          {/* Center Position Edit */}
+          {isEditingCenterPosition && (
+            <div className="mb-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium w-4">X:</label>
+                <input
+                  type="number"
+                  value={centerPositionValues.x}
+                  onChange={(e) => setCenterPositionValues(prev => ({ ...prev, x: e.target.value }))}
+                  onKeyDown={handleCenterPositionKeyPress}
+                  step="0.1"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium w-4">Y:</label>
+                <input
+                  type="number"
+                  value={centerPositionValues.y}
+                  onChange={(e) => setCenterPositionValues(prev => ({ ...prev, y: e.target.value }))}
+                  onKeyDown={handleCenterPositionKeyPress}
+                  step="0.1"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium w-4">Z:</label>
+                <input
+                  type="number"
+                  value={centerPositionValues.z}
+                  onChange={(e) => setCenterPositionValues(prev => ({ ...prev, z: e.target.value }))}
+                  onKeyDown={handleCenterPositionKeyPress}
+                  step="0.1"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCenterPositionSave}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Rotation Edit (Direct angle input) */}
+          {isEditingRotation && (
+            <div className="mb-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium">Angle:</label>
+                <input
+                  type="number"
+                  value={rotationEditValue}
+                  onChange={(e) => setRotationEditValue(e.target.value)}
+                  onKeyDown={handleRotationEditKeyPress}
+                  step="1"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+                <span className="text-xs text-muted-foreground">°</span>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRotationSave}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Rotation Controls - rotate object around its center */}
           <div className="flex gap-1 mb-2">
             <Button
               size="sm"
@@ -190,25 +546,39 @@ export function ObjectInfoPanel({
               +90°
             </Button>
           </div>
+
+          {/* Custom Rotation */}
           <div className="flex gap-1 mb-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onRotate(selectedObject, -15 * Math.PI / 180)}
-              className="text-xs px-2 py-1 h-auto flex-1"
-            >
-              <RotateCcw className="h-3 w-3 mr-1" />
-              -15°
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onRotate(selectedObject, 15 * Math.PI / 180)}
-              className="text-xs px-2 py-1 h-auto flex-1"
-            >
-              <RotateCw className="h-3 w-3 mr-1" />
-              +15°
-            </Button>
+            {!isCustomRotationMode ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsCustomRotationMode(true)}
+                className="text-xs px-2 py-1 h-auto w-full"
+              >
+                Rotate Custom
+              </Button>
+            ) : (
+              <div className="flex gap-1 w-full">
+                <input
+                  type="number"
+                  value={customRotationValue}
+                  onChange={(e) => setCustomRotationValue(e.target.value)}
+                  onKeyDown={handleCustomRotationKeyPress}
+                  placeholder="Angle"
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCustomRotation}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Delete Button */}

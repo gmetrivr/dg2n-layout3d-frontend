@@ -69,11 +69,12 @@ function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' 
 export interface ArchitecturalObject {
   id: string;
   type: 'glazing' | 'partition';
+  variant?: string; // Variant name (e.g., "Partition variant 1", "Glazing variant 2")
   floorIndex: number;
   startPoint: [number, number, number]; // [x, y, z] in world coordinates
   endPoint: [number, number, number]; // [x, y, z] in world coordinates
   height: number; // Height variant in meters
-  rotation?: number; // Additional rotation in radians (applied after line rotation)
+  rotation?: number; // Additional rotation in radians (applied after line rotation) - kept for backward compatibility
   // Track modifications
   originalStartPoint?: [number, number, number];
   originalEndPoint?: [number, number, number];
@@ -654,6 +655,34 @@ export function ThreeDViewerModifier() {
         height: newHeight,
         wasHeightChanged: true,
         originalHeight: prev.originalHeight ?? prev.height
+      } : null);
+    }
+  }, [selectedObject]);
+
+  // Handler for object start/end points change (for length editing)
+  const handleObjectPointsChange = useCallback((object: ArchitecturalObject, newStartPoint: [number, number, number], newEndPoint: [number, number, number]) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          startPoint: newStartPoint,
+          endPoint: newEndPoint,
+          wasMoved: true,
+          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
+          originalEndPoint: obj.originalEndPoint ?? obj.endPoint
+        };
+      }
+      return obj;
+    }));
+
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => prev ? {
+        ...prev,
+        startPoint: newStartPoint,
+        endPoint: newEndPoint,
+        wasMoved: true,
+        originalStartPoint: prev.originalStartPoint ?? prev.startPoint,
+        originalEndPoint: prev.originalEndPoint ?? prev.endPoint
       } : null);
     }
   }, [selectedObject]);
@@ -2478,6 +2507,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onClose={() => setSelectedObject(null)}
             onRotate={handleObjectRotate}
             onHeightChange={handleObjectHeightChange}
+            onPositionChange={handleObjectPointsChange}
             onDelete={handleObjectDelete}
             onReset={handleObjectReset}
           />
