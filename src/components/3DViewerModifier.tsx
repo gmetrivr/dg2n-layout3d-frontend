@@ -22,6 +22,7 @@ import { useFixtureModifications } from '../hooks/useFixtureModifications';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/shadcn/components/ui/dialog';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 import { loadStoreMasterData, getUniqueStoreCodes, type StoreData } from '../utils/csvUtils';
+import { AddObjectModal } from './AddObjectModal';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -63,8 +64,15 @@ function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' 
   return 'legacy';
 }
 
-
-
+// Architectural object type definition
+export interface ArchitecturalObject {
+  id: string;
+  type: 'glazing' | 'partition';
+  floorIndex: number;
+  startPoint: [number, number, number]; // [x, y, z] in world coordinates
+  endPoint: [number, number, number]; // [x, y, z] in world coordinates
+  height: number; // Height variant in meters
+}
 
 
 
@@ -126,6 +134,14 @@ export function ThreeDViewerModifier() {
   const [floorManagementModalOpen, setFloorManagementModalOpen] = useState(false);
   const [floorDisplayOrder, setFloorDisplayOrder] = useState<number[]>([]); // Maps display position to actual floor index
   const [initialFloorCount, setInitialFloorCount] = useState<number>(0); // Track initial floor count
+
+  // Architectural objects state (glazing and partitions)
+  const [architecturalObjects, setArchitecturalObjects] = useState<ArchitecturalObject[]>([]);
+  const [addObjectModalOpen, setAddObjectModalOpen] = useState(false);
+  const [isAddingObject, setIsAddingObject] = useState(false);
+  const [currentObjectType, setCurrentObjectType] = useState<'glazing' | 'partition' | null>(null);
+  const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
+  const [objectHeight, setObjectHeight] = useState<number>(2.5); // Default height in meters
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -438,6 +454,45 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, setFixtureCache, setFixtureTypeMap]);
 
+  // Handler for object type selection from modal
+  const handleObjectTypeSelect = useCallback((objectType: 'glazing' | 'partition') => {
+    setCurrentObjectType(objectType);
+    setIsAddingObject(true);
+    setObjectPlacementPoint(null); // Reset placement point
+    // Cursor will change in Canvas3D when isAddingObject is true
+  }, []);
+
+  // Handler for floor click during object placement
+  const handleFloorClickForObjectPlacement = useCallback((point: [number, number, number]) => {
+    if (!isAddingObject || !currentObjectType) return;
+
+    const fileForFloorExtraction = selectedFloorFile || selectedFile;
+    const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+    const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    if (objectPlacementPoint === null) {
+      // First click - set start point
+      setObjectPlacementPoint(point);
+    } else {
+      // Second click - create object with start and end points
+      const newObject: ArchitecturalObject = {
+        id: `${currentObjectType}-${Date.now()}-${Math.random()}`,
+        type: currentObjectType,
+        floorIndex: currentFloor,
+        startPoint: objectPlacementPoint,
+        endPoint: point,
+        height: objectHeight
+      };
+
+      setArchitecturalObjects(prev => [...prev, newObject]);
+
+      // Reset placement state
+      setIsAddingObject(false);
+      setCurrentObjectType(null);
+      setObjectPlacementPoint(null);
+    }
+  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile]);
+
   // Helper function to get floor index mapping if floors have been reordered or deleted
   const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
     if (!floorDisplayOrder || floorDisplayOrder.length === 0) {
@@ -576,7 +631,55 @@ export function ThreeDViewerModifier() {
           console.warn(`Failed to load fixture GLB for export: ${location.blockName}`, error);
         }
       }
-      
+
+      // Add architectural objects (glazing and partitions) for the current floor
+      const currentFloorObjects = architecturalObjects.filter(obj => obj.floorIndex === currentFloor);
+
+      for (const obj of currentFloorObjects) {
+        const { startPoint, endPoint, height } = obj;
+
+        // Calculate dimensions and position
+        const dx = endPoint[0] - startPoint[0];
+        const dz = endPoint[2] - startPoint[2];
+        const length = Math.sqrt(dx * dx + dz * dz);
+        const angle = Math.atan2(dz, dx);
+
+        // Position at midpoint
+        const position = new THREE.Vector3(
+          (startPoint[0] + endPoint[0]) / 2,
+          startPoint[1] + height / 2,
+          (startPoint[2] + endPoint[2]) / 2
+        );
+
+        let geometry: THREE.BufferGeometry;
+        let material: THREE.Material;
+
+        if (obj.type === 'glazing') {
+          // Create plane geometry for glazing
+          geometry = new THREE.PlaneGeometry(length, height);
+          material = new THREE.MeshStandardMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide
+          });
+        } else {
+          // Create box geometry for partition (115mm width)
+          const width = 0.115;
+          geometry = new THREE.BoxGeometry(length, height, width);
+          material = new THREE.MeshStandardMaterial({
+            color: 0xcccccc
+          });
+        }
+
+        // Create mesh and apply transformations
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(position);
+        mesh.rotation.set(0, angle, 0);
+
+        exportScene.add(mesh);
+      }
+
       // Export the combined scene as GLB
       const exporter = new GLTFExporter();
       
@@ -610,7 +713,7 @@ export function ThreeDViewerModifier() {
       }
       setIsExporting(false);
     }
-  }, [selectedFile, selectedFloorFile, locationData, deletedFixtures, isExporting]);
+  }, [selectedFile, selectedFloorFile, locationData, deletedFixtures, architecturalObjects, isExporting]);
 
   
 
@@ -1954,6 +2057,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             setIsAddingFixture(true);
             setAddFixtureModalOpen(true);
           }}
+          onAddObjectsClick={() => setAddObjectModalOpen(true)}
         />
         <Canvas3D
           cameraPosition={cameraPosition}
@@ -1976,6 +2080,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           showFixtureLabels={showFixtureLabels}
           showWalls={showWalls}
           selectedLocations={selectedLocations}
+          architecturalObjects={architecturalObjects}
+          isAddingObject={isAddingObject}
+          currentObjectType={currentObjectType}
+          objectPlacementPoint={objectPlacementPoint}
+          onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
           onFixtureClick={handleFixtureClick}
@@ -2124,6 +2233,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onMoveFloorDown={handleMoveFloorDown}
         onRenameFloor={handleRenameFloor}
         floorDisplayOrder={floorDisplayOrder}
+      />
+
+      {/* Add Object Modal */}
+      <AddObjectModal
+        open={addObjectModalOpen}
+        onOpenChange={setAddObjectModalOpen}
+        onObjectSelect={handleObjectTypeSelect}
       />
 
       {/* Save Store Dialog */}

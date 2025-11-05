@@ -4,6 +4,7 @@ import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } fr
 import * as THREE from 'three';
 import type { ExtractedFile } from '../utils/zipUtils';
 import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
+import type { ArchitecturalObject } from './3DViewerModifier';
 
 interface BillboardProps {
   children: React.ReactNode;
@@ -689,6 +690,142 @@ class ModelErrorBoundary extends Component<
   }
 }
 
+// Glazing component - single plane
+interface GlazingProps {
+  object: ArchitecturalObject;
+}
+
+function Glazing({ object }: GlazingProps) {
+  const { startPoint, endPoint, height } = object;
+
+  // Calculate position, rotation, and dimensions
+  const dx = endPoint[0] - startPoint[0];
+  const dz = endPoint[2] - startPoint[2];
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const angle = Math.atan2(dz, dx);
+
+  // Position at midpoint
+  const position: [number, number, number] = [
+    (startPoint[0] + endPoint[0]) / 2,
+    startPoint[1] + height / 2,
+    (startPoint[2] + endPoint[2]) / 2
+  ];
+
+  return (
+    <group position={position} rotation={[0, angle, 0]}>
+      <mesh>
+        <planeGeometry args={[length, height]} />
+        <meshStandardMaterial
+          color="#88ccff"
+          transparent
+          opacity={0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Edge outline */}
+      <lineSegments>
+        <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
+        <lineBasicMaterial color="#0066cc" linewidth={2} />
+      </lineSegments>
+    </group>
+  );
+}
+
+// Partition component - box with 115mm width
+interface PartitionProps {
+  object: ArchitecturalObject;
+}
+
+function Partition({ object }: PartitionProps) {
+  const { startPoint, endPoint, height } = object;
+
+  // Calculate position, rotation, and dimensions
+  const dx = endPoint[0] - startPoint[0];
+  const dz = endPoint[2] - startPoint[2];
+  const length = Math.sqrt(dx * dx + dz * dz);
+  const angle = Math.atan2(dz, dx);
+  const width = 0.115; // 115mm in meters
+
+  // Position at midpoint
+  const position: [number, number, number] = [
+    (startPoint[0] + endPoint[0]) / 2,
+    startPoint[1] + height / 2,
+    (startPoint[2] + endPoint[2]) / 2
+  ];
+
+  return (
+    <group position={position} rotation={[0, angle, 0]}>
+      <mesh>
+        <boxGeometry args={[length, height, width]} />
+        <meshStandardMaterial color="#cccccc" />
+      </mesh>
+      {/* Edge outline */}
+      <lineSegments>
+        <edgesGeometry args={[new THREE.BoxGeometry(length, height, width)]} />
+        <lineBasicMaterial color="#666666" linewidth={2} />
+      </lineSegments>
+    </group>
+  );
+}
+
+// Floor click handler using raycasting
+interface FloorClickHandlerProps {
+  isAddingObject: boolean;
+  onFloorClick: (point: [number, number, number]) => void;
+}
+
+function FloorClickHandler({ isAddingObject, onFloorClick }: FloorClickHandlerProps) {
+  const { scene, camera } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+
+  useEffect(() => {
+    if (!isAddingObject) return;
+
+    const handleClick = (event: MouseEvent) => {
+      // Calculate mouse position in normalized device coordinates
+      const canvas = event.target as HTMLCanvasElement;
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      // Update raycaster
+      raycaster.setFromCamera(mouse, camera);
+
+      // Intersect with all meshes in the scene
+      const intersects = raycaster.intersectObjects(scene.children, true);
+
+      // Find first floor mesh intersection
+      for (const intersect of intersects) {
+        const mesh = intersect.object as THREE.Mesh;
+
+        // Check if this is a floor mesh (not a fixture or other object)
+        // Floor meshes typically don't have interactive userData
+        if (mesh.isMesh && !mesh.userData.interactive) {
+          const point = intersect.point;
+          onFloorClick([point.x, point.y, point.z]);
+          break;
+        }
+      }
+    };
+
+    const canvas = document.querySelector('canvas');
+    if (canvas) {
+      canvas.addEventListener('click', handleClick);
+      // Change cursor to crosshair when adding objects
+      canvas.style.cursor = 'crosshair';
+
+      return () => {
+        canvas.removeEventListener('click', handleClick);
+        canvas.style.cursor = 'default';
+      };
+    }
+  }, [isAddingObject, onFloorClick, raycaster, scene, camera]);
+
+  return null;
+}
+
 interface Canvas3DProps {
   cameraPosition: [number, number, number];
   orbitTarget: [number, number, number];
@@ -710,6 +847,13 @@ interface Canvas3DProps {
   showFixtureLabels: boolean;
   showWalls: boolean;
   selectedLocations: LocationData[];
+  // Architectural objects props
+  architecturalObjects?: ArchitecturalObject[];
+  isAddingObject?: boolean;
+  currentObjectType?: 'glazing' | 'partition' | null;
+  objectPlacementPoint?: [number, number, number] | null;
+  onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
+  // Existing callbacks
   onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
   onGLBError: (blockName: string, url: string) => void;
   onFixtureClick: (location: LocationData, event?: any) => void;
@@ -742,6 +886,11 @@ export function Canvas3D({
   showFixtureLabels,
   showWalls,
   selectedLocations,
+  architecturalObjects = [],
+  isAddingObject = false,
+  currentObjectType = null,
+  objectPlacementPoint = null,
+  onFloorClickForObjectPlacement,
   onBoundsCalculated,
   onGLBError,
   onFixtureClick,
@@ -886,6 +1035,42 @@ export function Canvas3D({
             )
           ));
       })()}
+
+      {/* Render architectural objects (glazing and partitions) */}
+      {architecturalObjects.map(obj => {
+        const fileForFloorExtraction = selectedFloorFile || selectedFile;
+        const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+        // Only render objects for current floor
+        if (obj.floorIndex !== currentFloor) return null;
+
+        return obj.type === 'glazing' ? (
+          <Glazing key={obj.id} object={obj} />
+        ) : (
+          <Partition key={obj.id} object={obj} />
+        );
+      })}
+
+      {/* Preview line during object placement */}
+      {isAddingObject && objectPlacementPoint && (() => {
+        // We need to show a line from the first point to the cursor
+        // But we can't easily track cursor in 3D, so we just show the start point sphere
+        return (
+          <mesh position={objectPlacementPoint}>
+            <sphereGeometry args={[0.15]} />
+            <meshStandardMaterial color="#ff00ff" />
+          </mesh>
+        );
+      })()}
+
+      {/* Floor click handler for object placement */}
+      {isAddingObject && onFloorClickForObjectPlacement && (
+        <FloorClickHandler
+          isAddingObject={isAddingObject}
+          onFloorClick={onFloorClickForObjectPlacement}
+        />
+      )}
 
       <OrbitControls
         ref={orbitControlsRef}

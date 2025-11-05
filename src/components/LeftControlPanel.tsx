@@ -62,6 +62,7 @@ interface LeftControlPanelProps {
   onSaveStoreClick?: () => void;
   onManageFloorsClick?: () => void;
   onAddFixtureClick?: () => void;
+  onAddObjectsClick?: () => void;
 }
 
 export function LeftControlPanel({
@@ -104,6 +105,7 @@ export function LeftControlPanel({
   onSaveStoreClick,
   onManageFloorsClick,
   onAddFixtureClick,
+  onAddObjectsClick,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -344,7 +346,7 @@ export function LeftControlPanel({
 
         {/* Add Fixture Button */}
         {editMode && (
-          <div className="flex">
+          <div className="flex gap-2">
             <button
               onClick={onAddFixtureClick}
               className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 w-full justify-center"
@@ -352,9 +354,16 @@ export function LeftControlPanel({
               <Plus className="h-4 w-4" />
               Add Fixture
             </button>
+            <button
+              onClick={onAddObjectsClick}
+              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:opacity-90 w-full justify-center"
+            >
+              <Plus className="h-4 w-4" />
+              Add Objects
+            </button>
           </div>
         )}
-        
+
         {/* Floor Plates Controls */}
         {editFloorplatesMode && (() => {
           // Calculate counts for current floor
