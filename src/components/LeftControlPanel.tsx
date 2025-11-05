@@ -47,6 +47,9 @@ interface LeftControlPanelProps {
   floorDisplayOrder?: number[];
   initialFloorCount?: number;
 
+  // Architectural objects
+  architecturalObjectsCount?: number;
+
   // Event handlers
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
@@ -91,6 +94,7 @@ export function LeftControlPanel({
   jobId,
   floorDisplayOrder,
   initialFloorCount,
+  architecturalObjectsCount,
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
@@ -181,7 +185,8 @@ export function LeftControlPanel({
                     deletedFixtures.size > 0 ||
                     hasDuplicatedFixtures() ||
                     hasFloorReordering() ||
-                    hasFloorDeletion();
+                    hasFloorDeletion() ||
+                    (architecturalObjectsCount && architecturalObjectsCount > 0);
 
   return (
     <div className="absolute top-4 left-4 z-50">

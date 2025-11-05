@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 import { loadStoreMasterData, getUniqueStoreCodes, type StoreData } from '../utils/csvUtils';
 import { AddObjectModal } from './AddObjectModal';
+import { ObjectInfoPanel } from './ObjectInfoPanel';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -72,6 +73,15 @@ export interface ArchitecturalObject {
   startPoint: [number, number, number]; // [x, y, z] in world coordinates
   endPoint: [number, number, number]; // [x, y, z] in world coordinates
   height: number; // Height variant in meters
+  rotation?: number; // Additional rotation in radians (applied after line rotation)
+  // Track modifications
+  originalStartPoint?: [number, number, number];
+  originalEndPoint?: [number, number, number];
+  originalHeight?: number;
+  originalRotation?: number;
+  wasMoved?: boolean;
+  wasRotated?: boolean;
+  wasHeightChanged?: boolean;
 }
 
 
@@ -141,7 +151,8 @@ export function ThreeDViewerModifier() {
   const [isAddingObject, setIsAddingObject] = useState(false);
   const [currentObjectType, setCurrentObjectType] = useState<'glazing' | 'partition' | null>(null);
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
-  const [objectHeight, setObjectHeight] = useState<number>(2.5); // Default height in meters
+  const [objectHeight] = useState<number>(2.5); // Default height in meters
+  const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -190,6 +201,12 @@ export function ThreeDViewerModifier() {
     setLocationData,
     setSelectedFloorPlate
   );
+
+  // Wrap handleFixtureClick to clear selected object when a fixture is clicked
+  const handleFixtureClickWithObjectClear = useCallback((clickedLocation: LocationData, event?: any) => {
+    setSelectedObject(null); // Clear selected architectural object
+    handleFixtureClick(clickedLocation, event);
+  }, [handleFixtureClick]);
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -470,6 +487,9 @@ export function ThreeDViewerModifier() {
     const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
     const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
 
+    // Note: point is in Three.js world coordinates [x, y, z]
+    // We store it as-is since our rendering already handles this correctly
+
     if (objectPlacementPoint === null) {
       // First click - set start point
       setObjectPlacementPoint(point);
@@ -481,7 +501,16 @@ export function ThreeDViewerModifier() {
         floorIndex: currentFloor,
         startPoint: objectPlacementPoint,
         endPoint: point,
-        height: objectHeight
+        height: objectHeight,
+        rotation: 0,
+        // Store original values
+        originalStartPoint: objectPlacementPoint,
+        originalEndPoint: point,
+        originalHeight: objectHeight,
+        originalRotation: 0,
+        wasMoved: false,
+        wasRotated: false,
+        wasHeightChanged: false
       };
 
       setArchitecturalObjects(prev => [...prev, newObject]);
@@ -492,6 +521,180 @@ export function ThreeDViewerModifier() {
       setObjectPlacementPoint(null);
     }
   }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile]);
+
+  // Handler for object click
+  const handleObjectClick = useCallback((object: ArchitecturalObject) => {
+    if (!editMode || isAddingObject) return;
+    setSelectedObject(object);
+    // Clear fixture selections when selecting an object
+    setSelectedLocation(null);
+    setSelectedLocations([]);
+    setSelectedFloorPlate(null);
+  }, [editMode, isAddingObject]);
+
+  // Handler for object position change
+  const handleObjectPositionChange = useCallback((object: ArchitecturalObject, newCenterPosition: [number, number, number]) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        // Calculate offset from original center (origin is now at ground level)
+        const originalCenter: [number, number, number] = [
+          (obj.startPoint[0] + obj.endPoint[0]) / 2,
+          obj.startPoint[1],  // Ground level (y coordinate of start/end points)
+          (obj.startPoint[2] + obj.endPoint[2]) / 2
+        ];
+
+        const offset: [number, number, number] = [
+          newCenterPosition[0] - originalCenter[0],
+          newCenterPosition[1] - originalCenter[1],
+          newCenterPosition[2] - originalCenter[2]
+        ];
+
+        // Apply offset to both start and end points
+        const newStartPoint: [number, number, number] = [
+          obj.startPoint[0] + offset[0],
+          obj.startPoint[1] + offset[1],
+          obj.startPoint[2] + offset[2]
+        ];
+
+        const newEndPoint: [number, number, number] = [
+          obj.endPoint[0] + offset[0],
+          obj.endPoint[1] + offset[1],
+          obj.endPoint[2] + offset[2]
+        ];
+
+        return {
+          ...obj,
+          startPoint: newStartPoint,
+          endPoint: newEndPoint,
+          wasMoved: true,
+          originalStartPoint: obj.originalStartPoint || obj.startPoint,
+          originalEndPoint: obj.originalEndPoint || obj.endPoint
+        };
+      }
+      return obj;
+    }));
+
+    // Update selected object
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => {
+        if (!prev) return null;
+        const originalCenter: [number, number, number] = [
+          (prev.startPoint[0] + prev.endPoint[0]) / 2,
+          prev.startPoint[1],  // Ground level
+          (prev.startPoint[2] + prev.endPoint[2]) / 2
+        ];
+
+        const offset: [number, number, number] = [
+          newCenterPosition[0] - originalCenter[0],
+          newCenterPosition[1] - originalCenter[1],
+          newCenterPosition[2] - originalCenter[2]
+        ];
+
+        return {
+          ...prev,
+          startPoint: [
+            prev.startPoint[0] + offset[0],
+            prev.startPoint[1] + offset[1],
+            prev.startPoint[2] + offset[2]
+          ],
+          endPoint: [
+            prev.endPoint[0] + offset[0],
+            prev.endPoint[1] + offset[1],
+            prev.endPoint[2] + offset[2]
+          ],
+          wasMoved: true,
+          originalStartPoint: prev.originalStartPoint || prev.startPoint,
+          originalEndPoint: prev.originalEndPoint || prev.endPoint
+        };
+      });
+    }
+  }, [selectedObject]);
+
+  // Handler for object rotation
+  const handleObjectRotate = useCallback((object: ArchitecturalObject, angle: number) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          rotation: (obj.rotation || 0) + angle,
+          wasRotated: true,
+          originalRotation: obj.originalRotation ?? (obj.rotation || 0)
+        };
+      }
+      return obj;
+    }));
+
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => prev ? {
+        ...prev,
+        rotation: (prev.rotation || 0) + angle,
+        wasRotated: true,
+        originalRotation: prev.originalRotation ?? (prev.rotation || 0)
+      } : null);
+    }
+  }, [selectedObject]);
+
+  // Handler for object height change
+  const handleObjectHeightChange = useCallback((object: ArchitecturalObject, newHeight: number) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          height: newHeight,
+          wasHeightChanged: true,
+          originalHeight: obj.originalHeight ?? obj.height
+        };
+      }
+      return obj;
+    }));
+
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => prev ? {
+        ...prev,
+        height: newHeight,
+        wasHeightChanged: true,
+        originalHeight: prev.originalHeight ?? prev.height
+      } : null);
+    }
+  }, [selectedObject]);
+
+  // Handler for object deletion
+  const handleObjectDelete = useCallback((object: ArchitecturalObject) => {
+    setArchitecturalObjects(prev => prev.filter(obj => obj.id !== object.id));
+    setSelectedObject(null);
+  }, []);
+
+  // Handler for object reset
+  const handleObjectReset = useCallback((object: ArchitecturalObject) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          startPoint: obj.originalStartPoint || obj.startPoint,
+          endPoint: obj.originalEndPoint || obj.endPoint,
+          height: obj.originalHeight ?? obj.height,
+          rotation: obj.originalRotation ?? obj.rotation ?? 0,
+          wasMoved: false,
+          wasRotated: false,
+          wasHeightChanged: false
+        };
+      }
+      return obj;
+    }));
+
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => prev ? {
+        ...prev,
+        startPoint: prev.originalStartPoint || prev.startPoint,
+        endPoint: prev.originalEndPoint || prev.endPoint,
+        height: prev.originalHeight ?? prev.height,
+        rotation: prev.originalRotation ?? prev.rotation ?? 0,
+        wasMoved: false,
+        wasRotated: false,
+        wasHeightChanged: false
+      } : null);
+    }
+  }, [selectedObject]);
 
   // Helper function to get floor index mapping if floors have been reordered or deleted
   const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
@@ -642,12 +845,12 @@ export function ThreeDViewerModifier() {
         const dx = endPoint[0] - startPoint[0];
         const dz = endPoint[2] - startPoint[2];
         const length = Math.sqrt(dx * dx + dz * dz);
-        const angle = Math.atan2(dz, dx);
+        const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
 
-        // Position at midpoint
+        // Position at midpoint - origin at ground level
         const position = new THREE.Vector3(
           (startPoint[0] + endPoint[0]) / 2,
-          startPoint[1] + height / 2,
+          startPoint[1],  // Ground level
           (startPoint[2] + endPoint[2]) / 2
         );
 
@@ -672,12 +875,17 @@ export function ThreeDViewerModifier() {
           });
         }
 
-        // Create mesh and apply transformations
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(position);
-        mesh.rotation.set(0, angle, 0);
+        // Create a group for proper origin positioning
+        const objectGroup = new THREE.Group();
+        objectGroup.position.copy(position);
+        objectGroup.rotation.set(0, angle, 0);
 
-        exportScene.add(mesh);
+        // Create mesh offset upward by height/2 (since origin is at ground level)
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(0, height / 2, 0);
+
+        objectGroup.add(mesh);
+        exportScene.add(objectGroup);
       }
 
       // Export the combined scene as GLB
@@ -762,12 +970,27 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     log('Extracted files:', workingExtractedFiles.map(f => f.name));
 
-    // Add all original files except the CSVs that need to be modified
+    // Find floors with architectural objects
+    const floorsWithObjects = new Set(architecturalObjects.map(obj => obj.floorIndex));
+    log('Floors with architectural objects:', Array.from(floorsWithObjects));
+
+    // Add all original files except the CSVs that need to be modified and GLBs with architectural objects
     for (const file of workingExtractedFiles) {
       if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
         log('Skipping original CSV in bundle:', file.name);
         continue;
       }
+
+      // Check if this is a floor GLB that has architectural objects
+      const floorMatch = file.name.match(/floor[_-]?(\d+)/i);
+      if (floorMatch && !isShatteredFloorPlateFile(file.name)) {
+        const floorNum = parseInt(floorMatch[1]);
+        if (floorsWithObjects.has(floorNum)) {
+          log('Skipping floor GLB (will regenerate with objects):', file.name);
+          continue;
+        }
+      }
+
       zip.file(file.name, file.blob);
     }
 
@@ -784,10 +1007,131 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         zip.file(originalFloorPlatesFile.name, originalFloorPlatesFile.blob);
       }
     }
+
+    // Export GLB files with architectural objects
+    if (floorsWithObjects.size > 0) {
+      log('Exporting floors with architectural objects...');
+      const loader = new GLTFLoader();
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      loader.setDRACOLoader(dracoLoader);
+
+      for (const floorNum of floorsWithObjects) {
+        // Find the floor file
+        const floorFile = workingExtractedFiles.find(file => {
+          const match = file.name.match(/floor[_-]?(\d+)/i);
+          return match && parseInt(match[1]) === floorNum && !isShatteredFloorPlateFile(file.name);
+        });
+
+        if (!floorFile) {
+          log('Floor file not found for floor:', floorNum);
+          continue;
+        }
+
+        log('Exporting floor with objects:', floorFile.name);
+
+        try {
+          // Create a new scene to combine floor + fixtures + objects
+          const exportScene = new THREE.Scene();
+
+          // Load the floor model
+          const floorGLTF = await new Promise<GLTF>((resolve, reject) => {
+            loader.load(floorFile.url, resolve, undefined, reject);
+          });
+          const floorModel = floorGLTF.scene.clone();
+          exportScene.add(floorModel);
+
+          // Add architectural objects for this floor (fixtures are NOT exported, only objects)
+          const floorObjects = architecturalObjects.filter(obj => obj.floorIndex === floorNum);
+
+          // Create shared materials for each object type (reused across all objects)
+          const glazingMaterial = new THREE.MeshStandardMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide
+          });
+
+          const partitionMaterial = new THREE.MeshStandardMaterial({
+            color: 0xcccccc
+          });
+
+          // Count objects by type for naming
+          const glazingCount = { count: 0 };
+          const partitionCount = { count: 0 };
+
+          for (const obj of floorObjects) {
+            const { startPoint, endPoint, height } = obj;
+
+            const dx = endPoint[0] - startPoint[0];
+            const dz = endPoint[2] - startPoint[2];
+            const length = Math.sqrt(dx * dx + dz * dz);
+            const angle = Math.atan2(-dz, dx);
+
+            const position = new THREE.Vector3(
+              (startPoint[0] + endPoint[0]) / 2,
+              startPoint[1],
+              (startPoint[2] + endPoint[2]) / 2
+            );
+
+            let geometry: THREE.BufferGeometry;
+            let material: THREE.Material;
+            let objectName: string;
+
+            if (obj.type === 'glazing') {
+              glazingCount.count++;
+              objectName = `glazing_${glazingCount.count}`;
+              geometry = new THREE.PlaneGeometry(length, height);
+              material = glazingMaterial; // Reuse shared material
+            } else {
+              partitionCount.count++;
+              objectName = `partition_${partitionCount.count}`;
+              const width = 0.115;
+              geometry = new THREE.BoxGeometry(length, height, width);
+              material = partitionMaterial; // Reuse shared material
+            }
+
+            const objectGroup = new THREE.Group();
+            objectGroup.name = objectName;
+            objectGroup.position.copy(position);
+            objectGroup.rotation.set(0, angle, 0);
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = objectName;
+            mesh.position.set(0, height / 2, 0);
+
+            objectGroup.add(mesh);
+            exportScene.add(objectGroup);
+          }
+
+          // Export the combined scene as GLB
+          const exporter = new GLTFExporter();
+          const result = await new Promise<ArrayBuffer>((resolve, reject) => {
+            exporter.parse(
+              exportScene,
+              (gltf) => resolve(gltf as ArrayBuffer),
+              (error) => reject(error),
+              { binary: true }
+            );
+          });
+
+          // Add to zip
+          const blob = new Blob([result], { type: 'application/octet-stream' });
+          zip.file(floorFile.name, blob);
+          log('Exported floor GLB with objects:', floorFile.name);
+
+        } catch (error) {
+          console.error('Failed to export floor with objects:', floorFile.name, error);
+        }
+      }
+
+      dracoLoader.dispose();
+    }
+
     log('Modified ZIP built.');
     const blob = await zip.generateAsync({ type: 'blob' });
     return blob;
-  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName]);
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
@@ -2040,6 +2384,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           jobId={jobId}
           floorDisplayOrder={floorDisplayOrder}
           initialFloorCount={initialFloorCount}
+          architecturalObjectsCount={architecturalObjects.length}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
@@ -2084,10 +2429,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           isAddingObject={isAddingObject}
           currentObjectType={currentObjectType}
           objectPlacementPoint={objectPlacementPoint}
+          selectedObject={selectedObject}
           onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
+          onObjectClick={handleObjectClick}
+          onObjectPositionChange={handleObjectPositionChange}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
-          onFixtureClick={handleFixtureClick}
+          onFixtureClick={handleFixtureClickWithObjectClear}
           isLocationSelected={isLocationSelected}
           onPositionChange={handlePositionChange}
           onFloorPlateClick={(plateData) => setSelectedFloorPlate(plateData)}
@@ -2097,6 +2445,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             } else {
               setSelectedLocations([]);
               setSelectedLocation(null);
+              setSelectedObject(null);
             }
           }}
           setIsTransforming={setIsTransforming}
@@ -2121,8 +2470,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           />
         )}
         
+        {/* Show ObjectInfoPanel when an architectural object is selected */}
+        {selectedObject && (
+          <ObjectInfoPanel
+            selectedObject={selectedObject}
+            editMode={editMode}
+            onClose={() => setSelectedObject(null)}
+            onRotate={handleObjectRotate}
+            onHeightChange={handleObjectHeightChange}
+            onDelete={handleObjectDelete}
+            onReset={handleObjectReset}
+          />
+        )}
+
         {/* Show RightInfoPanel for single selection or floor plates */}
-        {selectedLocations.length <= 1 && (
+        {selectedLocations.length <= 1 && !selectedObject && (
           <RightInfoPanel
             selectedLocation={selectedLocation}
             selectedFloorPlate={selectedFloorPlate}

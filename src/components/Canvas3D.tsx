@@ -693,78 +693,190 @@ class ModelErrorBoundary extends Component<
 // Glazing component - single plane
 interface GlazingProps {
   object: ArchitecturalObject;
+  isSelected?: boolean;
+  editMode?: boolean;
+  transformSpace?: 'world' | 'local';
+  onClick?: (object: ArchitecturalObject, event?: any) => void;
+  onPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
 }
 
-function Glazing({ object }: GlazingProps) {
-  const { startPoint, endPoint, height } = object;
+function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: GlazingProps) {
+  const { startPoint, endPoint, height, rotation: additionalRotation } = object;
+  const groupRef = useRef<THREE.Group>(null);
+  const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
 
   // Calculate position, rotation, and dimensions
   const dx = endPoint[0] - startPoint[0];
   const dz = endPoint[2] - startPoint[2];
   const length = Math.sqrt(dx * dx + dz * dz);
-  const angle = Math.atan2(dz, dx);
+  const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
 
-  // Position at midpoint
-  const position: [number, number, number] = [
+  // Position at midpoint - origin at ground level (y=0)
+  const position: [number, number, number] = pendingPosition || [
     (startPoint[0] + endPoint[0]) / 2,
-    startPoint[1] + height / 2,
+    startPoint[1],  // Ground level, not height/2
     (startPoint[2] + endPoint[2]) / 2
   ];
 
+  const totalRotation = angle + (additionalRotation || 0);
+
+  const handleTransformChange = () => {
+    // Store position locally during transform to avoid global state updates
+    if (groupRef.current) {
+      const newPosition = groupRef.current.position;
+      setPendingPosition([newPosition.x, newPosition.y, newPosition.z]);
+    }
+  };
+
+  const handleTransformEnd = () => {
+    if (pendingPosition && onPositionChange) {
+      onPositionChange(object, pendingPosition);
+      setPendingPosition(null);
+
+      // Clear isTransforming flag after update
+      setTimeout(() => {
+        onTransformEnd?.();
+      }, 0);
+    } else {
+      onTransformEnd?.();
+    }
+  };
+
   return (
-    <group position={position} rotation={[0, angle, 0]}>
-      <mesh>
-        <planeGeometry args={[length, height]} />
-        <meshStandardMaterial
-          color="#88ccff"
-          transparent
-          opacity={0.6}
-          side={THREE.DoubleSide}
+    <>
+      <group ref={groupRef} position={position} rotation={[0, totalRotation, 0]}>
+        <mesh
+          position={[0, height / 2, 0]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick?.(object, event);
+          }}
+        >
+          <planeGeometry args={[length, height]} />
+          <meshStandardMaterial
+            color={isSelected ? "#66aaff" : "#88ccff"}
+            transparent
+            opacity={0.6}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Edge outline */}
+        <lineSegments position={[0, height / 2, 0]}>
+          <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
+          <lineBasicMaterial color={isSelected ? "red" : (object.wasMoved || object.wasRotated || object.wasHeightChanged ? "purple" : "#0066cc")} linewidth={2} />
+        </lineSegments>
+      </group>
+
+      {/* Transform controls for editing mode - only show for selected object */}
+      {editMode && isSelected && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode="translate"
+          space={transformSpace}
+          showX={true}
+          showY={false}
+          showZ={true}
+          onObjectChange={handleTransformChange}
+          onMouseDown={onTransformStart}
+          onMouseUp={handleTransformEnd}
         />
-      </mesh>
-      {/* Edge outline */}
-      <lineSegments>
-        <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
-        <lineBasicMaterial color="#0066cc" linewidth={2} />
-      </lineSegments>
-    </group>
+      )}
+    </>
   );
 }
 
 // Partition component - box with 115mm width
 interface PartitionProps {
   object: ArchitecturalObject;
+  isSelected?: boolean;
+  editMode?: boolean;
+  transformSpace?: 'world' | 'local';
+  onClick?: (object: ArchitecturalObject, event?: any) => void;
+  onPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
 }
 
-function Partition({ object }: PartitionProps) {
-  const { startPoint, endPoint, height } = object;
+function Partition({ object, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: PartitionProps) {
+  const { startPoint, endPoint, height, rotation: additionalRotation } = object;
+  const groupRef = useRef<THREE.Group>(null);
+  const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
 
   // Calculate position, rotation, and dimensions
   const dx = endPoint[0] - startPoint[0];
   const dz = endPoint[2] - startPoint[2];
   const length = Math.sqrt(dx * dx + dz * dz);
-  const angle = Math.atan2(dz, dx);
+  const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
   const width = 0.115; // 115mm in meters
 
-  // Position at midpoint
-  const position: [number, number, number] = [
+  // Position at midpoint - origin at ground level (y=0)
+  const position: [number, number, number] = pendingPosition || [
     (startPoint[0] + endPoint[0]) / 2,
-    startPoint[1] + height / 2,
+    startPoint[1],  // Ground level, not height/2
     (startPoint[2] + endPoint[2]) / 2
   ];
 
+  const totalRotation = angle + (additionalRotation || 0);
+
+  const handleTransformChange = () => {
+    // Store position locally during transform to avoid global state updates
+    if (groupRef.current) {
+      const newPosition = groupRef.current.position;
+      setPendingPosition([newPosition.x, newPosition.y, newPosition.z]);
+    }
+  };
+
+  const handleTransformEnd = () => {
+    if (pendingPosition && onPositionChange) {
+      onPositionChange(object, pendingPosition);
+      setPendingPosition(null);
+
+      // Clear isTransforming flag after update
+      setTimeout(() => {
+        onTransformEnd?.();
+      }, 0);
+    } else {
+      onTransformEnd?.();
+    }
+  };
+
   return (
-    <group position={position} rotation={[0, angle, 0]}>
-      <mesh>
-        <boxGeometry args={[length, height, width]} />
-        <meshStandardMaterial color="#cccccc" />
-      </mesh>
-      {/* Edge outline */}
-      <lineSegments>
-        <edgesGeometry args={[new THREE.BoxGeometry(length, height, width)]} />
-        <lineBasicMaterial color="#666666" linewidth={2} />
-      </lineSegments>
-    </group>
+    <>
+      <group ref={groupRef} position={position} rotation={[0, totalRotation, 0]}>
+        <mesh
+          position={[0, height / 2, 0]}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick?.(object, event);
+          }}
+        >
+          <boxGeometry args={[length, height, width]} />
+          <meshStandardMaterial color={isSelected ? "#aaaaaa" : "#cccccc"} />
+        </mesh>
+        {/* Edge outline */}
+        <lineSegments position={[0, height / 2, 0]}>
+          <edgesGeometry args={[new THREE.BoxGeometry(length, height, width)]} />
+          <lineBasicMaterial color={isSelected ? "red" : (object.wasMoved || object.wasRotated || object.wasHeightChanged ? "purple" : "#666666")} linewidth={2} />
+        </lineSegments>
+      </group>
+
+      {/* Transform controls for editing mode - only show for selected object */}
+      {editMode && isSelected && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode="translate"
+          space={transformSpace}
+          showX={true}
+          showY={false}
+          showZ={true}
+          onObjectChange={handleTransformChange}
+          onMouseDown={onTransformStart}
+          onMouseUp={handleTransformEnd}
+        />
+      )}
+    </>
   );
 }
 
@@ -852,7 +964,10 @@ interface Canvas3DProps {
   isAddingObject?: boolean;
   currentObjectType?: 'glazing' | 'partition' | null;
   objectPlacementPoint?: [number, number, number] | null;
+  selectedObject?: ArchitecturalObject | null;
   onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
+  onObjectClick?: (object: ArchitecturalObject) => void;
+  onObjectPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
   // Existing callbacks
   onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
   onGLBError: (blockName: string, url: string) => void;
@@ -888,9 +1003,12 @@ export function Canvas3D({
   selectedLocations,
   architecturalObjects = [],
   isAddingObject = false,
-  currentObjectType = null,
+  currentObjectType: _currentObjectType = null,
   objectPlacementPoint = null,
+  selectedObject = null,
   onFloorClickForObjectPlacement,
+  onObjectClick,
+  onObjectPositionChange,
   onBoundsCalculated,
   onGLBError,
   onFixtureClick,
@@ -1045,10 +1163,32 @@ export function Canvas3D({
         // Only render objects for current floor
         if (obj.floorIndex !== currentFloor) return null;
 
+        const isSelected = selectedObject?.id === obj.id;
+
         return obj.type === 'glazing' ? (
-          <Glazing key={obj.id} object={obj} />
+          <Glazing
+            key={obj.id}
+            object={obj}
+            isSelected={isSelected}
+            editMode={editMode}
+            transformSpace={transformSpace}
+            onClick={onObjectClick}
+            onPositionChange={onObjectPositionChange}
+            onTransformStart={() => setIsTransforming(true)}
+            onTransformEnd={() => setIsTransforming(false)}
+          />
         ) : (
-          <Partition key={obj.id} object={obj} />
+          <Partition
+            key={obj.id}
+            object={obj}
+            isSelected={isSelected}
+            editMode={editMode}
+            transformSpace={transformSpace}
+            onClick={onObjectClick}
+            onPositionChange={onObjectPositionChange}
+            onTransformStart={() => setIsTransforming(true)}
+            onTransformEnd={() => setIsTransforming(false)}
+          />
         );
       })}
 
