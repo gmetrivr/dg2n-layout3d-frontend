@@ -61,7 +61,7 @@ export function AddObjectModal({
             >
               <Box className="h-12 w-12 text-primary mb-3" />
               <span className="font-medium text-sm">Partition</span>
-              <span className="text-xs text-muted-foreground mt-1">115mm box</span>
+              <span className="text-xs text-muted-foreground mt-1">60mm box</span>
             </button>
           </div>
 

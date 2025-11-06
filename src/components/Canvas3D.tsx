@@ -744,9 +744,13 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
     }
   };
 
+  const frameThickness = 0.05; // 50mm
+  const frameDepth = 0.1; // 100mm
+
   return (
     <>
       <group ref={groupRef} position={position} rotation={[0, totalRotation, 0]}>
+        {/* Glass plane */}
         <mesh
           position={[0, height / 2, 0]}
           onClick={(event) => {
@@ -762,6 +766,48 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
             side={THREE.DoubleSide}
           />
         </mesh>
+
+        {/* Metal frame around the glass */}
+        {/* Top frame */}
+        <mesh position={[0, height - frameThickness / 2, 0]}>
+          <boxGeometry args={[length, frameThickness, frameDepth]} />
+          <meshStandardMaterial
+            color={isSelected ? "#333333" : "#444444"}
+            metalness={0.8}
+            roughness={0.2}
+          />
+        </mesh>
+
+        {/* Bottom frame */}
+        <mesh position={[0, frameThickness / 2, 0]}>
+          <boxGeometry args={[length, frameThickness, frameDepth]} />
+          <meshStandardMaterial
+            color={isSelected ? "#333333" : "#444444"}
+            metalness={0.8}
+            roughness={0.2}
+          />
+        </mesh>
+
+        {/* Left frame */}
+        <mesh position={[-length / 2 + frameThickness / 2, height / 2, 0]}>
+          <boxGeometry args={[frameThickness, height - 2 * frameThickness, frameDepth]} />
+          <meshStandardMaterial
+            color={isSelected ? "#333333" : "#444444"}
+            metalness={0.8}
+            roughness={0.2}
+          />
+        </mesh>
+
+        {/* Right frame */}
+        <mesh position={[length / 2 - frameThickness / 2, height / 2, 0]}>
+          <boxGeometry args={[frameThickness, height - 2 * frameThickness, frameDepth]} />
+          <meshStandardMaterial
+            color={isSelected ? "#333333" : "#444444"}
+            metalness={0.8}
+            roughness={0.2}
+          />
+        </mesh>
+
         {/* Edge outline */}
         <lineSegments position={[0, height / 2, 0]}>
           <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
@@ -787,7 +833,7 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
   );
 }
 
-// Partition component - box with 115mm width
+// Partition component - box with 60mm width
 interface PartitionProps {
   object: ArchitecturalObject;
   isSelected?: boolean;
@@ -809,7 +855,7 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
   const dz = endPoint[2] - startPoint[2];
   const length = Math.sqrt(dx * dx + dz * dz);
   const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
-  const width = 0.115; // 115mm in meters
+  const width = 0.06; // 60mm in meters
 
   // Position at midpoint - origin at ground level (y=0)
   const position: [number, number, number] = pendingPosition || [
@@ -893,7 +939,35 @@ function FloorClickHandler({ isAddingObject, onFloorClick }: FloorClickHandlerPr
   useEffect(() => {
     if (!isAddingObject) return;
 
+    let mouseDownPosition: { x: number; y: number } | null = null;
+    let isDragging = false;
+    const dragThreshold = 5; // pixels
+
+    const handleMouseDown = (event: MouseEvent) => {
+      mouseDownPosition = { x: event.clientX, y: event.clientY };
+      isDragging = false;
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (mouseDownPosition) {
+        const dx = event.clientX - mouseDownPosition.x;
+        const dy = event.clientY - mouseDownPosition.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance > dragThreshold) {
+          isDragging = true;
+        }
+      }
+    };
+
     const handleClick = (event: MouseEvent) => {
+      // Only process click if it wasn't a drag operation
+      if (isDragging) {
+        isDragging = false;
+        mouseDownPosition = null;
+        return;
+      }
+
       // Calculate mouse position in normalized device coordinates
       const canvas = event.target as HTMLCanvasElement;
       const rect = canvas.getBoundingClientRect();
@@ -920,15 +994,23 @@ function FloorClickHandler({ isAddingObject, onFloorClick }: FloorClickHandlerPr
           break;
         }
       }
+
+      // Reset tracking
+      mouseDownPosition = null;
+      isDragging = false;
     };
 
     const canvas = document.querySelector('canvas');
     if (canvas) {
+      canvas.addEventListener('mousedown', handleMouseDown);
+      canvas.addEventListener('mousemove', handleMouseMove);
       canvas.addEventListener('click', handleClick);
       // Change cursor to crosshair when adding objects
       canvas.style.cursor = 'crosshair';
 
       return () => {
+        canvas.removeEventListener('mousedown', handleMouseDown);
+        canvas.removeEventListener('mousemove', handleMouseMove);
         canvas.removeEventListener('click', handleClick);
         canvas.style.cursor = 'default';
       };
