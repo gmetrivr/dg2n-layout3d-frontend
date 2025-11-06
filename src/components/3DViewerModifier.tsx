@@ -1220,7 +1220,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         zip_path: path,
         zip_size: size,
         job_id: jobId,
-        entity: saveEntity,
+        entity: saveEntity.toLowerCase(), // Ensure lowercase for API compatibility
       });
 
       setSaveDialogOpen(false);
@@ -1247,7 +1247,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       setSaveStoreName(`${selectedStoreCode} - ${displayName}`);
 
       // Set entity from formatType, defaulting to 'trends' if not found
-      const entity = selectedStore.formatType || 'trends';
+      // Normalize to lowercase for API compatibility
+      const entity = (selectedStore.formatType || 'trends').toLowerCase();
       setSaveEntity(entity);
     } else {
       setSaveStoreName('');

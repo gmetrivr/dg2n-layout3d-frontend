@@ -356,7 +356,7 @@ export function MyCreatedStores() {
                             const zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
 
                             // Make the store live using the API
-                            await makeStoreLive(r.store_id, r.store_name, zipBlob, r.entity || 'trends');
+                            await makeStoreLive(r.store_id, r.store_name, zipBlob, (r.entity || 'trends').toLowerCase());
 
                             alert(`Store "${r.store_name}" is now live!`);
                           } catch (error) {
