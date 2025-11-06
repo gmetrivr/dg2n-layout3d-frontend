@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
@@ -152,8 +152,9 @@ export function ThreeDViewerModifier() {
   const [isAddingObject, setIsAddingObject] = useState(false);
   const [currentObjectType, setCurrentObjectType] = useState<'glazing' | 'partition' | null>(null);
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
-  const [objectHeight] = useState<number>(2.5); // Default height in meters
+  const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
+  const justCreatedObjectRef = useRef<boolean>(false); // Track if we just created an object
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -488,25 +489,25 @@ export function ThreeDViewerModifier() {
     const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
     const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
 
-    // Note: point is in Three.js world coordinates [x, y, z]
-    // We store it as-is since our rendering already handles this correctly
+    // Force placement at ground level (y = 0)
+    const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
 
     if (objectPlacementPoint === null) {
-      // First click - set start point
-      setObjectPlacementPoint(point);
+      // First click - set start point at ground level
+      setObjectPlacementPoint(groundLevelPoint);
     } else {
-      // Second click - create object with start and end points
+      // Second click - create object with start and end points at ground level
       const newObject: ArchitecturalObject = {
         id: `${currentObjectType}-${Date.now()}-${Math.random()}`,
         type: currentObjectType,
         floorIndex: currentFloor,
         startPoint: objectPlacementPoint,
-        endPoint: point,
+        endPoint: groundLevelPoint,
         height: objectHeight,
         rotation: 0,
         // Store original values
         originalStartPoint: objectPlacementPoint,
-        originalEndPoint: point,
+        originalEndPoint: groundLevelPoint,
         originalHeight: objectHeight,
         originalRotation: 0,
         wasMoved: false,
@@ -514,14 +515,36 @@ export function ThreeDViewerModifier() {
         wasHeightChanged: false
       };
 
+      // Add the new object to the list
       setArchitecturalObjects(prev => [...prev, newObject]);
+
+      // Set flag to prevent onPointerMissed from clearing selection
+      justCreatedObjectRef.current = true;
+
+      // Use setTimeout to ensure state updates are processed before selection
+      setTimeout(() => {
+        console.log('Selecting newly created object:', newObject.id, newObject.type);
+
+        // Select the newly created object
+        setSelectedObject(newObject);
+
+        // Clear fixture selections
+        setSelectedLocation(null);
+        setSelectedLocations([]);
+        setSelectedFloorPlate(null);
+
+        // Reset the flag after a short delay to allow normal behavior again
+        setTimeout(() => {
+          justCreatedObjectRef.current = false;
+        }, 100);
+      }, 0);
 
       // Reset placement state
       setIsAddingObject(false);
       setCurrentObjectType(null);
       setObjectPlacementPoint(null);
     }
-  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile]);
+  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
 
   // Handler for object click
   const handleObjectClick = useCallback((object: ArchitecturalObject) => {
@@ -544,22 +567,23 @@ export function ThreeDViewerModifier() {
           (obj.startPoint[2] + obj.endPoint[2]) / 2
         ];
 
+        // Force Y to stay at ground level (0), only allow X and Z movement
         const offset: [number, number, number] = [
           newCenterPosition[0] - originalCenter[0],
-          newCenterPosition[1] - originalCenter[1],
+          0,  // No Y movement - keep at ground level
           newCenterPosition[2] - originalCenter[2]
         ];
 
-        // Apply offset to both start and end points
+        // Apply offset to both start and end points (Y remains at 0)
         const newStartPoint: [number, number, number] = [
           obj.startPoint[0] + offset[0],
-          obj.startPoint[1] + offset[1],
+          0,  // Force ground level
           obj.startPoint[2] + offset[2]
         ];
 
         const newEndPoint: [number, number, number] = [
           obj.endPoint[0] + offset[0],
-          obj.endPoint[1] + offset[1],
+          0,  // Force ground level
           obj.endPoint[2] + offset[2]
         ];
 
@@ -886,8 +910,13 @@ export function ThreeDViewerModifier() {
         let geometry: THREE.BufferGeometry;
         let material: THREE.Material;
 
+        // Create a group for proper origin positioning
+        const objectGroup = new THREE.Group();
+        objectGroup.position.copy(position);
+        objectGroup.rotation.set(0, angle, 0);
+
         if (obj.type === 'glazing') {
-          // Create plane geometry for glazing
+          // Create plane geometry for glazing (glass)
           geometry = new THREE.PlaneGeometry(length, height);
           material = new THREE.MeshStandardMaterial({
             color: 0x88ccff,
@@ -895,25 +924,67 @@ export function ThreeDViewerModifier() {
             opacity: 0.6,
             side: THREE.DoubleSide
           });
+
+          // Create glass mesh offset upward by height/2 (since origin is at ground level)
+          const glassMesh = new THREE.Mesh(geometry, material);
+          glassMesh.position.set(0, height / 2, 0);
+          objectGroup.add(glassMesh);
+
+          // Add metal frame around the glass (50mm thickness, 100mm depth)
+          const frameThickness = 0.05; // 50mm
+          const frameDepth = 0.1; // 100mm
+          const frameMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444, // Dark grey metal
+            metalness: 0.8,
+            roughness: 0.2
+          });
+
+          // Top frame
+          const topFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(length, frameThickness, frameDepth),
+            frameMaterial
+          );
+          topFrame.position.set(0, height - frameThickness / 2, 0);
+          objectGroup.add(topFrame);
+
+          // Bottom frame
+          const bottomFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(length, frameThickness, frameDepth),
+            frameMaterial
+          );
+          bottomFrame.position.set(0, frameThickness / 2, 0);
+          objectGroup.add(bottomFrame);
+
+          // Left frame
+          const leftFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+            frameMaterial
+          );
+          leftFrame.position.set(-length / 2 + frameThickness / 2, height / 2, 0);
+          objectGroup.add(leftFrame);
+
+          // Right frame
+          const rightFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+            frameMaterial
+          );
+          rightFrame.position.set(length / 2 - frameThickness / 2, height / 2, 0);
+          objectGroup.add(rightFrame);
         } else {
-          // Create box geometry for partition (115mm width)
-          const width = 0.115;
+          // Create box geometry for partition (60mm width)
+          const width = 0.06;
           geometry = new THREE.BoxGeometry(length, height, width);
           material = new THREE.MeshStandardMaterial({
             color: 0xcccccc
           });
+
+          // Create mesh offset upward by height/2 (since origin is at ground level)
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(0, height / 2, 0);
+
+          objectGroup.add(mesh);
         }
 
-        // Create a group for proper origin positioning
-        const objectGroup = new THREE.Group();
-        objectGroup.position.copy(position);
-        objectGroup.rotation.set(0, angle, 0);
-
-        // Create mesh offset upward by height/2 (since origin is at ground level)
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(0, height / 2, 0);
-
-        objectGroup.add(mesh);
         exportScene.add(objectGroup);
       }
 
@@ -1081,6 +1152,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             side: THREE.DoubleSide
           });
 
+          const frameMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444, // Dark grey metal
+            metalness: 0.8,
+            roughness: 0.2
+          });
+
           const partitionMaterial = new THREE.MeshStandardMaterial({
             color: 0xcccccc
           });
@@ -1103,33 +1180,75 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               (startPoint[2] + endPoint[2]) / 2
             );
 
-            let geometry: THREE.BufferGeometry;
-            let material: THREE.Material;
             let objectName: string;
+            const objectGroup = new THREE.Group();
+            objectGroup.position.copy(position);
+            objectGroup.rotation.set(0, angle, 0);
 
             if (obj.type === 'glazing') {
               glazingCount.count++;
               objectName = `glazing_${glazingCount.count}`;
-              geometry = new THREE.PlaneGeometry(length, height);
-              material = glazingMaterial; // Reuse shared material
+              objectGroup.name = objectName;
+
+              // Create glass plane
+              const glassGeometry = new THREE.PlaneGeometry(length, height);
+              const glassMesh = new THREE.Mesh(glassGeometry, glazingMaterial);
+              glassMesh.name = `${objectName}_glass`;
+              glassMesh.position.set(0, height / 2, 0);
+              objectGroup.add(glassMesh);
+
+              // Add metal frame around the glass (50mm thickness, 100mm depth)
+              const frameThickness = 0.05; // 50mm
+              const frameDepth = 0.1; // 100mm
+
+              // Top frame
+              const topFrame = new THREE.Mesh(
+                new THREE.BoxGeometry(length, frameThickness, frameDepth),
+                frameMaterial
+              );
+              topFrame.name = `${objectName}_frame_top`;
+              topFrame.position.set(0, height - frameThickness / 2, 0);
+              objectGroup.add(topFrame);
+
+              // Bottom frame
+              const bottomFrame = new THREE.Mesh(
+                new THREE.BoxGeometry(length, frameThickness, frameDepth),
+                frameMaterial
+              );
+              bottomFrame.name = `${objectName}_frame_bottom`;
+              bottomFrame.position.set(0, frameThickness / 2, 0);
+              objectGroup.add(bottomFrame);
+
+              // Left frame
+              const leftFrame = new THREE.Mesh(
+                new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+                frameMaterial
+              );
+              leftFrame.name = `${objectName}_frame_left`;
+              leftFrame.position.set(-length / 2 + frameThickness / 2, height / 2, 0);
+              objectGroup.add(leftFrame);
+
+              // Right frame
+              const rightFrame = new THREE.Mesh(
+                new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+                frameMaterial
+              );
+              rightFrame.name = `${objectName}_frame_right`;
+              rightFrame.position.set(length / 2 - frameThickness / 2, height / 2, 0);
+              objectGroup.add(rightFrame);
             } else {
               partitionCount.count++;
               objectName = `partition_${partitionCount.count}`;
-              const width = 0.115;
-              geometry = new THREE.BoxGeometry(length, height, width);
-              material = partitionMaterial; // Reuse shared material
+              objectGroup.name = objectName;
+
+              const width = 0.06; // 60mm
+              const geometry = new THREE.BoxGeometry(length, height, width);
+              const mesh = new THREE.Mesh(geometry, partitionMaterial);
+              mesh.name = objectName;
+              mesh.position.set(0, height / 2, 0);
+              objectGroup.add(mesh);
             }
 
-            const objectGroup = new THREE.Group();
-            objectGroup.name = objectName;
-            objectGroup.position.copy(position);
-            objectGroup.rotation.set(0, angle, 0);
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.name = objectName;
-            mesh.position.set(0, height / 2, 0);
-
-            objectGroup.add(mesh);
             exportScene.add(objectGroup);
           }
 
@@ -2469,6 +2588,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onPositionChange={handlePositionChange}
           onFloorPlateClick={(plateData) => setSelectedFloorPlate(plateData)}
           onPointerMissed={() => {
+            // Don't clear selection when adding objects or just created an object
+            if (isAddingObject || justCreatedObjectRef.current) return;
+
             if (editFloorplatesMode) {
               setSelectedFloorPlate(null);
             } else {
