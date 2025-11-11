@@ -1332,7 +1332,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       await uploadStoreZip(path, blob);
       log('Save Store: uploaded to', path, 'size', size);
 
-      // Insert DB record
+      // Find store metadata from master data
+      // Insert DB record (metadata will be fetched from CSV when making store live)
       await insertStoreRecord({
         store_id: saveStoreId,
         store_name: saveStoreName,
@@ -1353,7 +1354,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } finally {
       setIsSavingStore(false);
     }
-  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord]);
+  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord, storeData]);
 
   // Handle store selection and auto-populate store name and entity
   const handleStoreSelection = useCallback((selectedStoreCode: string) => {

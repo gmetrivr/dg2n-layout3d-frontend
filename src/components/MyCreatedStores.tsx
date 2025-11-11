@@ -355,8 +355,26 @@ export function MyCreatedStores() {
                             // Download the ZIP file first
                             const zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
 
-                            // Make the store live using the API
-                            await makeStoreLive(r.store_id, r.store_name, zipBlob, (r.entity || 'trends').toLowerCase());
+                            // Find store metadata from CSV by store_id
+                            const storeInfo = storeData.find(store => store.storeCode === r.store_id);
+
+                            // Make the store live using the API with metadata from CSV
+                            await makeStoreLive(
+                              r.store_id,
+                              r.store_name,
+                              zipBlob,
+                              (r.entity || 'trends').toLowerCase(),
+                              '0,0,0',
+                              {
+                                nocName: storeInfo?.nocName || undefined,
+                                sapName: storeInfo?.sapName || undefined,
+                                zone: storeInfo?.zone || undefined,
+                                state: storeInfo?.state || undefined,
+                                city: storeInfo?.city || undefined,
+                                format: storeInfo?.format || undefined,
+                                formatType: storeInfo?.formatType || undefined,
+                              }
+                            );
 
                             alert(`Store "${r.store_name}" is now live!`);
                           } catch (error) {

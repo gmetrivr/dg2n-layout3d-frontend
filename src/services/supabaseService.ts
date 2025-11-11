@@ -111,13 +111,32 @@ export const useSupabaseService = () => {
         storeName: string,
         zipBlob: Blob,
         entity: string = 'trends',
-        spawnPoint: string = '0,0,0'
+        spawnPoint: string = '0,0,0',
+        options?: {
+          nocName?: string;
+          sapName?: string;
+          zone?: string;
+          state?: string;
+          city?: string;
+          format?: string;
+          formatType?: string;
+        }
       ) {
         const formData = new FormData();
         formData.append('entity', entity);
         formData.append('store', storeId);
         formData.append('store3dZip', zipBlob, `${storeName}.zip`);
         formData.append('spawnPoint', spawnPoint);
+        formData.append('storeName', storeName);
+
+        // Append optional fields if provided
+        if (options?.nocName) formData.append('nocName', options.nocName);
+        if (options?.sapName) formData.append('sapName', options.sapName);
+        if (options?.zone) formData.append('zone', options.zone);
+        if (options?.state) formData.append('state', options.state);
+        if (options?.city) formData.append('city', options.city);
+        if (options?.format) formData.append('formate', options.format);
+        if (options?.formatType) formData.append('formatType', options.formatType);
 
         const response = await fetch('https://stockflow-core.dg2n.com/api/tooling/processStore3DZip', {
           method: 'POST',

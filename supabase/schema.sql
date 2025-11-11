@@ -6,7 +6,8 @@ create table if not exists public.store_saves (
   store_name text not null,
   job_id text null,
   zip_path text not null,
-  zip_size bigint null
+  zip_size bigint null,
+  entity text null
 );
 
 -- Note: Use the Supabase Dashboard to create a Storage bucket.
