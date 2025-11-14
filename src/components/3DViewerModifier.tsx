@@ -155,6 +155,8 @@ export function ThreeDViewerModifier() {
   const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
   const justCreatedObjectRef = useRef<boolean>(false); // Track if we just created an object
+  const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
+  const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -206,9 +208,36 @@ export function ThreeDViewerModifier() {
 
   // Wrap handleFixtureClick to clear selected object when a fixture is clicked
   const handleFixtureClickWithObjectClear = useCallback((clickedLocation: LocationData, event?: any) => {
+    // Don't process clicks if mouse was down on transform controls
+    // This prevents accidental selection when clicking transform controls that overlap other fixtures
+    if (isMouseDownOnTransformRef.current) {
+      return;
+    }
+
     setSelectedObject(null); // Clear selected architectural object
     handleFixtureClick(clickedLocation, event);
   }, [handleFixtureClick]);
+
+  // Wrap setIsTransforming to track when transforming starts/ends
+  const handleSetIsTransforming = useCallback((transforming: boolean) => {
+    setIsTransforming(transforming);
+
+    if (transforming) {
+      // Mouse is down on transform controls
+      isMouseDownOnTransformRef.current = true;
+    } else {
+      // Transforming ended - set flags to prevent selection clearing
+      justFinishedTransformRef.current = true;
+
+      // Clear the mouse down flag immediately
+      isMouseDownOnTransformRef.current = false;
+
+      // Clear the finished transform flag after a delay
+      setTimeout(() => {
+        justFinishedTransformRef.current = false;
+      }, 200); // Increased delay to ensure onPointerMissed is fully processed
+    }
+  }, []);
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -563,6 +592,13 @@ export function ThreeDViewerModifier() {
   // Handler for object click
   const handleObjectClick = useCallback((object: ArchitecturalObject) => {
     if (!editMode || isAddingObject) return;
+
+    // Don't process clicks if mouse was down on transform controls
+    // This prevents accidental selection when clicking transform controls that overlap other objects
+    if (isMouseDownOnTransformRef.current) {
+      return;
+    }
+
     setSelectedObject(object);
     // Clear fixture selections when selecting an object
     setSelectedLocation(null);
@@ -2766,8 +2802,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onPositionChange={handlePositionChange}
           onFloorPlateClick={(plateData) => setSelectedFloorPlate(plateData)}
           onPointerMissed={() => {
-            // Don't clear selection when adding objects or just created an object
-            if (isAddingObject || justCreatedObjectRef.current) return;
+            // Don't clear selection when:
+            // - Adding objects
+            // - Just created an object
+            // - Currently transforming
+            // - Mouse is/was down on transform controls
+            // - Just finished transforming
+            if (isAddingObject || justCreatedObjectRef.current || isTransforming || isMouseDownOnTransformRef.current || justFinishedTransformRef.current) return;
 
             if (editFloorplatesMode) {
               setSelectedFloorPlate(null);
@@ -2777,7 +2818,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               setSelectedObject(null);
             }
           }}
-          setIsTransforming={setIsTransforming}
+          setIsTransforming={handleSetIsTransforming}
           onOrbitTargetUpdate={setCurrentOrbitTarget}
         />
         

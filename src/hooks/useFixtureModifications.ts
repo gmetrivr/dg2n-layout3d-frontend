@@ -91,7 +91,24 @@ export function useFixtureModifications(
       }
       return prev;
     });
-  }, [setLocationData, setSelectedLocation]);
+
+    // Also update selectedLocations to keep the array in sync
+    setSelectedLocations(prev => prev.map(loc => {
+      if (generateFixtureUID(loc) === key) {
+        return {
+          ...loc,
+          posX: newPosition[0],
+          posY: newPosition[1],
+          posZ: newPosition[2],
+          wasMoved: true,
+          originalPosX: loc.originalPosX ?? loc.posX,
+          originalPosY: loc.originalPosY ?? loc.posY,
+          originalPosZ: loc.originalPosZ ?? loc.posZ,
+        };
+      }
+      return loc;
+    }));
+  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
 
 
   const handleRotateFixture = useCallback((degrees: number) => {

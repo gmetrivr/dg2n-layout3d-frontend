@@ -179,16 +179,13 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
     if (pendingPosition && onPositionChange) {
       onPositionChange(location, pendingPosition);
       setPendingPosition(null);
-
-      // Clear isTransforming flag AFTER position update's render cycle completes
-      // This ensures memo comparison blocks re-render before flag is cleared
-      setTimeout(() => {
-        onTransformEnd?.();
-      }, 0);
-    } else {
-      // No position changes, clear flag immediately
-      onTransformEnd?.();
     }
+
+    // Always delay clearing isTransforming flag to prevent onPointerMissed from clearing selection
+    // This ensures the flag stays true until after the mouse up event is fully processed
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
   };
 
   const count = location.count || 1;
@@ -734,14 +731,12 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
     if (pendingPosition && onPositionChange) {
       onPositionChange(object, pendingPosition);
       setPendingPosition(null);
-
-      // Clear isTransforming flag after update
-      setTimeout(() => {
-        onTransformEnd?.();
-      }, 0);
-    } else {
-      onTransformEnd?.();
     }
+
+    // Always delay clearing isTransforming flag to prevent onPointerMissed from clearing selection
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
   };
 
   const frameThickness = 0.05; // 50mm
@@ -878,14 +873,12 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
     if (pendingPosition && onPositionChange) {
       onPositionChange(object, pendingPosition);
       setPendingPosition(null);
-
-      // Clear isTransforming flag after update
-      setTimeout(() => {
-        onTransformEnd?.();
-      }, 0);
-    } else {
-      onTransformEnd?.();
     }
+
+    // Always delay clearing isTransforming flag to prevent onPointerMissed from clearing selection
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
   };
 
   return (
