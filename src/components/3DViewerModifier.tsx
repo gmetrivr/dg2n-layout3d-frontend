@@ -1331,11 +1331,24 @@ const createStoreConfigJSON = useCallback(async (
     // Continue with preserved mappings only
   }
 
-  // 6. Build the config object
+  // 6. Fetch direct render fixture types
+  let directRenderTypes: string[] = [];
+  try {
+    log('Fetching direct render fixture types...');
+    const directRenderData = await apiService.getDirectRenderTypes('02');
+    directRenderTypes = directRenderData.direct_render_fixture_types;
+    log(`Found ${directRenderTypes.length} direct render fixture types`);
+  } catch (error) {
+    console.error('Failed to fetch direct render types:', error);
+    // Continue without direct render types
+  }
+
+  // 7. Build the config object
   const config = {
     floor: floors,
     block_fixture_types: blockFixtureTypes,
-    fixture_type_glb_urls: fixtureTypeGlbUrls
+    fixture_type_glb_urls: fixtureTypeGlbUrls,
+    additional_block_fixture_type: directRenderTypes
   };
 
   log('Store config generated with', floors.length, 'floors');

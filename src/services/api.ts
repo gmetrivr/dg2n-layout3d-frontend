@@ -80,6 +80,12 @@ export interface MigrateBrandsResponse {
   total_changed: number;
 }
 
+export interface DirectRenderTypesResponse {
+  pipeline_version: string;
+  direct_render_fixture_types: string[];
+  count: number;
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -315,6 +321,17 @@ export const apiService = {
 
     if (!response.ok) {
       throw new Error(`Failed to migrate brand names: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // Direct render fixture types endpoint
+  async getDirectRenderTypes(pipelineVersion: string = '02'): Promise<DirectRenderTypesResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/direct-render-types?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get direct render types: ${response.statusText}`);
     }
 
     return response.json();

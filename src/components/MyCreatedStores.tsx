@@ -222,11 +222,23 @@ async function ensureStoreConfigInZip(zipBlob: Blob): Promise<Blob> {
     console.error('[MyCreatedStores] Failed to fetch fixture type URLs:', error);
   }
 
+  // Fetch direct render fixture types
+  let directRenderTypes: string[] = [];
+  try {
+    console.log('[MyCreatedStores] Fetching direct render fixture types...');
+    const directRenderData = await apiService.getDirectRenderTypes('02');
+    directRenderTypes = directRenderData.direct_render_fixture_types;
+    console.log(`[MyCreatedStores] Found ${directRenderTypes.length} direct render fixture types`);
+  } catch (error) {
+    console.error('[MyCreatedStores] Failed to fetch direct render types:', error);
+  }
+
   // Build config object
   const config = {
     floor: floors,
     block_fixture_types: blockFixtureTypes,
-    fixture_type_glb_urls: fixtureTypeGlbUrls
+    fixture_type_glb_urls: fixtureTypeGlbUrls,
+    additional_block_fixture_type: directRenderTypes
   };
 
   // Add store-config.json to ZIP
