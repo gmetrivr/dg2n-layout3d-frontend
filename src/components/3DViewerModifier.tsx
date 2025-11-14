@@ -299,11 +299,18 @@ export function ThreeDViewerModifier() {
       
       // Small delay to ensure cache clearing takes effect
       await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Find the mapped blockName for this fixture type
-      const mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
-        blockName => FIXTURE_TYPE_MAPPING[blockName] === newType
-      ) || newType; // fallback to newType if not found in mapping
+
+      // Get the proper block name from the backend API
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType);
+
+      // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
+      if (!mappedBlockName) {
+        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+          blockName => FIXTURE_TYPE_MAPPING[blockName] === newType
+        ) || newType; // fallback to newType if not found in mapping
+      }
+
+      console.log(`[handleFixtureTypeChange] Fixture type: ${newType}, Block name: ${mappedBlockName}`);
       
       // Update the fixture cache with new GLB URL
       setFixtureCache(prev => {
@@ -376,10 +383,17 @@ export function ThreeDViewerModifier() {
       const fixtureTypeInfo = await apiService.getFixtureTypeUrl(fixtureType);
       const glbUrl = fixtureTypeInfo.glb_url;
 
-      // Find the mapped blockName for this fixture type
-      const mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
-        blockName => FIXTURE_TYPE_MAPPING[blockName] === fixtureType
-      ) || fixtureType; // fallback to fixtureType if not found in mapping
+      // Get the proper block name from the backend API
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(fixtureType);
+
+      // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
+      if (!mappedBlockName) {
+        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+          blockName => FIXTURE_TYPE_MAPPING[blockName] === fixtureType
+        ) || fixtureType; // fallback to fixtureType if not found in mapping
+      }
+
+      console.log(`[handleAddFixture] Fixture type: ${fixtureType}, Block name: ${mappedBlockName}`);
 
       // Preload the GLB
       useGLTF.preload(glbUrl);
@@ -1042,6 +1056,151 @@ const isFloorPlatesCsv = (name: string) => {
   return n.endsWith('.csv') && (n.includes('floor-plate-master') || n.includes('floor-plates'));
 };
 
+// Generate store config JSON with floor data and fixture mappings from API
+const createStoreConfigJSON = useCallback(async (
+  workingLocationData: LocationData[],
+  workingExtractedFiles: ExtractedFile[]
+): Promise<string> => {
+  log('Generating store config JSON...');
+
+  // Check if existing store-config.json exists and preserve spawn points, floor names, and fixture mappings
+  const existingConfigFile = workingExtractedFiles.find(file =>
+    file.name.toLowerCase() === 'store-config.json'
+  );
+
+  let existingFloorData: Record<number, { name: string; spawn_point: number[] }> = {};
+  let existingBlockFixtureTypes: Record<string, string> = {};
+  let existingFixtureTypeUrls: Record<string, string> = {};
+
+  if (existingConfigFile) {
+    try {
+      const response = await fetch(existingConfigFile.url);
+      const existingConfig = await response.json();
+
+      // Preserve floor data
+      if (existingConfig.floor && Array.isArray(existingConfig.floor)) {
+        existingConfig.floor.forEach((floor: any) => {
+          if (floor.floor_index !== undefined) {
+            existingFloorData[floor.floor_index] = {
+              name: floor.name || '',
+              spawn_point: floor.spawn_point || [0, 0, 0]
+            };
+          }
+        });
+        log('Preserved floor data from existing config:', existingFloorData);
+      }
+
+      // Preserve block_fixture_types mapping
+      if (existingConfig.block_fixture_types && typeof existingConfig.block_fixture_types === 'object') {
+        existingBlockFixtureTypes = { ...existingConfig.block_fixture_types };
+        log('Preserved block_fixture_types from existing config:', existingBlockFixtureTypes);
+      }
+
+      // Preserve fixture_type_glb_urls mapping
+      if (existingConfig.fixture_type_glb_urls && typeof existingConfig.fixture_type_glb_urls === 'object') {
+        existingFixtureTypeUrls = { ...existingConfig.fixture_type_glb_urls };
+        log('Preserved fixture_type_glb_urls from existing config:', existingFixtureTypeUrls);
+      }
+    } catch (error) {
+      console.warn('Failed to parse existing store-config.json, using defaults:', error);
+    }
+  }
+
+  // 1. Build floor array from extracted floor files
+  const floorFiles = workingExtractedFiles.filter(file =>
+    isFloorFile(file.name) && !isShatteredFloorPlateFile(file.name)
+  );
+
+  const floors = floorFiles.map(file => {
+    const floorMatch = file.name.match(/floor[_-]?(\d+)/i);
+    const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Try to get existing floor data first
+    const existingFloor = existingFloorData[floorIndex];
+
+    // Extract floor name from filename (e.g., "LB_floor_0.glb" -> "LB") as fallback
+    const nameMatch = file.name.match(/^(.+?)[-_]floor/i);
+    const defaultFloorName = nameMatch ? nameMatch[1] : `Floor ${floorIndex}`;
+
+    // Use existing name and spawn point if available, otherwise use defaults
+    const floorName = existingFloor?.name || defaultFloorName;
+    const spawnPoint = existingFloor?.spawn_point || [0, 0, 0];
+
+    return {
+      name: floorName,
+      glb_file_name: file.name,
+      floor_index: floorIndex,
+      spawn_point: spawnPoint
+    };
+  }).sort((a, b) => a.floor_index - b.floor_index);
+
+  // 2. Get all unique block names from fixtures
+  const uniqueBlockNames = Array.from(new Set(
+    workingLocationData
+      .filter(loc => !loc.forDelete)
+      .map(loc => loc.blockName)
+  ));
+
+  // 3. Fetch block_fixture_types mapping from API and merge with existing
+  let blockFixtureTypes: Record<string, string> = { ...existingBlockFixtureTypes };
+  try {
+    if (uniqueBlockNames.length > 0) {
+      log(`Fetching fixture types for ${uniqueBlockNames.length} block names...`);
+      const fixtureBlocks = await apiService.getFixtureBlocks(uniqueBlockNames);
+      fixtureBlocks.forEach(block => {
+        if (block.block_name && block.fixture_type) {
+          blockFixtureTypes[block.block_name] = block.fixture_type;
+        }
+      });
+      log(`Block-to-fixture-type mappings: ${Object.keys(blockFixtureTypes).length} total (${Object.keys(existingBlockFixtureTypes).length} preserved, ${fixtureBlocks.length} fetched)`);
+    }
+  } catch (error) {
+    console.error('Failed to fetch block fixture types:', error);
+    // Continue with preserved mappings only
+  }
+
+  // 4. Get all unique fixture types from merged mappings
+  const uniqueFixtureTypes = Array.from(new Set(Object.values(blockFixtureTypes)));
+
+  // 5. Fetch fixture_type_glb_urls mapping from API and merge with existing
+  let fixtureTypeGlbUrls: Record<string, string> = { ...existingFixtureTypeUrls };
+  try {
+    if (uniqueFixtureTypes.length > 0) {
+      log(`Fetching GLB URLs for ${uniqueFixtureTypes.length} fixture types...`);
+      const urlPromises = uniqueFixtureTypes.map(async (fixtureType) => {
+        try {
+          const typeInfo = await apiService.getFixtureTypeUrl(fixtureType);
+          return { fixtureType, url: typeInfo.glb_url };
+        } catch (error) {
+          console.error(`Failed to fetch URL for fixture type ${fixtureType}:`, error);
+          return { fixtureType, url: null };
+        }
+      });
+
+      const results = await Promise.all(urlPromises);
+      results.forEach(result => {
+        if (result.url) {
+          fixtureTypeGlbUrls[result.fixtureType] = result.url;
+        }
+      });
+      log(`Fixture-type-to-URL mappings: ${Object.keys(fixtureTypeGlbUrls).length} total (${Object.keys(existingFixtureTypeUrls).length} preserved, ${results.filter(r => r.url).length} fetched)`);
+    }
+  } catch (error) {
+    console.error('Failed to fetch fixture type URLs:', error);
+    // Continue with preserved mappings only
+  }
+
+  // 6. Build the config object
+  const config = {
+    floor: floors,
+    block_fixture_types: blockFixtureTypes,
+    fixture_type_glb_urls: fixtureTypeGlbUrls
+  };
+
+  log('Store config generated with', floors.length, 'floors');
+  return JSON.stringify(config, null, 2);
+}, []);
+
 const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const zip = new JSZip();
     log('Building modified ZIP...');
@@ -1074,10 +1233,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const floorsWithObjects = new Set(architecturalObjects.map(obj => obj.floorIndex));
     log('Floors with architectural objects:', Array.from(floorsWithObjects));
 
-    // Add all original files except the CSVs that need to be modified and GLBs with architectural objects
+    // Add all original files except the CSVs that need to be modified, GLBs with architectural objects, and store-config.json
     for (const file of workingExtractedFiles) {
       if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
         log('Skipping original CSV in bundle:', file.name);
+        continue;
+      }
+
+      // Skip existing store-config.json since we'll regenerate it
+      if (file.name.toLowerCase() === 'store-config.json') {
+        log('Skipping original store-config.json (will regenerate):', file.name);
         continue;
       }
 
@@ -1276,10 +1441,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       dracoLoader.dispose();
     }
 
+    // Generate and add store config JSON
+    try {
+      log('Creating store config JSON...');
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles);
+      zip.file('store-config.json', configJson);
+      log('Added store-config.json to ZIP');
+    } catch (error) {
+      console.error('Failed to create store config JSON:', error);
+      // Continue with export even if config generation fails
+    }
+
     log('Modified ZIP built.');
     const blob = await zip.generateAsync({ type: 'blob' });
     return blob;
-  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects]);
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects, createStoreConfigJSON]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;

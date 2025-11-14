@@ -1,10 +1,13 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import JSZip from 'jszip';
 
 import { Button } from '@/shadcn/components/ui/button';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 import type { StoreSaveRow } from '../services/supabaseService';
 import { loadStoreMasterData, type StoreData } from '../utils/csvUtils';
+import { apiService } from '../services/api';
+import { isFloorFile, isShatteredFloorPlateFile } from '../utils/zipUtils';
 
 function formatBytes(bytes?: number | null) {
   if (bytes == null) return '-';
@@ -13,6 +16,120 @@ function formatBytes(bytes?: number | null) {
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   const val = bytes / Math.pow(1024, i);
   return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
+}
+
+// Helper to ensure store-config.json exists in ZIP, adding it if missing
+async function ensureStoreConfigInZip(zipBlob: Blob): Promise<Blob> {
+  const zip = await JSZip.loadAsync(zipBlob);
+
+  // Check if store-config.json already exists
+  if (zip.file('store-config.json')) {
+    console.log('[MyCreatedStores] store-config.json already exists in ZIP');
+    return zipBlob;
+  }
+
+  console.log('[MyCreatedStores] store-config.json missing, generating...');
+
+  // Extract location data from location-master.csv
+  const locationCsvFile = zip.file(/location[-_]master\.csv/i)[0];
+  if (!locationCsvFile) {
+    console.warn('[MyCreatedStores] No location-master.csv found, returning original ZIP');
+    return zipBlob;
+  }
+
+  const locationCsvText = await locationCsvFile.async('text');
+  const locationLines = locationCsvText.split('\n').filter(line => line.trim());
+
+  // Parse block names from CSV (column 0)
+  const blockNames = new Set<string>();
+  for (let i = 1; i < locationLines.length; i++) {
+    const values = locationLines[i].split(',');
+    if (values.length >= 14) {
+      blockNames.add(values[0].trim());
+    }
+  }
+
+  // Build floor array from floor GLB files
+  const allFiles = Object.keys(zip.files);
+  const floorFiles = allFiles.filter(name => {
+    const fileName = name.split('/').pop() || name;
+    return isFloorFile(fileName) && !isShatteredFloorPlateFile(fileName);
+  });
+
+  const floors = floorFiles.map(fileName => {
+    const baseName = fileName.split('/').pop() || fileName;
+    const floorMatch = baseName.match(/floor[_-]?(\d+)/i);
+    const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    const nameMatch = baseName.match(/^(.+?)[-_]floor/i);
+    const floorName = nameMatch ? nameMatch[1] : `Floor ${floorIndex}`;
+
+    return {
+      name: floorName,
+      glb_file_name: baseName,
+      floor_index: floorIndex,
+      spawn_point: [0, 0, 0]
+    };
+  }).sort((a, b) => a.floor_index - b.floor_index);
+
+  // Fetch block_fixture_types mapping from API
+  let blockFixtureTypes: Record<string, string> = {};
+  try {
+    if (blockNames.size > 0) {
+      console.log(`[MyCreatedStores] Fetching fixture types for ${blockNames.size} block names...`);
+      const fixtureBlocks = await apiService.getFixtureBlocks(Array.from(blockNames));
+      blockFixtureTypes = fixtureBlocks.reduce((acc, block) => {
+        if (block.block_name && block.fixture_type) {
+          acc[block.block_name] = block.fixture_type;
+        }
+        return acc;
+      }, {} as Record<string, string>);
+    }
+  } catch (error) {
+    console.error('[MyCreatedStores] Failed to fetch block fixture types:', error);
+  }
+
+  // Get unique fixture types and fetch their URLs
+  const uniqueFixtureTypes = Array.from(new Set(Object.values(blockFixtureTypes)));
+  let fixtureTypeGlbUrls: Record<string, string> = {};
+  try {
+    if (uniqueFixtureTypes.length > 0) {
+      console.log(`[MyCreatedStores] Fetching GLB URLs for ${uniqueFixtureTypes.length} fixture types...`);
+      const urlPromises = uniqueFixtureTypes.map(async (fixtureType) => {
+        try {
+          const typeInfo = await apiService.getFixtureTypeUrl(fixtureType);
+          return { fixtureType, url: typeInfo.glb_url };
+        } catch (error) {
+          console.error(`[MyCreatedStores] Failed to fetch URL for fixture type ${fixtureType}:`, error);
+          return { fixtureType, url: null };
+        }
+      });
+
+      const results = await Promise.all(urlPromises);
+      fixtureTypeGlbUrls = results.reduce((acc, result) => {
+        if (result.url) {
+          acc[result.fixtureType] = result.url;
+        }
+        return acc;
+      }, {} as Record<string, string>);
+    }
+  } catch (error) {
+    console.error('[MyCreatedStores] Failed to fetch fixture type URLs:', error);
+  }
+
+  // Build config object
+  const config = {
+    floor: floors,
+    block_fixture_types: blockFixtureTypes,
+    fixture_type_glb_urls: fixtureTypeGlbUrls
+  };
+
+  // Add store-config.json to ZIP
+  zip.file('store-config.json', JSON.stringify(config, null, 2));
+  console.log('[MyCreatedStores] Added store-config.json to ZIP');
+
+  // Generate updated ZIP blob
+  return await zip.generateAsync({ type: 'blob' });
 }
 
 export function MyCreatedStores() {
@@ -290,7 +407,11 @@ export function MyCreatedStores() {
                         className="px-0"
                         onClick={async () => {
                           try {
-                            const blob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+                            let blob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+
+                            // Ensure store-config.json exists in the ZIP
+                            blob = await ensureStoreConfigInZip(blob);
+
                             const url = URL.createObjectURL(blob);
                             const anchor = document.createElement('a');
                             anchor.href = url;
@@ -353,7 +474,10 @@ export function MyCreatedStores() {
                             setMakingLiveId(r.id);
 
                             // Download the ZIP file first
-                            const zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+                            let zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+
+                            // Ensure store-config.json exists in the ZIP
+                            zipBlob = await ensureStoreConfigInZip(zipBlob);
 
                             // Find store metadata from CSV by store_id
                             const storeInfo = storeData.find(store => store.storeCode === r.store_id);

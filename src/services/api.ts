@@ -252,12 +252,26 @@ export const apiService = {
 
   async getAllFixtureTypes(): Promise<string[]> {
     const response = await fetch(`${API_BASE_URL}/api/fixtures/types`);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to get all fixture types: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
     return data.fixture_types;
+  },
+
+  async getBlockNameForFixtureType(fixtureType: string): Promise<string | null> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/block-name`);
+
+    if (!response.ok) {
+      // If endpoint doesn't exist or returns error, return null
+      console.warn(`Failed to get block name for fixture type ${fixtureType}: ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    // Use block_name property (which is the first from all_block_names on backend)
+    return data.block_name || null;
   }
 };
