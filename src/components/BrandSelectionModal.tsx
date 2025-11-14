@@ -44,9 +44,13 @@ export function BrandSelectionModal({
 
     const query = searchQuery.toLowerCase();
     const filterAndSortItems = (items: string[]) => {
+      // Deduplicate brands first (case-insensitive)
+      const uniqueBrands = Array.from(new Set(items.map(b => b.toLowerCase())))
+        .map(lower => items.find(b => b.toLowerCase() === lower)!);
+
       const filtered = searchQuery.trim()
-        ? items.filter(brand => brand.toLowerCase().includes(query))
-        : items;
+        ? uniqueBrands.filter(brand => brand.toLowerCase().includes(query))
+        : uniqueBrands;
       return filtered.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     };
 
@@ -83,10 +87,14 @@ export function BrandSelectionModal({
 
   // Filter and sort flat brands list
   const filteredBrands = useMemo(() => {
+    // Deduplicate brands first (case-insensitive)
+    const uniqueBrands = Array.from(new Set(brands.map(b => b.toLowerCase())))
+      .map(lower => brands.find(b => b.toLowerCase() === lower)!);
+
     const query = searchQuery.toLowerCase();
     const filtered = searchQuery.trim()
-      ? brands.filter(brand => brand.toLowerCase().includes(query))
-      : brands;
+      ? uniqueBrands.filter(brand => brand.toLowerCase().includes(query))
+      : uniqueBrands;
     return filtered.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [brands, searchQuery]);
 

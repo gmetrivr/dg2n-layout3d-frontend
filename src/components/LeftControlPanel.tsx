@@ -317,8 +317,8 @@ export function LeftControlPanel({
               className="w-48"
             >
               <option value="all">All Brands</option>
-              {brands.map((brand) => (
-                <option key={brand} value={brand}>
+              {brands.map((brand, index) => (
+                <option key={`${brand}-${index}`} value={brand}>
                   {brand}
                 </option>
               ))}

@@ -62,6 +62,24 @@ export interface FixtureTypeInfo {
   glb_url: string;
 }
 
+export interface BrandMigrationsResponse {
+  pipeline_version: string;
+  migrations: Record<string, string>;
+  total_migrations: number;
+}
+
+export interface BrandMigrationResult {
+  old_name: string;
+  new_name: string;
+  changed: boolean;
+}
+
+export interface MigrateBrandsResponse {
+  pipeline_version: string;
+  migrations: BrandMigrationResult[];
+  total_changed: number;
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -273,5 +291,32 @@ export const apiService = {
     const data = await response.json();
     // Use block_name property (which is the first from all_block_names on backend)
     return data.block_name || null;
+  },
+
+  // Brand migration endpoints
+  async getBrandMigrations(pipelineVersion: string = '02'): Promise<BrandMigrationsResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/brands/migrations?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get brand migrations: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async migrateBrandNames(brandNames: string[], pipelineVersion: string = '02'): Promise<MigrateBrandsResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/brands/migrate?pipeline_version=${pipelineVersion}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(brandNames),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to migrate brand names: ${response.statusText}`);
+    }
+
+    return response.json();
   }
 };

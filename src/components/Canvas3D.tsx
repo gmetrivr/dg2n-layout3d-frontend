@@ -1103,6 +1103,7 @@ export function Canvas3D({
       className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
       onPointerMissed={onPointerMissed}
     >
+      <axesHelper args={[2]} />
       <ambientLight intensity={0.4} />
       <directionalLight
         position={[10, 10, 5]}
