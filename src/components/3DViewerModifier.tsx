@@ -262,6 +262,7 @@ export function ThreeDViewerModifier() {
   const justCreatedObjectRef = useRef<boolean>(false); // Track if we just created an object
   const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
+  const [isDragging, setIsDragging] = useState(false); // Track drag state for file upload
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -2330,6 +2331,36 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   };
 
+  // Drag and drop handlers for file upload
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      handleFileUpload(file);
+    }
+  };
+
   useEffect(() => {
     const fetchJobZip = async () => {
       if (!jobId) return;
@@ -2788,7 +2819,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           <h2 className="text-lg font-semibold mb-4">Upload ZIP File</h2>
           <p className="text-muted-foreground mb-6">Upload a processed ZIP file to view 3D models</p>
           
-          <div className="border-2 border-dashed border-muted rounded-lg p-8 mb-4 hover:border-primary/50 transition-colors cursor-pointer">
+          <div
+            className={`border-2 border-dashed rounded-lg p-8 mb-4 transition-colors cursor-pointer ${
+              isDragging
+                ? 'border-primary bg-primary/10'
+                : 'border-muted hover:border-primary/50'
+            }`}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
             <input
               type="file"
               accept=".zip"
@@ -2801,8 +2842,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             />
             <label htmlFor="zip-upload" className="cursor-pointer flex flex-col items-center space-y-2">
               <div className="text-4xl text-muted-foreground">📁</div>
-              <div className="text-sm font-medium">Click to upload ZIP file</div>
-              <div className="text-xs text-muted-foreground">Or drag and drop</div>
+              <div className="text-sm font-medium">
+                {isDragging ? 'Drop ZIP file here' : 'Click to upload ZIP file'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {isDragging ? 'Release to upload' : 'Or drag and drop'}
+              </div>
             </label>
           </div>
           
@@ -2853,9 +2898,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 6rem)' }}>
       {/* 3D Canvas */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative pointer-events-auto">
         <LeftControlPanel
           glbFiles={glbFiles}
           selectedFile={selectedFile}

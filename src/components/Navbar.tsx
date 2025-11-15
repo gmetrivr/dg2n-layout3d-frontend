@@ -27,9 +27,10 @@ export function Navbar() {
 
   return (
     <div
-      className={`fixed top-0 left-0 w-full z-50 transition-all duration-300 ${
+      className={`fixed top-0 left-0 w-full z-[100] pointer-events-auto transition-all duration-300 ${
         isScrolled ? 'bg-background/80 backdrop-blur-md border-b shadow-sm' : 'bg-transparent'
       }`}
+      style={{ willChange: 'transform' }}
     >
       <nav className="relative flex items-center justify-between p-6 max-w-7xl mx-auto">
         <div className="hidden md:flex items-center gap-6">
