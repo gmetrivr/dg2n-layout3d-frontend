@@ -3131,6 +3131,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               >
                 <option value="trends">Trends</option>
                 <option value="tst">TST</option>
+                <option value="demo">Demo</option>
               </select>
             </div>
             <div className="space-y-2">
