@@ -5,6 +5,8 @@ import { useState } from 'react';
 interface LocationData {
   blockName: string;
   floorIndex: number;
+  originX?: number;
+  originY?: number;
   posX: number;
   posY: number;
   posZ: number;
@@ -42,6 +44,9 @@ interface MultiRightInfoPanelProps {
   selectedLocations: LocationData[];
   editMode: boolean;
   fixtureTypeMap: Map<string, string>;
+  availableFloorIndices?: number[];
+  floorNames?: Map<number, string>;
+  floorDisplayOrder?: number[];
   onClose: () => void;
   onOpenBrandModal?: () => void;
   onRotateFixture?: (angle: number) => void;
@@ -51,6 +56,7 @@ interface MultiRightInfoPanelProps {
   canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
   onCountChange?: (locations: LocationData[], newCount: number) => void;
   onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
+  onFloorChange?: (locations: LocationData[], newFloorIndex: number) => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -71,6 +77,9 @@ export function MultiRightInfoPanel({
   selectedLocations,
   editMode,
   fixtureTypeMap,
+  availableFloorIndices = [],
+  floorNames = new Map(),
+  floorDisplayOrder = [],
   onClose,
   onOpenBrandModal,
   onRotateFixture,
@@ -80,6 +89,7 @@ export function MultiRightInfoPanel({
   canMergeFixtures,
   onCountChange,
   onHierarchyChange,
+  onFloorChange,
 }: MultiRightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
@@ -87,6 +97,8 @@ export function MultiRightInfoPanel({
   const [countValue, setCountValue] = useState('');
   const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
   const [hierarchyValue, setHierarchyValue] = useState('');
+  const [isEditingFloor, setIsEditingFloor] = useState(false);
+  const [floorValue, setFloorValue] = useState('');
   
   const handleCustomRotation = () => {
     const angle = parseFloat(customRotationValue);
@@ -174,7 +186,40 @@ export function MultiRightInfoPanel({
       handleHierarchyCancel();
     }
   };
-  
+
+  const handleFloorEdit = () => {
+    setIsEditingFloor(true);
+    const commonFloor = getCommonValue(selectedLocations.map(loc => loc.floorIndex));
+    if (commonFloor !== "Multiple Values" && commonFloor !== "N/A") {
+      setFloorValue(commonFloor.toString());
+    } else if (availableFloorIndices.length > 0) {
+      setFloorValue(availableFloorIndices[0].toString());
+    }
+  };
+
+  const handleFloorSave = () => {
+    const newFloorIndex = parseInt(floorValue);
+    // Validate floor index is in available floors
+    if (!isNaN(newFloorIndex) && availableFloorIndices.includes(newFloorIndex) && onFloorChange) {
+      onFloorChange(selectedLocations, newFloorIndex);
+    }
+    setIsEditingFloor(false);
+    setFloorValue('');
+  };
+
+  const handleFloorCancel = () => {
+    setIsEditingFloor(false);
+    setFloorValue('');
+  };
+
+  const handleFloorKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleFloorSave();
+    } else if (e.key === 'Escape') {
+      handleFloorCancel();
+    }
+  };
+
   if (selectedLocations.length === 0) return null;
 
   // Extract values for comparison
@@ -261,9 +306,24 @@ export function MultiRightInfoPanel({
             <span className="font-medium">New Brand:</span> {commonEffectiveBrand === "Multiple Values" || commonEffectiveBrand === "N/A" ? commonEffectiveBrand : String(commonEffectiveBrand)}
           </div>
         )}
-        
-        <div><span className="font-medium">Floor:</span> {commonFloor === "Multiple Values" || commonFloor === "N/A" ? commonFloor : String(commonFloor)}</div>
-        
+
+        <div className="flex items-center justify-between">
+          <span><span className="font-medium">Floor:</span> {
+            commonFloor === "Multiple Values" || commonFloor === "N/A"
+              ? commonFloor
+              : (floorNames.get(commonFloor as number) || `Floor ${commonFloor}`)
+          }</span>
+          {editMode && onFloorChange && (
+            <button
+              onClick={handleFloorEdit}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Change floor"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+
         <div>
           <span className="font-medium">Position X:</span> {commonPosX === "Multiple Values" || commonPosX === "N/A" ? commonPosX : (commonPosX as number).toFixed(2)}
         </div>
@@ -367,7 +427,42 @@ export function MultiRightInfoPanel({
           </div>
         </div>
       )}
-      
+
+      {isEditingFloor && (
+        <div className="mt-3 pt-2 border-t border-border">
+          <div className="flex gap-1 mb-2">
+            <select
+              value={floorValue}
+              onChange={(e) => setFloorValue(e.target.value)}
+              onKeyDown={handleFloorKeyPress}
+              className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+              autoFocus
+            >
+              {(() => {
+                // Sort by floor display order if available, otherwise by index
+                const sortedIndices = floorDisplayOrder.length > 0
+                  ? floorDisplayOrder.filter(idx => availableFloorIndices.includes(idx))
+                  : [...availableFloorIndices].sort((a, b) => a - b);
+
+                return sortedIndices.map(floorIndex => (
+                  <option key={floorIndex} value={floorIndex}>
+                    {floorNames.get(floorIndex) || `Floor ${floorIndex}`}
+                  </option>
+                ));
+              })()}
+            </select>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFloorSave}
+              className="text-xs px-2 py-1 h-auto"
+            >
+              <Check className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {editMode && (
         <div className="mt-3 pt-2 border-t border-border">
           <div className="flex gap-1 mb-2">

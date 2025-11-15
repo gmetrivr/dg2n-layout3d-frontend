@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
@@ -250,6 +250,7 @@ export function ThreeDViewerModifier() {
   const [floorManagementModalOpen, setFloorManagementModalOpen] = useState(false);
   const [floorDisplayOrder, setFloorDisplayOrder] = useState<number[]>([]); // Maps display position to actual floor index
   const [initialFloorCount, setInitialFloorCount] = useState<number>(0); // Track initial floor count
+  const [floorNames, setFloorNames] = useState<Map<number, string>>(new Map()); // Maps floor index to floor name
 
   // Architectural objects state (glazing and partitions)
   const [architecturalObjects, setArchitecturalObjects] = useState<ArchitecturalObject[]>([]);
@@ -263,6 +264,7 @@ export function ThreeDViewerModifier() {
   const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
   const [isDragging, setIsDragging] = useState(false); // Track drag state for file upload
+  const floorNamesInitializedRef = useRef<boolean>(false); // Track if floor names have been extracted
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -344,6 +346,19 @@ export function ThreeDViewerModifier() {
       }, 200); // Increased delay to ensure onPointerMissed is fully processed
     }
   }, []);
+
+  // Extract available floor indices from glbFiles
+  const availableFloorIndices = useMemo(() => {
+    const floorIndices = new Set<number>();
+    glbFiles.forEach(file => {
+      // Extract floor index from filename
+      const floorMatch = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
+      if (floorMatch) {
+        floorIndices.add(parseInt(floorMatch[1]));
+      }
+    });
+    return Array.from(floorIndices).sort((a, b) => a - b);
+  }, [glbFiles]);
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -561,6 +576,11 @@ export function ThreeDViewerModifier() {
         : 0;
       const newHierarchy = maxHierarchy + 1;
 
+      // Get origin values from current floor
+      const floorOriginFixture = currentFloorFixtures[0];
+      const originX = floorOriginFixture?.originX ?? 0;
+      const originY = floorOriginFixture?.originY ?? 0;
+
       // Default brand is "unassigned"
       const defaultBrand = "unassigned";
 
@@ -571,6 +591,8 @@ export function ThreeDViewerModifier() {
       const newFixture: LocationData = {
         blockName: mappedBlockName,
         floorIndex: currentFloor,
+        originX: originX,
+        originY: originY,
         posX: posX,
         posY: posY,
         posZ: posZ,
@@ -1261,11 +1283,25 @@ const createStoreConfigJSON = useCallback(async (
     const existingFloor = existingFloorData[floorIndex];
 
     // Extract floor name from filename (e.g., "LB_floor_0.glb" -> "LB") as fallback
-    const nameMatch = file.name.match(/^(.+?)[-_]floor/i);
-    const defaultFloorName = nameMatch ? nameMatch[1] : `Floor ${floorIndex}`;
+    let defaultFloorName: string;
+
+    // Check if filename starts with "dg2n-3d-" prefix
+    if (file.name.toLowerCase().startsWith('dg2n-3d-')) {
+      // Remove "dg2n-3d-" prefix and .glb extension
+      defaultFloorName = file.name.substring(8).replace('.glb', '');
+    } else {
+      const nameMatch = file.name.match(/^(.+?)[-_]floor/i);
+      defaultFloorName = nameMatch ? nameMatch[1] : `Floor ${floorIndex}`;
+    }
 
     // Use existing name and spawn point if available, otherwise use defaults
-    const floorName = existingFloor?.name || defaultFloorName;
+    // If existing name is "dg2n-3d", replace it with the extracted name
+    let floorName: string;
+    if (existingFloor?.name && existingFloor.name.toLowerCase() !== 'dg2n-3d') {
+      floorName = existingFloor.name;
+    } else {
+      floorName = defaultFloorName;
+    }
     const spawnPoint = existingFloor?.spawn_point || [0, 0, 0];
 
     return {
@@ -1803,21 +1839,70 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setFloorDisplayOrder(newOrder);
   }, [floorDisplayOrder]);
 
-  const handleRenameFloor = useCallback((floorFile: ExtractedFile, newName: string) => {
+  const handleRenameFloor = useCallback(async (floorFile: ExtractedFile, newName: string) => {
     // Create a new file name by replacing the title part while keeping the extension and floor number
     const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i);
     const floorNumber = floorMatch ? floorMatch[0] : 'floor-0';
+    const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
 
     // Generate new file name: sanitize the new name and append floor number and extension
     const sanitizedName = newName.replace(/[^a-zA-Z0-9-_\s]/g, '').replace(/\s+/g, '-');
     const newFileName = `${sanitizedName}-${floorNumber}.glb`;
 
-    // Update the file in extractedFiles
-    setExtractedFiles(prev => prev.map(file =>
-      file.name === floorFile.name
-        ? { ...file, name: newFileName }
-        : file
-    ));
+    // Update the floor names map immediately
+    setFloorNames(prev => {
+      const updated = new Map(prev);
+      updated.set(floorIndex, newName);
+      return updated;
+    });
+
+    // Update store-config.json if it exists
+    const storeConfigFile = extractedFiles.find(f => f.name.toLowerCase() === 'store-config.json');
+    if (storeConfigFile) {
+      try {
+        const response = await fetch(storeConfigFile.url);
+        const config = await response.json();
+
+        if (config.floor && Array.isArray(config.floor)) {
+          const floorEntry = config.floor.find((f: any) => f.floor_index === floorIndex);
+          if (floorEntry) {
+            floorEntry.name = newName;
+            floorEntry.glb_file_name = newFileName;
+          }
+        }
+
+        // Create new blob with updated config
+        const updatedConfigBlob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+        const updatedConfigUrl = URL.createObjectURL(updatedConfigBlob);
+
+        // Clean up old URL
+        URL.revokeObjectURL(storeConfigFile.url);
+
+        // Update the store-config.json file
+        setExtractedFiles(prev => prev.map(f =>
+          f.name.toLowerCase() === 'store-config.json'
+            ? { ...f, blob: updatedConfigBlob, url: updatedConfigUrl }
+            : f.name === floorFile.name
+            ? { ...f, name: newFileName }
+            : f
+        ));
+      } catch (error) {
+        console.warn('Failed to update store-config.json:', error);
+        // Still update the floor file name even if config update fails
+        setExtractedFiles(prev => prev.map(file =>
+          file.name === floorFile.name
+            ? { ...file, name: newFileName }
+            : file
+        ));
+      }
+    } else {
+      // No store-config.json, just update the floor file name
+      setExtractedFiles(prev => prev.map(file =>
+        file.name === floorFile.name
+          ? { ...file, name: newFileName }
+          : file
+      ));
+    }
 
     // Update the file in glbFiles
     setGlbFiles(prev => prev.map(file =>
@@ -1839,7 +1924,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         ? { ...prev, name: newFileName }
         : prev
     );
-  }, []);
+  }, [extractedFiles]);
 
 
   // Event handlers for LeftControlPanel
@@ -2175,7 +2260,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const rows = data.map(loc => [
       loc.blockName,
       loc.floorIndex,
-      0, 0, 0,
+      Number((loc.originX ?? 0).toFixed(12)),
+      Number((loc.originY ?? 0).toFixed(12)),
+      0, // Origin Z is always 0
       Number(loc.posX.toFixed(12)),
       Number(loc.posY.toFixed(12)),
       Number(loc.posZ.toFixed(1)),
@@ -2545,7 +2632,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     loadStores();
   }, []); // Only run once on component mount
 
-  // Initialize floor display order when GLB files change
+  // Initialize floor display order and extract floor names from store-config.json
   useEffect(() => {
     if (glbFiles.length > 0) {
       // Extract floor numbers from GLB files
@@ -2564,8 +2651,72 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           setInitialFloorCount(floorIndices.length);
         }
       }
+
+      // Extract floor names from store-config.json or from file names
+      // Only run once on initial load to avoid overwriting manual changes
+      if (!floorNamesInitializedRef.current) {
+        const extractFloorNames = async () => {
+          const namesMap = new Map<number, string>();
+
+          // Check if store-config.json exists
+          const storeConfigFile = extractedFiles.find(file =>
+            file.name.toLowerCase() === 'store-config.json'
+          );
+
+          if (storeConfigFile) {
+            try {
+              const response = await fetch(storeConfigFile.url);
+              const config = await response.json();
+
+              if (config.floor && Array.isArray(config.floor)) {
+                config.floor.forEach((floor: any) => {
+                  if (floor.floor_index !== undefined && floor.name) {
+                    // If floor name is "dg2n-3d", extract from glb_file_name or use default
+                    if (floor.name.toLowerCase() === 'dg2n-3d') {
+                      if (floor.glb_file_name && floor.glb_file_name.toLowerCase().startsWith('dg2n-3d-')) {
+                        // Extract the part after "dg2n-3d-" and remove .glb extension
+                        const extractedName = floor.glb_file_name.substring(8).replace('.glb', '');
+                        namesMap.set(floor.floor_index, extractedName);
+                      } else {
+                        // Default to floor-{index} format
+                        namesMap.set(floor.floor_index, `floor-${floor.floor_index}`);
+                      }
+                    } else {
+                      namesMap.set(floor.floor_index, floor.name);
+                    }
+                  }
+                });
+              }
+            } catch (error) {
+              console.warn('Failed to parse store-config.json for floor names:', error);
+            }
+          }
+
+          // For floors without names in store-config, use filename-based names
+          floorFiles.forEach(file => {
+            const match = file.name.match(/floor[_-]?(\d+)/i);
+            const floorIndex = match ? parseInt(match[1]) : 0;
+
+            if (!namesMap.has(floorIndex)) {
+              // Extract floor name from filename as fallback
+              if (file.name.toLowerCase().startsWith('dg2n-3d-')) {
+                namesMap.set(floorIndex, file.name.substring(8).replace('.glb', ''));
+              } else {
+                const nameMatch = file.name.match(/^(.+?)[-_]floor/i);
+                const defaultName = nameMatch ? nameMatch[1] : `Floor ${floorIndex}`;
+                namesMap.set(floorIndex, defaultName);
+              }
+            }
+          });
+
+          setFloorNames(namesMap);
+          floorNamesInitializedRef.current = true;
+        };
+
+        extractFloorNames();
+      }
     }
-  }, [glbFiles, initialFloorCount]);
+  }, [glbFiles, extractedFiles, initialFloorCount]);
 
   // Extract unique brands from location data for current floor
   useEffect(() => {
@@ -2636,6 +2787,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           
           if (values.length >= 14) {
             const blockName = values[0].trim();
+            const originX = parseFloat(values[2]) || 0;
+            const originY = parseFloat(values[3]) || 0;
             const posX = parseFloat(values[5]) || 0;
             const posY = parseFloat(values[6]) || 0;
             const posZ = parseFloat(values[7]) || 0;
@@ -2645,11 +2798,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const brand = values[11]?.trim() || 'unknown';
             const count = parseInt(values[12]) || 1;
             const hierarchy = parseInt(values[13]) || 0;
-            
+
             const locationItem = {
               // Current state
               blockName,
               floorIndex: parseInt(values[1]) || 0,
+              originX,
+              originY,
               posX,
               posY,
               posZ,
@@ -3018,6 +3173,70 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             canMergeFixtures={canMergeFixtures}
             onCountChange={handleFixtureCountChangeMulti}
             onHierarchyChange={handleFixtureHierarchyChangeMulti}
+            availableFloorIndices={availableFloorIndices}
+            floorNames={floorNames}
+            floorDisplayOrder={floorDisplayOrder}
+            onFloorChange={(locations, newFloorIndex) => {
+              // Update floor index, origin values, and position for all selected locations
+              const keys = locations.map(loc => generateFixtureUID(loc));
+
+              // Find the origin values for the target floor BEFORE updating state
+              const targetFloorFixture = locationData.find(loc => loc.floorIndex === newFloorIndex && !loc.forDelete);
+              const newOriginX = targetFloorFixture?.originX ?? 0;
+              const newOriginY = targetFloorFixture?.originY ?? 0;
+
+              setLocationData(prev => {
+                return prev.map(loc => {
+                  if (keys.includes(generateFixtureUID(loc))) {
+                    // Get current origin values for this fixture
+                    const currentOriginX = loc.originX ?? 0;
+                    const currentOriginY = loc.originY ?? 0;
+
+                    // Calculate the origin difference to adjust position
+                    const originDiffX = currentOriginX - newOriginX;
+                    const originDiffY = currentOriginY - newOriginY;
+
+                    return {
+                      ...loc,
+                      floorIndex: newFloorIndex,
+                      originX: newOriginX,
+                      originY: newOriginY,
+                      posX: loc.posX + originDiffX,
+                      posY: loc.posY + originDiffY,
+                      wasMoved: true,
+                      originalPosX: loc.originalPosX ?? loc.posX,
+                      originalPosY: loc.originalPosY ?? loc.posY,
+                    };
+                  }
+                  return loc;
+                });
+              });
+
+              // Update selected locations with the same values
+              setSelectedLocations(prev => {
+                return prev.map(loc => {
+                  // Get current origin values for this fixture
+                  const currentOriginX = loc.originX ?? 0;
+                  const currentOriginY = loc.originY ?? 0;
+
+                  // Calculate the origin difference to adjust position
+                  const originDiffX = currentOriginX - newOriginX;
+                  const originDiffY = currentOriginY - newOriginY;
+
+                  return {
+                    ...loc,
+                    floorIndex: newFloorIndex,
+                    originX: newOriginX,
+                    originY: newOriginY,
+                    posX: loc.posX + originDiffX,
+                    posY: loc.posY + originDiffY,
+                    wasMoved: true,
+                    originalPosX: loc.originalPosX ?? loc.posX,
+                    originalPosY: loc.originalPosY ?? loc.posY,
+                  };
+                });
+              });
+            }}
           />
         )}
         
@@ -3075,7 +3294,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 }
                 return loc;
               }));
-              
+
               // Update selected location
               setSelectedLocation(prev => {
                 if (prev && generateFixtureUID(prev) === key) {
@@ -3088,6 +3307,63 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                     originalRotationX: prev.originalRotationX ?? prev.rotationX,
                     originalRotationY: prev.originalRotationY ?? prev.rotationY,
                     originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
+                  };
+                }
+                return prev;
+              });
+            }}
+            availableFloorIndices={availableFloorIndices}
+            floorNames={floorNames}
+            floorDisplayOrder={floorDisplayOrder}
+            onFloorChange={(location, newFloorIndex) => {
+              // Update the location's floor index, origin values, and position
+              const key = generateFixtureUID(location);
+
+              // Get current origin values
+              const currentOriginX = location.originX ?? 0;
+              const currentOriginY = location.originY ?? 0;
+
+              // Find the origin values for the target floor BEFORE updating state
+              const targetFloorFixture = locationData.find(loc => loc.floorIndex === newFloorIndex && !loc.forDelete);
+              const newOriginX = targetFloorFixture?.originX ?? 0;
+              const newOriginY = targetFloorFixture?.originY ?? 0;
+
+              // Calculate the origin difference to adjust position
+              const originDiffX = currentOriginX - newOriginX;
+              const originDiffY = currentOriginY - newOriginY;
+
+              setLocationData(prev => {
+                return prev.map(loc => {
+                  if (generateFixtureUID(loc) === key) {
+                    return {
+                      ...loc,
+                      floorIndex: newFloorIndex,
+                      originX: newOriginX,
+                      originY: newOriginY,
+                      posX: loc.posX + originDiffX,
+                      posY: loc.posY + originDiffY,
+                      wasMoved: true,
+                      originalPosX: loc.originalPosX ?? loc.posX,
+                      originalPosY: loc.originalPosY ?? loc.posY,
+                    };
+                  }
+                  return loc;
+                });
+              });
+
+              // Update selected location with the same values
+              setSelectedLocation(prev => {
+                if (prev && generateFixtureUID(prev) === key) {
+                  return {
+                    ...prev,
+                    floorIndex: newFloorIndex,
+                    originX: newOriginX,
+                    originY: newOriginY,
+                    posX: prev.posX + originDiffX,
+                    posY: prev.posY + originDiffY,
+                    wasMoved: true,
+                    originalPosX: prev.originalPosX ?? prev.posX,
+                    originalPosY: prev.originalPosY ?? prev.posY,
                   };
                 }
                 return prev;

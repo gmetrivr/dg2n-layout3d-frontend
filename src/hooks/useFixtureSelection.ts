@@ -4,6 +4,8 @@ export interface LocationData {
   // Current state (what's displayed and used)
   blockName: string;
   floorIndex: number;
+  originX?: number; // Origin X for the floor
+  originY?: number; // Origin Y for the floor
   posX: number;
   posY: number;
   posZ: number;
@@ -14,7 +16,7 @@ export interface LocationData {
   count: number;
   hierarchy: number;
   glbUrl?: string;
-  
+
   // Original state (from CSV ingestion, for reset and export logic)
   originalBlockName?: string;
   originalPosX?: number;

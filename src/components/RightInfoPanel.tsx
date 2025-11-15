@@ -6,6 +6,8 @@ import { SplitFixtureModal } from './SplitFixtureModal';
 interface LocationData {
   blockName: string;
   floorIndex: number;
+  originX?: number;
+  originY?: number;
   posX: number;
   posY: number;
   posZ: number;
@@ -56,15 +58,18 @@ interface RightInfoPanelProps {
   // Selected items
   selectedLocation?: LocationData | null;
   selectedFloorPlate?: FloorPlateData | null;
-  
+
   // Mode flags
   editMode: boolean;
   editFloorplatesMode: boolean;
-  
+
   // Data maps for tracking changes
   modifiedFloorPlates: Map<string, any>;
   fixtureTypeMap: Map<string, string>;
-  
+  availableFloorIndices?: number[];
+  floorNames?: Map<number, string>;
+  floorDisplayOrder?: number[];
+
   // Event handlers
   onCloseLocation: () => void;
   onCloseFloorPlate: () => void;
@@ -80,6 +85,7 @@ interface RightInfoPanelProps {
   onHierarchyChange?: (location: LocationData, newHierarchy: number) => void;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
   onRotationChange?: (location: LocationData, newRotation: [number, number, number]) => void;
+  onFloorChange?: (location: LocationData, newFloorIndex: number) => void;
 }
 
 export function RightInfoPanel({
@@ -89,6 +95,9 @@ export function RightInfoPanel({
   editFloorplatesMode,
   modifiedFloorPlates,
   fixtureTypeMap,
+  availableFloorIndices = [],
+  floorNames = new Map(),
+  floorDisplayOrder = [],
   onCloseLocation,
   onCloseFloorPlate,
   onOpenFixtureTypeModal,
@@ -103,6 +112,7 @@ export function RightInfoPanel({
   onHierarchyChange,
   onPositionChange,
   onRotationChange,
+  onFloorChange,
 }: RightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
@@ -115,6 +125,8 @@ export function RightInfoPanel({
   const [isEditingRotation, setIsEditingRotation] = useState(false);
   const [rotationValues, setRotationValues] = useState({ x: '', y: '', z: '' });
   const [showSplitModal, setShowSplitModal] = useState(false);
+  const [isEditingFloor, setIsEditingFloor] = useState(false);
+  const [floorValue, setFloorValue] = useState('');
   
   // Reset all editing states when selectedLocation changes
   useEffect(() => {
@@ -129,6 +141,8 @@ export function RightInfoPanel({
     setIsCustomRotationMode(false);
     setCustomRotationValue('');
     setShowSplitModal(false);
+    setIsEditingFloor(false);
+    setFloorValue('');
   }, [selectedLocation]);
   
   const handleCustomRotation = () => {
@@ -284,7 +298,36 @@ export function RightInfoPanel({
       handleRotationCancel();
     }
   };
-  
+
+  // Floor editing handlers
+  const handleFloorEdit = () => {
+    setIsEditingFloor(true);
+    setFloorValue(selectedLocation?.floorIndex?.toString() || '0');
+  };
+
+  const handleFloorSave = () => {
+    const newFloorIndex = parseInt(floorValue);
+    // Validate floor index is in available floors
+    if (!isNaN(newFloorIndex) && availableFloorIndices.includes(newFloorIndex) && selectedLocation && onFloorChange) {
+      onFloorChange(selectedLocation, newFloorIndex);
+    }
+    setIsEditingFloor(false);
+    setFloorValue('');
+  };
+
+  const handleFloorCancel = () => {
+    setIsEditingFloor(false);
+    setFloorValue('');
+  };
+
+  const handleFloorKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleFloorSave();
+    } else if (e.key === 'Escape') {
+      handleFloorCancel();
+    }
+  };
+
   // Location Info Panel
   if (selectedLocation && !editFloorplatesMode) {
     // Use embedded modification flags
@@ -341,7 +384,19 @@ export function RightInfoPanel({
               <span className="font-medium">New Brand:</span> {selectedLocation.brand}
             </div>
           )}
-          <div><span className="font-medium">Floor:</span> {selectedLocation.floorIndex}</div>
+          <div className="flex items-center justify-between">
+            <span><span className="font-medium">Floor:</span> {floorNames.get(selectedLocation.floorIndex) || `Floor ${selectedLocation.floorIndex}`}</span>
+            {editMode && onFloorChange && (
+              <button
+                onClick={handleFloorEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Change floor"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+          <div><span className="font-medium">Origin:</span> ({(selectedLocation as any).originX?.toFixed(2) ?? 0}, {(selectedLocation as any).originY?.toFixed(2) ?? 0})</div>
           <div className="flex items-center justify-between">
             <div style={{ color: hasCountChanged ? '#ef4444' : 'inherit' }}>
               <span className="font-medium">Count:</span> {hasCountChanged ? selectedLocation.originalCount : selectedLocation.count}
@@ -508,6 +563,38 @@ export function RightInfoPanel({
                   size="sm"
                   variant="outline"
                   onClick={handleHierarchySave}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+            {isEditingFloor && (
+              <div className="flex gap-1 mb-2">
+                <select
+                  value={floorValue}
+                  onChange={(e) => setFloorValue(e.target.value)}
+                  onKeyDown={handleFloorKeyPress}
+                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                  autoFocus
+                >
+                  {(() => {
+                    // Sort by floor display order if available, otherwise by index
+                    const sortedIndices = floorDisplayOrder.length > 0
+                      ? floorDisplayOrder.filter(idx => availableFloorIndices.includes(idx))
+                      : [...availableFloorIndices].sort((a, b) => a - b);
+
+                    return sortedIndices.map(floorIndex => (
+                      <option key={floorIndex} value={floorIndex}>
+                        {floorNames.get(floorIndex) || `Floor ${floorIndex}`}
+                      </option>
+                    ));
+                  })()}
+                </select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleFloorSave}
                   className="text-xs px-2 py-1 h-auto"
                 >
                   <Check className="h-3 w-3" />
