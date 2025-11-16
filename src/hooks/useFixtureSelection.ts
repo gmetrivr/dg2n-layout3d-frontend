@@ -16,6 +16,7 @@ export interface LocationData {
   count: number;
   hierarchy: number;
   glbUrl?: string;
+  fixtureId?: string; // Assigned during Make Live process
 
   // Original state (from CSV ingestion, for reset and export logic)
   originalBlockName?: string;
@@ -29,6 +30,7 @@ export interface LocationData {
   originalCount?: number;
   originalHierarchy?: number;
   originalGlbUrl?: string;
+  originalFixtureId?: string;
   
   // Modification tracking
   wasMoved?: boolean;

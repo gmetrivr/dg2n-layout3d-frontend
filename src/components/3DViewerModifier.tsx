@@ -2196,15 +2196,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         if (values.length > 13) {
           values[13] = currentLocationData.hierarchy.toString();
         }
+
+        // Use current fixture ID (15th column)
+        if (values.length > 14) {
+          values[14] = currentLocationData.fixtureId || '';
+        } else {
+          values.push(currentLocationData.fixtureId || '');
+        }
       }
-      
+
       // Update block name if fixture type was changed (embedded in currentLocationData)
       if (currentLocationData && currentLocationData.wasTypeChanged) {
         values[0] = currentLocationData.blockName; // Use current block name (includes type changes)
         // Note: Fixture Type column doesn't exist in this CSV structure
       }
-      
-      
+
+
       modifiedLines.push(values.join(','));
       updated++;
     }
@@ -2223,7 +2230,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const wasNotInOriginalCSV = !originalFixtures.has(originalLocationKey);
 
       if (isDerivedFixture || wasNotInOriginalCSV) {
-        // Create CSV line for new fixture using correct 14-column structure
+        // Create CSV line for new fixture using correct 15-column structure
         const csvLine = [
           location.blockName,             // 0: Block Name
           location.floorIndex.toString(), // 1: Floor Index
@@ -2238,7 +2245,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           location.rotationZ.toFixed(1), // 10: Rotation Z (deg)
           location.brand,                // 11: Brand
           location.count.toString(),     // 12: Count
-          location.hierarchy.toString()  // 13: Hierarchy
+          location.hierarchy.toString(), // 13: Hierarchy
+          location.fixtureId || ''       // 14: Fixture ID
         ].join(',');
 
         modifiedLines.push(csvLine);
@@ -2256,7 +2264,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   };
 
   const generateLocationCSVFromState = (data: LocationData[] = locationData) => {
-    const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy';
+    const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy,Fixture ID';
     const rows = data.map(loc => [
       loc.blockName,
       loc.floorIndex,
@@ -2271,7 +2279,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       Number(loc.rotationZ.toFixed(1)),
       loc.brand,
       loc.count,
-      loc.hierarchy
+      loc.hierarchy,
+      loc.fixtureId || '' // Fixture ID (15th column)
     ].join(','));
     const csv = [header, ...rows].join('\n');
     log('Generated CSV from state. Rows:', rows.length);
@@ -2798,6 +2807,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const brand = values[11]?.trim() || 'unknown';
             const count = parseInt(values[12]) || 1;
             const hierarchy = parseInt(values[13]) || 0;
+            const fixtureId = values[14]?.trim() || undefined; // Fixture ID (optional, 15th column)
 
             const locationItem = {
               // Current state
@@ -2815,7 +2825,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               count,
               hierarchy,
               glbUrl: undefined, // Will be loaded via API
-              
+              fixtureId, // Fixture ID from CSV
+
               // Original state (for reset and export logic)
               originalBlockName: blockName,
               originalPosX: posX,
@@ -2828,7 +2839,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               originalCount: count,
               originalHierarchy: hierarchy,
               originalGlbUrl: undefined,
-              
+              originalFixtureId: fixtureId,
+
               // No modifications on initial load
               wasMoved: false,
               wasRotated: false,
@@ -2837,7 +2849,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               wasCountChanged: false,
               wasHierarchyChanged: false,
               wasDuplicated: false,
-              
+
               _ingestionTimestamp: ingestionTimestamp + i // Add unique timestamp per row
             };
             data.push(locationItem);

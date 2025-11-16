@@ -18,6 +18,23 @@ export interface StoreSaveRow extends StoreSaveRecord {
   created_at: string;
 }
 
+export interface StoreFixtureId {
+  fixture_id: string;
+  store_id: string;
+  fixture_type: string;
+  brand: string;
+  floor_index: number;
+  pos_x: number;
+  pos_y: number;
+  pos_z: number;
+  created_at: string; // First time fixture was created (preserved across updates)
+}
+
+export interface StoreFixtureIdRow extends StoreFixtureId {
+  id: string;
+  updated_at: string; // When this specific entry was created
+}
+
 type UploadOptions = {
   bucket?: string;
   contentType?: string;
@@ -138,7 +155,8 @@ export const useSupabaseService = () => {
         if (options?.format) formData.append('formate', options.format);
         if (options?.formatType) formData.append('formatType', options.formatType);
 
-        const response = await fetch('https://stockflow-core.dg2n.com/api/tooling/processStore3DZip', {
+        const apiUrl = (import.meta as any).env?.VITE_API_URL || '';
+        const response = await fetch(`${apiUrl}/api/tooling/processStore3DZip`, {
           method: 'POST',
           body: formData,
         });
@@ -149,6 +167,137 @@ export const useSupabaseService = () => {
         }
 
         return await response.json();
+      },
+
+      // Store Fixture ID (SFI) CRUD operations
+      async getStoreFixtures(storeId: string) {
+        // Get latest entry for each fixture using DISTINCT ON
+        const { data, error } = await supabase
+          .from('store_fixture_ids')
+          .select('*')
+          .eq('store_id', storeId)
+          .order('fixture_id', { ascending: true })
+          .order('updated_at', { ascending: false });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to get store fixtures');
+        }
+
+        // Filter to get only latest entry per fixture_id (client-side dedup)
+        const latestByFixture = new Map<string, StoreFixtureIdRow>();
+        for (const row of (data ?? [])) {
+          const existing = latestByFixture.get(row.fixture_id);
+          if (!existing || new Date(row.updated_at) > new Date(existing.updated_at)) {
+            latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
+          }
+        }
+
+        return Array.from(latestByFixture.values());
+      },
+
+      async insertFixtures(fixtures: StoreFixtureId[]) {
+        // Always INSERT new rows (history tracking)
+        const { data, error } = await supabase
+          .from('store_fixture_ids')
+          .insert(
+            fixtures.map((f) => ({
+              fixture_id: f.fixture_id,
+              store_id: f.store_id,
+              fixture_type: f.fixture_type,
+              brand: f.brand,
+              floor_index: f.floor_index,
+              pos_x: f.pos_x,
+              pos_y: f.pos_y,
+              pos_z: f.pos_z,
+              created_at: f.created_at, // Preserved from existing or new timestamp
+              updated_at: new Date().toISOString(), // New timestamp for this entry
+            }))
+          )
+          .select();
+
+        if (error) {
+          throw new Error(error.message || 'Failed to insert fixtures');
+        }
+
+        return (data ?? []) as StoreFixtureIdRow[];
+      },
+
+      async getFixturesByBrand(storeId: string, brand: string) {
+        // Get all fixtures with brand, then filter to latest
+        const { data, error } = await supabase
+          .from('store_fixture_ids')
+          .select('*')
+          .eq('store_id', storeId)
+          .eq('brand', brand)
+          .order('fixture_id', { ascending: true })
+          .order('updated_at', { ascending: false });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to get fixtures by brand');
+        }
+
+        // Filter to get only latest entry per fixture_id
+        const latestByFixture = new Map<string, StoreFixtureIdRow>();
+        for (const row of (data ?? [])) {
+          if (!latestByFixture.has(row.fixture_id)) {
+            latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
+          }
+        }
+
+        return Array.from(latestByFixture.values());
+      },
+
+      async getFixtureHistory(storeId: string, fixtureId: string) {
+        // Get full history for a specific fixture
+        const { data, error } = await supabase
+          .from('store_fixture_ids')
+          .select('*')
+          .eq('store_id', storeId)
+          .eq('fixture_id', fixtureId)
+          .order('updated_at', { ascending: false });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to get fixture history');
+        }
+
+        return (data ?? []) as StoreFixtureIdRow[];
+      },
+
+      async getFixturesByFloor(storeId: string, floorIndex: number) {
+        // Get all fixtures on a specific floor
+        const { data, error } = await supabase
+          .from('store_fixture_ids')
+          .select('*')
+          .eq('store_id', storeId)
+          .eq('floor_index', floorIndex)
+          .order('fixture_id', { ascending: true })
+          .order('updated_at', { ascending: false });
+
+        if (error) {
+          throw new Error(error.message || 'Failed to get fixtures by floor');
+        }
+
+        // Filter to get only latest entry per fixture_id
+        const latestByFixture = new Map<string, StoreFixtureIdRow>();
+        for (const row of (data ?? [])) {
+          if (!latestByFixture.has(row.fixture_id)) {
+            latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
+          }
+        }
+
+        return Array.from(latestByFixture.values());
+      },
+
+      async deleteStoreFixtures(storeId: string) {
+        // Delete all history for a store
+        const { error } = await supabase
+          .from('store_fixture_ids')
+          .delete()
+          .eq('store_id', storeId);
+
+        if (error) {
+          throw new Error(error.message || 'Failed to delete store fixtures');
+        }
       },
     }),
     []

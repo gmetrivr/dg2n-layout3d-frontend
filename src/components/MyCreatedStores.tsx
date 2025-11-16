@@ -4,10 +4,12 @@ import JSZip from 'jszip';
 
 import { Button } from '@/shadcn/components/ui/button';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
-import type { StoreSaveRow } from '../services/supabaseService';
+import type { StoreSaveRow, StoreFixtureId } from '../services/supabaseService';
 import { loadStoreMasterData, type StoreData } from '../utils/csvUtils';
 import { apiService } from '../services/api';
 import { isFloorFile, isShatteredFloorPlateFile } from '../utils/zipUtils';
+import { assignFixtureIdsNewStore, assignFixtureIdsUpdateStore, type CurrentFixture } from '../services/fixtureIdAssignment';
+import { fetchBlockTypeMapping } from '../services/fixtureTypeMapping';
 
 function formatBytes(bytes?: number | null) {
   if (bytes == null) return '-';
@@ -262,7 +264,14 @@ export function MyCreatedStores() {
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [isLoadingStores, setIsLoadingStores] = useState(false);
   const navigate = useNavigate();
-  const { listStoreRecords, downloadZip, makeStoreLive } = useSupabaseService();
+  const {
+    listStoreRecords,
+    downloadZip,
+    uploadStoreZip,
+    makeStoreLive,
+    getStoreFixtures,
+    insertFixtures
+  } = useSupabaseService();
   // removeZipAndRow temporarily removed - used for delete functionality
 
   const fetchRows = useCallback(
@@ -612,14 +621,126 @@ export function MyCreatedStores() {
                             // Ensure store-config.json exists in the ZIP
                             zipBlob = await ensureStoreConfigInZip(zipBlob);
 
+                            // Process ZIP to assign fixture IDs
+                            const zip = await JSZip.loadAsync(zipBlob);
+
+                            // Find location-master.csv in ZIP
+                            const locationMasterFile = Object.keys(zip.files).find(
+                              (name) => name.toLowerCase().includes('location') && name.toLowerCase().includes('master') && name.endsWith('.csv')
+                            );
+
+                            if (!locationMasterFile) {
+                              throw new Error('location-master.csv not found in ZIP');
+                            }
+
+                            // Extract and parse CSV
+                            const csvText = await zip.files[locationMasterFile].async('text');
+                            const lines = csvText.split('\n').filter(line => line.trim());
+
+                            // Parse current fixtures from CSV
+                            const currentFixtures: CurrentFixture[] = [];
+                            for (let i = 1; i < lines.length; i++) {
+                              const values = lines[i].split(',');
+                              if (values.length >= 14) {
+                                currentFixtures.push({
+                                  blockName: values[0].trim(),
+                                  floorIndex: parseInt(values[1]) || 0,
+                                  posX: parseFloat(values[5]) || 0,
+                                  posY: parseFloat(values[6]) || 0,
+                                  posZ: parseFloat(values[7]) || 0,
+                                  brand: values[11]?.trim() || 'unknown',
+                                });
+                              }
+                            }
+
+                            // Fetch block name to fixture type mapping from backend API
+                            console.log('Fetching block→fixture_type mapping from API...');
+                            const blockTypeMapping = await fetchBlockTypeMapping();
+                            console.log(`Loaded ${blockTypeMapping.size} block→fixture_type mappings`);
+
+                            // Check if store exists in SFI table
+                            const existingFixtures = await getStoreFixtures(r.store_id);
+                            const isNewStore = existingFixtures.length === 0;
+
+                            let finalFixtures: StoreFixtureId[];
+                            let moveToStorage: string[] = [];
+
+                            if (isNewStore) {
+                              // Make Live #1: New store - generate new IDs
+                              console.log('Make Live #1: New store, generating new fixture IDs');
+                              finalFixtures = assignFixtureIdsNewStore(r.store_id, currentFixtures, blockTypeMapping);
+                            } else {
+                              // Make Live #2: Update store - reuse IDs
+                              console.log('Make Live #2: Updating store, reusing fixture IDs');
+                              const result = assignFixtureIdsUpdateStore(r.store_id, currentFixtures, existingFixtures, blockTypeMapping);
+                              finalFixtures = result.finalFixtures;
+                              moveToStorage = result.moveToStorage;
+                            }
+
+                            // Update CSV with assigned fixture IDs
+                            const header = lines[0];
+                            const updatedLines = [header];
+
+                            for (let i = 0; i < currentFixtures.length; i++) {
+                              const values = lines[i + 1].split(',');
+                              const fixtureId = finalFixtures[i]?.fixture_id || '';
+
+                              // Ensure fixture_id is in the CSV (15th column)
+                              if (values.length > 14) {
+                                values[14] = fixtureId;
+                              } else {
+                                values.push(fixtureId);
+                              }
+
+                              updatedLines.push(values.join(','));
+                            }
+
+                            const updatedCSV = updatedLines.join('\n');
+                            zip.file(locationMasterFile, updatedCSV);
+
+                            // Generate updated ZIP blob
+                            const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
+
+                            // Upload updated ZIP back to Supabase storage (with fixture IDs in CSV)
+                            await uploadStoreZip(r.zip_path, updatedZipBlob, { bucket: DEFAULT_BUCKET });
+                            console.log(`Updated ZIP uploaded to storage: ${r.zip_path}`);
+
+                            // Insert new entries into SFI table (history tracking - always insert, never update)
+                            await insertFixtures(finalFixtures);
+                            console.log(`Inserted ${finalFixtures.length} fixture entries`);
+
+                            // Move leftover TEMP fixtures to STORAGE
+                            if (moveToStorage.length > 0) {
+                              const storageFixtures: StoreFixtureId[] = moveToStorage
+                                .map(fixtureId => {
+                                  const existing = existingFixtures.find(f => f.fixture_id === fixtureId);
+                                  if (!existing) return null;
+                                  return {
+                                    fixture_id: existing.fixture_id,
+                                    store_id: r.store_id,
+                                    fixture_type: existing.fixture_type,
+                                    brand: 'STORAGE',
+                                    floor_index: existing.floor_index,
+                                    pos_x: existing.pos_x,
+                                    pos_y: existing.pos_y,
+                                    pos_z: existing.pos_z,
+                                    created_at: existing.created_at,
+                                  };
+                                })
+                                .filter((f): f is StoreFixtureId => f !== null);
+
+                              await insertFixtures(storageFixtures);
+                              console.log(`Moved ${storageFixtures.length} fixtures to STORAGE`);
+                            }
+
                             // Find store metadata from CSV by store_id
                             const storeInfo = storeData.find(store => store.storeCode === r.store_id);
 
-                            // Make the store live using the API with metadata from CSV
+                            // Make the store live using the API with updated ZIP
                             await makeStoreLive(
                               r.store_id,
                               r.store_name,
-                              zipBlob,
+                              updatedZipBlob,
                               (r.entity || 'trends').toLowerCase(),
                               '0,0,0',
                               {
@@ -633,14 +754,18 @@ export function MyCreatedStores() {
                               }
                             );
 
+                            // Refresh the store list to get the latest record from backend
+                            await fetchRows(search);
+
                             const migrationMessage = migrationResult.migratedCount > 0
                               ? ` (${migrationResult.migratedCount} brand names were automatically updated to the latest format)`
                               : '';
-                            alert(`Store "${r.store_name}" is now live!${migrationMessage}`);
+                            alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}`);
                           } catch (error) {
                             const message = error instanceof Error ? error.message : 'Failed to make store live';
                             alert(`Error: ${message}`);
                             setError(message);
+                            console.error('Make Live Error:', error);
                           } finally {
                             setMakingLiveId(null);
                           }
