@@ -134,11 +134,20 @@ function assignFixtureIds(
   for (const addition of additions) {
     const additionPos = toFixtureWithPosition(addition, blockTypeMapping);
 
+    console.log(`\n[ASSIGN] Addition: ${additionPos.fixture_type} at floor ${additionPos.floor_index}, pos (${additionPos.pos_x.toFixed(2)}, ${additionPos.pos_y.toFixed(2)})`);
+
     // Try TEMP first (has floor_index for floor-aware matching)
     const availableTemp = tempFixtures.filter((f) => !usedTempIds.has(f.fixture_id));
+    console.log(`[ASSIGN] Available TEMP: ${availableTemp.length} fixtures`);
+    availableTemp.forEach(f => {
+      console.log(`  - ${f.fixture_id}: ${f.fixture_type} floor ${f.floor_index} at (${f.pos_x.toFixed(2)}, ${f.pos_y.toFixed(2)})`);
+    });
+
     const tempMatch = findClosestFixture(additionPos, availableTemp);
 
     if (tempMatch) {
+      console.log(`[ASSIGN] TEMP Match found: ${tempMatch.fixture_id} (floor ${tempMatch.floor_index})`);
+
       const matchedTempFixture = availableTemp.find((f) => f.fixture_id === tempMatch.fixture_id);
       if (matchedTempFixture) {
         assignments.push({

@@ -11,7 +11,7 @@ export interface BlockTypeMapping {
 // Use the Rhino backend API (same as api.ts)
 const API_BASE_URL = import.meta.env.MODE === "production"
   ? 'https://ec2-prod-rhino.dg2n.com'
-  : "http://localhost:8081";
+  : ""; // Empty string uses relative URLs (goes through Vite proxy)
 
 const FIXTURE_BLOCKS_API = `${API_BASE_URL}/api/fixtures/block-types`;
 

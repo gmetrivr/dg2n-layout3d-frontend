@@ -11,4 +11,20 @@ export default defineConfig({
       "@/shadcn": path.resolve(__dirname, "./src/shadcn"),
     },
   },
+  server: {
+    proxy: {
+      // Stockflow backend - only handles store 3D zip processing
+      '/api/tooling/processStore3DZip': {
+        target: 'https://stockflow-core.rc.dg2n.com',
+        changeOrigin: true,
+        secure: true,
+      },
+      // Rhino backend - handles all other /api endpoints, DWG processing, jobs, downloads
+      '^/(api|upload|jobs|download|config)': {
+        target: 'http://0.0.0.0:8081',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
+  }
 })

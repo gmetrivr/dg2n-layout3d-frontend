@@ -51,6 +51,8 @@ export function findClosestFixture<T extends FixtureWithPosition>(
   // Filter by matching fixture_type
   const matchingType = candidates.filter((c) => c.fixture_type === target.fixture_type);
 
+  console.log(`[FIND_CLOSEST] Target: ${target.fixture_type} floor ${target.floor_index}, ${matchingType.length} matching type`);
+
   if (matchingType.length === 0) {
     return null;
   }
@@ -59,8 +61,13 @@ export function findClosestFixture<T extends FixtureWithPosition>(
   const sameFloor = matchingType.filter((c) => c.floor_index === target.floor_index);
   const otherFloors = matchingType.filter((c) => c.floor_index !== target.floor_index);
 
+  console.log(`[FIND_CLOSEST] Same floor: ${sameFloor.length}, Other floors: ${otherFloors.length}`);
+  sameFloor.forEach(f => console.log(`  Same floor: floor ${f.floor_index} at (${f.pos_x.toFixed(2)}, ${f.pos_y.toFixed(2)})`));
+  otherFloors.forEach(f => console.log(`  Other floor: floor ${f.floor_index} at (${f.pos_x.toFixed(2)}, ${f.pos_y.toFixed(2)})`));
+
   // Try same floor first
   const searchList = sameFloor.length > 0 ? sameFloor : otherFloors;
+  console.log(`[FIND_CLOSEST] Searching in ${searchList.length} fixtures (${sameFloor.length > 0 ? 'same floor' : 'other floors'})`);
 
   // Find closest by 2D distance (X, Y - horizontal plane)
   let closest: T | null = null;
@@ -76,6 +83,12 @@ export function findClosestFixture<T extends FixtureWithPosition>(
       minDistance = distance;
       closest = candidate;
     }
+  }
+
+  if (closest) {
+    console.log(`[FIND_CLOSEST] Returning: floor ${closest.floor_index} at (${closest.pos_x.toFixed(2)}, ${closest.pos_y.toFixed(2)}) - distance: ${minDistance.toFixed(2)}m`);
+  } else {
+    console.log(`[FIND_CLOSEST] No match found`);
   }
 
   return closest;
@@ -103,18 +116,22 @@ export function isSamePosition(
 }
 
 /**
- * Check if a fixture matches another by fixture_type and position (within 0.3m threshold)
+ * Check if a fixture matches another by fixture_type, floor_index, and position (within 0.3m threshold)
  * Used for "no change" detection
  *
  * @param fixture1 First fixture
  * @param fixture2 Second fixture
  * @param threshold Distance threshold in meters (default 0.3m)
- * @returns True if fixtures match (same fixture_type + same position)
+ * @returns True if fixtures match (same fixture_type + same floor_index + same position)
  */
 export function isFixtureMatch(
   fixture1: FixtureWithPosition,
   fixture2: FixtureWithPosition,
   threshold: number = 0.3
 ): boolean {
-  return fixture1.fixture_type === fixture2.fixture_type && isSamePosition(fixture1, fixture2, threshold);
+  return (
+    fixture1.fixture_type === fixture2.fixture_type &&
+    fixture1.floor_index === fixture2.floor_index &&
+    isSamePosition(fixture1, fixture2, threshold)
+  );
 }
