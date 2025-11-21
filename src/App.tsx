@@ -1,29 +1,50 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import { Loader2 } from 'lucide-react';
 
 import './App.css';
 import Navbar from './components/Navbar';
 import { AuthGate } from './components/AuthGate';
 import { Home } from './components/Home';
 import { CadTo3D } from './components/CadTo3D';
-import { ThreeDViewerModifier } from './components/3DViewerModifier';
 import { MyCreatedStores } from './components/MyCreatedStores';
 import { AuthProvider } from './contexts/AuthContext';
+
+// Lazy load the heavy 3D viewer component
+const ThreeDViewerModifier = lazy(() =>
+  import('./components/3DViewerModifier').then(module => ({
+    default: module.ThreeDViewerModifier
+  }))
+);
+
+function LoadingFallback() {
+  return (
+    <div className="h-screen flex items-center justify-center">
+      <div className="text-center">
+        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   return (
     <AuthProvider>
       <Router>
         <AuthGate>
-          <div className="dark bg-background min-h-screen text-foreground">
+          <div className="dark bg-background min-h-screen text-foreground relative">
             <Navbar />
             <div className="pt-24" />
 
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/cad-to-3d" element={<CadTo3D />} />
-              <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
-              <Route path="/my-stores" element={<MyCreatedStores />} />
-            </Routes>
+            <Suspense fallback={<LoadingFallback />}>
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/cad-to-3d" element={<CadTo3D />} />
+                <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
+                <Route path="/my-stores" element={<MyCreatedStores />} />
+              </Routes>
+            </Suspense>
 
             <footer className="border-t border-border mt-auto">
               <div className="container mx-auto px-4 py-6">

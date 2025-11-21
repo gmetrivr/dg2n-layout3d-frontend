@@ -218,6 +218,8 @@ export function ThreeDViewerModifier() {
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
+  const [setSpawnPointMode, setSetSpawnPointMode] = useState(false);
+  const [spawnPoints, setSpawnPoints] = useState<Map<number, [number, number, number]>>(new Map());
   const [isTransforming, setIsTransforming] = useState(false);
   const [floorPlatesData, setFloorPlatesData] = useState<Record<string, Record<string, any[]>>>({});
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
@@ -716,6 +718,26 @@ export function ThreeDViewerModifier() {
       setObjectPlacementPoint(null);
     }
   }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
+
+  // Handler for floor click during spawn point setting
+  const handleFloorClickForSpawnPoint = useCallback((point: [number, number, number]) => {
+    if (!setSpawnPointMode) return;
+
+    const fileForFloorExtraction = selectedFloorFile || selectedFile;
+    const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+    const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Set spawn point at ground level (y = 0) for the current floor
+    const spawnPoint: [number, number, number] = [point[0], 0, point[2]];
+
+    setSpawnPoints(prev => {
+      const updated = new Map(prev);
+      updated.set(currentFloor, spawnPoint);
+      return updated;
+    });
+
+    console.log(`Spawn point set for floor ${currentFloor}:`, spawnPoint);
+  }, [setSpawnPointMode, selectedFloorFile, selectedFile]);
 
   // Handler for object click
   const handleObjectClick = useCallback((object: ArchitecturalObject) => {
@@ -1223,7 +1245,9 @@ const isFloorPlatesCsv = (name: string) => {
 // Generate store config JSON with floor data and fixture mappings from API
 const createStoreConfigJSON = useCallback(async (
   workingLocationData: LocationData[],
-  workingExtractedFiles: ExtractedFile[]
+  workingExtractedFiles: ExtractedFile[],
+  currentSpawnPoints: Map<number, [number, number, number]>,
+  currentFloorNames: Map<number, string>
 ): Promise<string> => {
   log('Generating store config JSON...');
 
@@ -1297,12 +1321,25 @@ const createStoreConfigJSON = useCallback(async (
     // Use existing name and spawn point if available, otherwise use defaults
     // If existing name is "dg2n-3d", replace it with the extracted name
     let floorName: string;
-    if (existingFloor?.name && existingFloor.name.toLowerCase() !== 'dg2n-3d') {
+
+    // Priority: currentFloorNames > existingFloor?.name > defaultFloorName
+    if (currentFloorNames.has(floorIndex)) {
+      floorName = currentFloorNames.get(floorIndex)!;
+    } else if (existingFloor?.name && existingFloor.name.toLowerCase() !== 'dg2n-3d') {
       floorName = existingFloor.name;
     } else {
       floorName = defaultFloorName;
     }
-    const spawnPoint = existingFloor?.spawn_point || [0, 0, 0];
+
+    // Priority: currentSpawnPoints > existingFloor?.spawn_point > [0, 0, 0]
+    let spawnPoint: [number, number, number];
+    if (currentSpawnPoints.has(floorIndex)) {
+      spawnPoint = currentSpawnPoints.get(floorIndex)!;
+    } else if (existingFloor?.spawn_point) {
+      spawnPoint = existingFloor.spawn_point as [number, number, number];
+    } else {
+      spawnPoint = [0, 0, 0];
+    }
 
     return {
       name: floorName,
@@ -1635,7 +1672,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Generate and add store config JSON
     try {
       log('Creating store config JSON...');
-      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles);
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames);
       zip.file('store-config.json', configJson);
       log('Added store-config.json to ZIP');
     } catch (error) {
@@ -1646,7 +1683,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     log('Modified ZIP built.');
     const blob = await zip.generateAsync({ type: 'blob' });
     return blob;
-  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects, createStoreConfigJSON]);
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects, spawnPoints, floorNames, createStoreConfigJSON]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
@@ -2196,15 +2233,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         if (values.length > 13) {
           values[13] = currentLocationData.hierarchy.toString();
         }
+
+        // Use current fixture ID (15th column)
+        if (values.length > 14) {
+          values[14] = currentLocationData.fixtureId || '';
+        } else {
+          values.push(currentLocationData.fixtureId || '');
+        }
       }
-      
+
       // Update block name if fixture type was changed (embedded in currentLocationData)
       if (currentLocationData && currentLocationData.wasTypeChanged) {
         values[0] = currentLocationData.blockName; // Use current block name (includes type changes)
         // Note: Fixture Type column doesn't exist in this CSV structure
       }
-      
-      
+
+
       modifiedLines.push(values.join(','));
       updated++;
     }
@@ -2223,7 +2267,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const wasNotInOriginalCSV = !originalFixtures.has(originalLocationKey);
 
       if (isDerivedFixture || wasNotInOriginalCSV) {
-        // Create CSV line for new fixture using correct 14-column structure
+        // Create CSV line for new fixture using correct 15-column structure
         const csvLine = [
           location.blockName,             // 0: Block Name
           location.floorIndex.toString(), // 1: Floor Index
@@ -2238,7 +2282,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           location.rotationZ.toFixed(1), // 10: Rotation Z (deg)
           location.brand,                // 11: Brand
           location.count.toString(),     // 12: Count
-          location.hierarchy.toString()  // 13: Hierarchy
+          location.hierarchy.toString(), // 13: Hierarchy
+          location.fixtureId || ''       // 14: Fixture ID
         ].join(',');
 
         modifiedLines.push(csvLine);
@@ -2256,7 +2301,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   };
 
   const generateLocationCSVFromState = (data: LocationData[] = locationData) => {
-    const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy';
+    const header = 'Block Name,Floor Index,Origin X (m),Origin Y (m),Origin Z (m),Pos X (m),Pos Y (m),Pos Z (m),Rotation X (deg),Rotation Y (deg),Rotation Z (deg),Brand,Count,Hierarchy,Fixture ID';
     const rows = data.map(loc => [
       loc.blockName,
       loc.floorIndex,
@@ -2271,7 +2316,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       Number(loc.rotationZ.toFixed(1)),
       loc.brand,
       loc.count,
-      loc.hierarchy
+      loc.hierarchy,
+      loc.fixtureId || '' // Fixture ID (15th column)
     ].join(','));
     const csv = [header, ...rows].join('\n');
     log('Generated CSV from state. Rows:', rows.length);
@@ -2798,6 +2844,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const brand = values[11]?.trim() || 'unknown';
             const count = parseInt(values[12]) || 1;
             const hierarchy = parseInt(values[13]) || 0;
+            const fixtureId = values[14]?.trim() || undefined; // Fixture ID (optional, 15th column)
 
             const locationItem = {
               // Current state
@@ -2815,7 +2862,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               count,
               hierarchy,
               glbUrl: undefined, // Will be loaded via API
-              
+              fixtureId, // Fixture ID from CSV
+
               // Original state (for reset and export logic)
               originalBlockName: blockName,
               originalPosX: posX,
@@ -2828,7 +2876,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               originalCount: count,
               originalHierarchy: hierarchy,
               originalGlbUrl: undefined,
-              
+              originalFixtureId: fixtureId,
+
               // No modifications on initial load
               wasMoved: false,
               wasRotated: false,
@@ -2837,7 +2886,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               wasCountChanged: false,
               wasHierarchyChanged: false,
               wasDuplicated: false,
-              
+
               _ingestionTimestamp: ingestionTimestamp + i // Add unique timestamp per row
             };
             data.push(locationItem);
@@ -3067,6 +3116,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           showWalls={showWalls}
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
+          setSpawnPointMode={setSpawnPointMode}
           transformSpace={transformSpace}
           fixtureTypes={fixtureTypes}
           selectedFixtureType={selectedFixtureType}
@@ -3083,6 +3133,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           floorDisplayOrder={floorDisplayOrder}
           initialFloorCount={initialFloorCount}
           architecturalObjectsCount={architecturalObjects.length}
+          spawnPoints={spawnPoints}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
@@ -3091,6 +3142,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onShowFixtureLabelsChange={setShowFixtureLabels}
           onShowWallsChange={setShowWalls}
           onEditModeChange={handleEditModeChange}
+          onSetSpawnPointModeChange={setSetSpawnPointMode}
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
@@ -3131,6 +3183,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
           onObjectClick={handleObjectClick}
           onObjectPositionChange={handleObjectPositionChange}
+          setSpawnPointMode={setSpawnPointMode}
+          spawnPoints={spawnPoints}
+          onFloorClickForSpawnPoint={handleFloorClickForSpawnPoint}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
           onFixtureClick={handleFixtureClickWithObjectClear}

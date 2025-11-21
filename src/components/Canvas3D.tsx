@@ -1043,6 +1043,10 @@ interface Canvas3DProps {
   onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
   onObjectClick?: (object: ArchitecturalObject) => void;
   onObjectPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  // Spawn point props
+  setSpawnPointMode?: boolean;
+  spawnPoints?: Map<number, [number, number, number]>;
+  onFloorClickForSpawnPoint?: (point: [number, number, number]) => void;
   // Existing callbacks
   onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
   onGLBError: (blockName: string, url: string) => void;
@@ -1084,6 +1088,9 @@ export function Canvas3D({
   onFloorClickForObjectPlacement,
   onObjectClick,
   onObjectPositionChange,
+  setSpawnPointMode = false,
+  spawnPoints = new Map(),
+  onFloorClickForSpawnPoint,
   onBoundsCalculated,
   onGLBError,
   onFixtureClick,
@@ -1280,11 +1287,50 @@ export function Canvas3D({
         );
       })()}
 
+      {/* Spawn point markers */}
+      {Array.from(spawnPoints.entries()).map(([floorIndex, spawnPoint]) => {
+        // Get current floor
+        const fileForFloorExtraction = selectedFloorFile || selectedFile;
+        const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+        // Only show spawn point for current floor
+        if (floorIndex !== currentFloor) return null;
+
+        return (
+          <group key={`spawn-${floorIndex}`} position={spawnPoint}>
+            {/* Spawn point sphere */}
+            <mesh position={[0, 0.1, 0]}>
+              <sphereGeometry args={[0.2]} />
+              <meshStandardMaterial color="#00ff00" emissive="#00ff00" emissiveIntensity={0.5} />
+            </mesh>
+            {/* Spawn point cylinder (marker pole) */}
+            <mesh position={[0, 1, 0]}>
+              <cylinderGeometry args={[0.05, 0.05, 2, 8]} />
+              <meshStandardMaterial color="#00ff00" emissive="#00ff00" emissiveIntensity={0.3} />
+            </mesh>
+            {/* Spawn point label */}
+            <mesh position={[0, 2.2, 0]}>
+              <sphereGeometry args={[0.1]} />
+              <meshStandardMaterial color="#00ff00" />
+            </mesh>
+          </group>
+        );
+      })}
+
       {/* Floor click handler for object placement */}
       {isAddingObject && onFloorClickForObjectPlacement && (
         <FloorClickHandler
           isAddingObject={isAddingObject}
           onFloorClick={onFloorClickForObjectPlacement}
+        />
+      )}
+
+      {/* Floor click handler for spawn point setting */}
+      {setSpawnPointMode && onFloorClickForSpawnPoint && (
+        <FloorClickHandler
+          isAddingObject={setSpawnPointMode}
+          onFloorClick={onFloorClickForSpawnPoint}
         />
       )}
 
