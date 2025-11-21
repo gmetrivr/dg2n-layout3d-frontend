@@ -10,6 +10,7 @@ import { apiService } from '../services/api';
 import { isFloorFile, isShatteredFloorPlateFile } from '../utils/zipUtils';
 import { assignFixtureIdsNewStore, assignFixtureIdsUpdateStore, type CurrentFixture } from '../services/fixtureIdAssignment';
 import { fetchBlockTypeMapping } from '../services/fixtureTypeMapping';
+import { MakeLiveConfirmationDialog, type MakeLiveStats } from './MakeLiveConfirmationDialog';
 
 function formatBytes(bytes?: number | null) {
   if (bytes == null) return '-';
@@ -263,6 +264,9 @@ export function MyCreatedStores() {
   const [selectedState, setSelectedState] = useState<string>('all');
   const [selectedCity, setSelectedCity] = useState<string>('all');
   const [isLoadingStores, setIsLoadingStores] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmStats, setConfirmStats] = useState<MakeLiveStats | null>(null);
+  const [pendingMakeLiveRow, setPendingMakeLiveRow] = useState<StoreSaveRow | null>(null);
   const navigate = useNavigate();
   const {
     listStoreRecords,
@@ -418,6 +422,367 @@ export function MyCreatedStores() {
       return true;
     });
   }, [rows, selectedRegion, selectedState, selectedCity, storeData]);
+
+  const handleMakeLiveClick = async (row: StoreSaveRow) => {
+    try {
+      setMakingLiveId(row.id);
+
+      // Download and process ZIP to gather stats
+      let zipBlob = await downloadZip(row.zip_path, DEFAULT_BUCKET);
+
+      // Migrate brand names
+      const migrationResult = await migrateBrandsInZip(zipBlob, '02');
+      zipBlob = migrationResult.zipBlob;
+
+      // Ensure store-config.json exists
+      zipBlob = await ensureStoreConfigInZip(zipBlob);
+
+      // Parse ZIP to extract fixture data
+      const zip = await JSZip.loadAsync(zipBlob);
+
+      // Find location-master.csv
+      const locationMasterFile = Object.keys(zip.files).find(
+        (name) => name.toLowerCase().includes('location') && name.toLowerCase().includes('master') && name.endsWith('.csv')
+      );
+
+      if (!locationMasterFile) {
+        throw new Error('location-master.csv not found in ZIP');
+      }
+
+      // Extract and parse CSV
+      const csvText = await zip.files[locationMasterFile].async('text');
+      const lines = csvText.split('\n').filter(line => line.trim());
+
+      // Parse current fixtures
+      const currentFixtures: CurrentFixture[] = [];
+      const brandsSet = new Set<string>();
+      const fixturesPerFloor: Record<number, number> = {};
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        if (values.length >= 14) {
+          const floorIndex = parseInt(values[1]) || 0;
+          const brand = values[11]?.trim() || 'unknown';
+
+          currentFixtures.push({
+            blockName: values[0].trim(),
+            floorIndex,
+            posX: parseFloat(values[5]) || 0,
+            posY: parseFloat(values[6]) || 0,
+            posZ: parseFloat(values[7]) || 0,
+            brand,
+          });
+
+          brandsSet.add(brand);
+          fixturesPerFloor[floorIndex] = (fixturesPerFloor[floorIndex] || 0) + 1;
+        }
+      }
+
+      // Check if store exists in SFI table
+      const existingFixtures = await getStoreFixtures(row.store_id);
+      const isNewStore = existingFixtures.length === 0;
+
+      // Calculate fixture changes if not first time
+      let previousFixtureCount: number | undefined;
+      let addedFixturesCount: number | undefined;
+      let removedFixturesCount: number | undefined;
+      let floorChangedFixturesCount: number | undefined;
+      let unchangedFixturesCount: number | undefined;
+
+      if (!isNewStore) {
+        // Get block type mapping
+        const blockTypeMapping = await fetchBlockTypeMapping();
+
+        // Use classification logic to detect changes
+        const activeExisting = existingFixtures.filter((f) => f.brand !== 'STORAGE');
+        previousFixtureCount = activeExisting.length;
+
+        const { noChange, deletions, additions, floorChanged } = classifyFixturesWithFloorTracking(
+          currentFixtures,
+          existingFixtures,
+          blockTypeMapping
+        );
+
+        addedFixturesCount = additions.length;
+        removedFixturesCount = deletions.length;
+        floorChangedFixturesCount = floorChanged.length;
+        unchangedFixturesCount = noChange.length - floorChanged.length;
+      }
+
+      const totalFloors = Object.keys(fixturesPerFloor).length;
+
+      const stats: MakeLiveStats = {
+        totalFloors,
+        totalFixtures: currentFixtures.length,
+        totalBrands: brandsSet.size,
+        fixturesPerFloor,
+        isFirstTime: isNewStore,
+        previousFixtureCount,
+        addedFixturesCount,
+        removedFixturesCount,
+        floorChangedFixturesCount,
+        unchangedFixturesCount,
+      };
+
+      // Store row and stats for confirmation
+      setPendingMakeLiveRow(row);
+      setConfirmStats(stats);
+      setShowConfirmDialog(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to prepare make live';
+      alert(`Error: ${message}`);
+      setError(message);
+      console.error('Make Live Preparation Error:', error);
+    } finally {
+      setMakingLiveId(null);
+    }
+  };
+
+  // Helper function for classifying fixtures with floor change tracking (for stats calculation)
+  function classifyFixturesWithFloorTracking(
+    currentFixtures: CurrentFixture[],
+    existingFixtures: any[],
+    blockTypeMapping: Map<string, string>
+  ) {
+    const noChange: any[] = [];
+    const additions: CurrentFixture[] = [];
+    const floorChanged: any[] = [];
+    const matchedExistingIds = new Set<string>();
+
+    const activeExisting = existingFixtures.filter((f) => f.brand !== 'STORAGE');
+
+    for (const current of currentFixtures) {
+      const currentFixtureType = blockTypeMapping.get(current.blockName) || current.blockName;
+
+      // First try to match by fixture_type, floor_index, and position (exact match)
+      const exactMatch = activeExisting.find((existing) => {
+        if (matchedExistingIds.has(existing.id)) return false;
+
+        if (existing.fixture_type !== currentFixtureType) return false;
+        if (existing.floor_index !== current.floorIndex) return false;
+
+        const dx = existing.pos_x - current.posX;
+        const dy = existing.pos_y - current.posY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        return distance <= 0.3;
+      });
+
+      if (exactMatch) {
+        noChange.push({ current, existing: exactMatch });
+        matchedExistingIds.add(exactMatch.id);
+        continue;
+      }
+
+      // If no exact match, try matching by fixture_type and position only (ignoring floor)
+      const floorChangedMatch = activeExisting.find((existing) => {
+        if (matchedExistingIds.has(existing.id)) return false;
+
+        if (existing.fixture_type !== currentFixtureType) return false;
+
+        const dx = existing.pos_x - current.posX;
+        const dy = existing.pos_y - current.posY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        return distance <= 0.3;
+      });
+
+      if (floorChangedMatch) {
+        noChange.push({ current, existing: floorChangedMatch });
+        floorChanged.push({ current, existing: floorChangedMatch });
+        matchedExistingIds.add(floorChangedMatch.id);
+      } else {
+        additions.push(current);
+      }
+    }
+
+    const deletions = activeExisting
+      .filter((existing) => !matchedExistingIds.has(existing.id))
+      .map((existing) => ({
+        fixture_id: existing.fixture_id,
+        fixture_type: existing.fixture_type,
+        floor_index: existing.floor_index,
+        pos_x: existing.pos_x,
+        pos_y: existing.pos_y,
+        created_at: existing.created_at,
+      }));
+
+    return { noChange, deletions, additions, floorChanged };
+  }
+
+  const handleConfirmMakeLive = async () => {
+    if (!pendingMakeLiveRow) return;
+
+    const r = pendingMakeLiveRow;
+    setShowConfirmDialog(false);
+
+    try {
+      setMakingLiveId(r.id);
+
+      // Download the ZIP file first
+      let zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
+
+      // Migrate brand names in location-master.csv
+      console.log('[MyCreatedStores] Starting brand migration...');
+      const migrationResult = await migrateBrandsInZip(zipBlob, '02');
+      zipBlob = migrationResult.zipBlob;
+      if (migrationResult.migratedCount > 0) {
+        console.log(`[MyCreatedStores] Successfully migrated ${migrationResult.migratedCount} brand names`);
+      }
+
+      // Ensure store-config.json exists in the ZIP
+      zipBlob = await ensureStoreConfigInZip(zipBlob);
+
+      // Process ZIP to assign fixture IDs
+      const zip = await JSZip.loadAsync(zipBlob);
+
+      // Find location-master.csv in ZIP
+      const locationMasterFile = Object.keys(zip.files).find(
+        (name) => name.toLowerCase().includes('location') && name.toLowerCase().includes('master') && name.endsWith('.csv')
+      );
+
+      if (!locationMasterFile) {
+        throw new Error('location-master.csv not found in ZIP');
+      }
+
+      // Extract and parse CSV
+      const csvText = await zip.files[locationMasterFile].async('text');
+      const lines = csvText.split('\n').filter(line => line.trim());
+
+      // Parse current fixtures from CSV
+      const currentFixtures: CurrentFixture[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        if (values.length >= 14) {
+          currentFixtures.push({
+            blockName: values[0].trim(),
+            floorIndex: parseInt(values[1]) || 0,
+            posX: parseFloat(values[5]) || 0,
+            posY: parseFloat(values[6]) || 0,
+            posZ: parseFloat(values[7]) || 0,
+            brand: values[11]?.trim() || 'unknown',
+          });
+        }
+      }
+
+      // Fetch block name to fixture type mapping from backend API
+      console.log('Fetching block→fixture_type mapping from API...');
+      const blockTypeMapping = await fetchBlockTypeMapping();
+      console.log(`Loaded ${blockTypeMapping.size} block→fixture_type mappings`);
+
+      // Check if store exists in SFI table
+      const existingFixtures = await getStoreFixtures(r.store_id);
+      const isNewStore = existingFixtures.length === 0;
+
+      let finalFixtures: StoreFixtureId[];
+      let moveToStorage: string[] = [];
+
+      if (isNewStore) {
+        // Make Live #1: New store - generate new IDs
+        console.log('Make Live #1: New store, generating new fixture IDs');
+        finalFixtures = assignFixtureIdsNewStore(r.store_id, currentFixtures, blockTypeMapping);
+      } else {
+        // Make Live #2: Update store - reuse IDs
+        console.log('Make Live #2: Updating store, reusing fixture IDs');
+        const result = assignFixtureIdsUpdateStore(r.store_id, currentFixtures, existingFixtures, blockTypeMapping);
+        finalFixtures = result.finalFixtures;
+        moveToStorage = result.moveToStorage;
+      }
+
+      // Update CSV with assigned fixture IDs
+      const header = lines[0];
+      const updatedLines = [header];
+
+      for (let i = 0; i < currentFixtures.length; i++) {
+        const values = lines[i + 1].split(',');
+        const fixtureId = finalFixtures[i]?.fixture_id || '';
+
+        // Ensure fixture_id is in the CSV (15th column)
+        if (values.length > 14) {
+          values[14] = fixtureId;
+        } else {
+          values.push(fixtureId);
+        }
+
+        updatedLines.push(values.join(','));
+      }
+
+      const updatedCSV = updatedLines.join('\n');
+      zip.file(locationMasterFile, updatedCSV);
+
+      // Generate updated ZIP blob
+      const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
+
+      // Upload updated ZIP back to Supabase storage (with fixture IDs in CSV)
+      await uploadStoreZip(r.zip_path, updatedZipBlob, { bucket: DEFAULT_BUCKET });
+      console.log(`Updated ZIP uploaded to storage: ${r.zip_path}`);
+
+      // Insert new entries into SFI table (history tracking - always insert, never update)
+      await insertFixtures(finalFixtures);
+      console.log(`Inserted ${finalFixtures.length} fixture entries`);
+
+      // Move leftover TEMP fixtures to STORAGE
+      if (moveToStorage.length > 0) {
+        const storageFixtures: StoreFixtureId[] = moveToStorage
+          .map(fixtureId => {
+            const existing = existingFixtures.find(f => f.fixture_id === fixtureId);
+            if (!existing) return null;
+            return {
+              fixture_id: existing.fixture_id,
+              store_id: r.store_id,
+              fixture_type: existing.fixture_type,
+              brand: 'STORAGE',
+              floor_index: existing.floor_index,
+              pos_x: existing.pos_x,
+              pos_y: existing.pos_y,
+              pos_z: existing.pos_z,
+              created_at: existing.created_at,
+            };
+          })
+          .filter((f): f is StoreFixtureId => f !== null);
+
+        await insertFixtures(storageFixtures);
+        console.log(`Moved ${storageFixtures.length} fixtures to STORAGE`);
+      }
+
+      // Find store metadata from CSV by store_id
+      const storeInfo = storeData.find(store => store.storeCode === r.store_id);
+
+      // Make the store live using the API with updated ZIP
+      await makeStoreLive(
+        r.store_id,
+        r.store_name,
+        updatedZipBlob,
+        (r.entity || 'trends').toLowerCase(),
+        '0,0,0',
+        {
+          nocName: storeInfo?.nocName || undefined,
+          sapName: storeInfo?.sapName || undefined,
+          zone: storeInfo?.zone || undefined,
+          state: storeInfo?.state || undefined,
+          city: storeInfo?.city || undefined,
+          format: storeInfo?.format || undefined,
+          formatType: storeInfo?.formatType || undefined,
+        }
+      );
+
+      // Refresh the store list to get the latest record from backend
+      await fetchRows(search);
+
+      const migrationMessage = migrationResult.migratedCount > 0
+        ? ` (${migrationResult.migratedCount} brand names were automatically updated to the latest format)`
+        : '';
+      alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to make store live';
+      alert(`Error: ${message}`);
+      setError(message);
+      console.error('Make Live Error:', error);
+    } finally {
+      setMakingLiveId(null);
+      setPendingMakeLiveRow(null);
+    }
+  };
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -598,178 +963,7 @@ export function MyCreatedStores() {
                         variant="link"
                         className="px-0"
                         disabled={makingLiveId === r.id}
-                        onClick={async () => {
-                          const ok = confirm(
-                            'Only one version can be live per Store ID. Make this live and override any existing live version?'
-                          );
-                          if (!ok) return;
-
-                          try {
-                            setMakingLiveId(r.id);
-
-                            // Download the ZIP file first
-                            let zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
-
-                            // Migrate brand names in location-master.csv
-                            console.log('[MyCreatedStores] Starting brand migration...');
-                            const migrationResult = await migrateBrandsInZip(zipBlob, '02');
-                            zipBlob = migrationResult.zipBlob;
-                            if (migrationResult.migratedCount > 0) {
-                              console.log(`[MyCreatedStores] Successfully migrated ${migrationResult.migratedCount} brand names`);
-                            }
-
-                            // Ensure store-config.json exists in the ZIP
-                            zipBlob = await ensureStoreConfigInZip(zipBlob);
-
-                            // Process ZIP to assign fixture IDs
-                            const zip = await JSZip.loadAsync(zipBlob);
-
-                            // Find location-master.csv in ZIP
-                            const locationMasterFile = Object.keys(zip.files).find(
-                              (name) => name.toLowerCase().includes('location') && name.toLowerCase().includes('master') && name.endsWith('.csv')
-                            );
-
-                            if (!locationMasterFile) {
-                              throw new Error('location-master.csv not found in ZIP');
-                            }
-
-                            // Extract and parse CSV
-                            const csvText = await zip.files[locationMasterFile].async('text');
-                            const lines = csvText.split('\n').filter(line => line.trim());
-
-                            // Parse current fixtures from CSV
-                            const currentFixtures: CurrentFixture[] = [];
-                            for (let i = 1; i < lines.length; i++) {
-                              const values = lines[i].split(',');
-                              if (values.length >= 14) {
-                                currentFixtures.push({
-                                  blockName: values[0].trim(),
-                                  floorIndex: parseInt(values[1]) || 0,
-                                  posX: parseFloat(values[5]) || 0,
-                                  posY: parseFloat(values[6]) || 0,
-                                  posZ: parseFloat(values[7]) || 0,
-                                  brand: values[11]?.trim() || 'unknown',
-                                });
-                              }
-                            }
-
-                            // Fetch block name to fixture type mapping from backend API
-                            console.log('Fetching block→fixture_type mapping from API...');
-                            const blockTypeMapping = await fetchBlockTypeMapping();
-                            console.log(`Loaded ${blockTypeMapping.size} block→fixture_type mappings`);
-
-                            // Check if store exists in SFI table
-                            const existingFixtures = await getStoreFixtures(r.store_id);
-                            const isNewStore = existingFixtures.length === 0;
-
-                            let finalFixtures: StoreFixtureId[];
-                            let moveToStorage: string[] = [];
-
-                            if (isNewStore) {
-                              // Make Live #1: New store - generate new IDs
-                              console.log('Make Live #1: New store, generating new fixture IDs');
-                              finalFixtures = assignFixtureIdsNewStore(r.store_id, currentFixtures, blockTypeMapping);
-                            } else {
-                              // Make Live #2: Update store - reuse IDs
-                              console.log('Make Live #2: Updating store, reusing fixture IDs');
-                              const result = assignFixtureIdsUpdateStore(r.store_id, currentFixtures, existingFixtures, blockTypeMapping);
-                              finalFixtures = result.finalFixtures;
-                              moveToStorage = result.moveToStorage;
-                            }
-
-                            // Update CSV with assigned fixture IDs
-                            const header = lines[0];
-                            const updatedLines = [header];
-
-                            for (let i = 0; i < currentFixtures.length; i++) {
-                              const values = lines[i + 1].split(',');
-                              const fixtureId = finalFixtures[i]?.fixture_id || '';
-
-                              // Ensure fixture_id is in the CSV (15th column)
-                              if (values.length > 14) {
-                                values[14] = fixtureId;
-                              } else {
-                                values.push(fixtureId);
-                              }
-
-                              updatedLines.push(values.join(','));
-                            }
-
-                            const updatedCSV = updatedLines.join('\n');
-                            zip.file(locationMasterFile, updatedCSV);
-
-                            // Generate updated ZIP blob
-                            const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
-
-                            // Upload updated ZIP back to Supabase storage (with fixture IDs in CSV)
-                            await uploadStoreZip(r.zip_path, updatedZipBlob, { bucket: DEFAULT_BUCKET });
-                            console.log(`Updated ZIP uploaded to storage: ${r.zip_path}`);
-
-                            // Insert new entries into SFI table (history tracking - always insert, never update)
-                            await insertFixtures(finalFixtures);
-                            console.log(`Inserted ${finalFixtures.length} fixture entries`);
-
-                            // Move leftover TEMP fixtures to STORAGE
-                            if (moveToStorage.length > 0) {
-                              const storageFixtures: StoreFixtureId[] = moveToStorage
-                                .map(fixtureId => {
-                                  const existing = existingFixtures.find(f => f.fixture_id === fixtureId);
-                                  if (!existing) return null;
-                                  return {
-                                    fixture_id: existing.fixture_id,
-                                    store_id: r.store_id,
-                                    fixture_type: existing.fixture_type,
-                                    brand: 'STORAGE',
-                                    floor_index: existing.floor_index,
-                                    pos_x: existing.pos_x,
-                                    pos_y: existing.pos_y,
-                                    pos_z: existing.pos_z,
-                                    created_at: existing.created_at,
-                                  };
-                                })
-                                .filter((f): f is StoreFixtureId => f !== null);
-
-                              await insertFixtures(storageFixtures);
-                              console.log(`Moved ${storageFixtures.length} fixtures to STORAGE`);
-                            }
-
-                            // Find store metadata from CSV by store_id
-                            const storeInfo = storeData.find(store => store.storeCode === r.store_id);
-
-                            // Make the store live using the API with updated ZIP
-                            await makeStoreLive(
-                              r.store_id,
-                              r.store_name,
-                              updatedZipBlob,
-                              (r.entity || 'trends').toLowerCase(),
-                              '0,0,0',
-                              {
-                                nocName: storeInfo?.nocName || undefined,
-                                sapName: storeInfo?.sapName || undefined,
-                                zone: storeInfo?.zone || undefined,
-                                state: storeInfo?.state || undefined,
-                                city: storeInfo?.city || undefined,
-                                format: storeInfo?.format || undefined,
-                                formatType: storeInfo?.formatType || undefined,
-                              }
-                            );
-
-                            // Refresh the store list to get the latest record from backend
-                            await fetchRows(search);
-
-                            const migrationMessage = migrationResult.migratedCount > 0
-                              ? ` (${migrationResult.migratedCount} brand names were automatically updated to the latest format)`
-                              : '';
-                            alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}`);
-                          } catch (error) {
-                            const message = error instanceof Error ? error.message : 'Failed to make store live';
-                            alert(`Error: ${message}`);
-                            setError(message);
-                            console.error('Make Live Error:', error);
-                          } finally {
-                            setMakingLiveId(null);
-                          }
-                        }}
+                        onClick={() => handleMakeLiveClick(r)}
                       >
                         {makingLiveId === r.id ? 'Making Live...' : 'Make Live'}
                       </Button>
@@ -781,6 +975,15 @@ export function MyCreatedStores() {
           </tbody>
         </table>
       </div>
+
+      <MakeLiveConfirmationDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        onConfirm={handleConfirmMakeLive}
+        stats={confirmStats}
+        storeName={pendingMakeLiveRow?.store_name || ''}
+        isProcessing={makingLiveId !== null}
+      />
     </div>
   );
 }
