@@ -21,7 +21,9 @@ import { useFixtureSelection, type LocationData, generateFixtureUID } from '../h
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/shadcn/components/ui/dialog';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
+import { supabase } from '../lib/supabaseClient';
 import { loadStoreMasterData, getUniqueStoreCodes, type StoreData } from '../utils/csvUtils';
+import { generateSpaceTrackerData, spaceTrackerToCSV, downloadSpaceTrackerCSV } from '../utils/spaceTrackerUtils';
 import { AddObjectModal } from './AddObjectModal';
 import { ObjectInfoPanel } from './ObjectInfoPanel';
 
@@ -1717,6 +1719,84 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   }, [createModifiedZipBlob, isExportingZip, jobId]);
 
+  const handleDownloadSpaceTracker = useCallback(() => {
+    try {
+      // Try to find the store data in multiple ways
+      let selectedStore: StoreData | null = null;
+      let identificationMethod = 'unknown';
+
+      // 1. Try using saveStoreId (from saved store or user selection)
+      if (saveStoreId && saveStoreId.trim()) {
+        selectedStore = storeData.find(store => store.storeCode === saveStoreId.trim()) || null;
+        if (selectedStore) {
+          identificationMethod = zipPath ? 'saved store (zipPath)' : 'user selection (saveStoreId)';
+        }
+      }
+
+      // 2. If not found, try to extract store code from jobId
+      if (!selectedStore && jobId) {
+        // JobId might contain store code (e.g., "STORE123-job-456")
+        const storeCodeMatch = jobId.match(/^([A-Z0-9]+)-/i);
+        if (storeCodeMatch) {
+          const potentialStoreCode = storeCodeMatch[1];
+          selectedStore = storeData.find(store =>
+            store.storeCode.toUpperCase() === potentialStoreCode.toUpperCase()
+          ) || null;
+          if (selectedStore) {
+            identificationMethod = 'jobId prefix match';
+          }
+        }
+
+        // Also try matching entire jobId against store codes
+        if (!selectedStore) {
+          selectedStore = storeData.find(store =>
+            jobId.toUpperCase().includes(store.storeCode.toUpperCase())
+          ) || null;
+          if (selectedStore) {
+            identificationMethod = 'jobId contains storeCode';
+          }
+        }
+      }
+
+      // Log store identification result
+      if (selectedStore) {
+        console.log(`[Space Tracker] Store identified via: ${identificationMethod}`);
+        console.log(`[Space Tracker] Store: ${selectedStore.storeCode} - ${selectedStore.storeName}`);
+      } else if (storeData.length > 0) {
+        console.warn('[Space Tracker] Store not found in store master data. Store-related columns will be empty.');
+        console.warn('[Space Tracker] Attempted methods:', {
+          saveStoreId: saveStoreId || 'not set',
+          jobId: jobId || 'not set',
+          zipPath: zipPath || 'not set',
+        });
+        console.warn('[Space Tracker] Available stores:', storeData.map(s => s.storeCode).join(', '));
+      }
+
+      // Generate Space Tracker data
+      const trackerData = generateSpaceTrackerData(
+        locationData,
+        selectedStore,
+        fixtureTypeMap,
+        floorNames,
+        deletedFixtures
+      );
+
+      // Convert to CSV
+      const csvContent = spaceTrackerToCSV(trackerData);
+
+      // Download the CSV
+      const storeName = selectedStore?.storeName || saveStoreId || jobId || 'unknown';
+      downloadSpaceTrackerCSV(csvContent, storeName);
+
+      // Show warning if store data not found
+      if (!selectedStore && storeData.length > 0) {
+        alert('Note: Store information could not be found in the store master file. Store-related columns (zone, state, city, etc.) will be empty in the CSV.');
+      }
+    } catch (error) {
+      console.error('Failed to generate Space Tracker CSV:', error);
+      alert('Failed to generate Space Tracker CSV file');
+    }
+  }, [locationData, storeData, saveStoreId, jobId, zipPath, fixtureTypeMap, floorNames, deletedFixtures]);
 
   const handleSaveStore = useCallback(async () => {
     if (!saveStoreId.trim() || !saveStoreName.trim()) {
@@ -2585,6 +2665,29 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       try {
         setLoading(true);
         setExtracting(true);
+
+        // Query store_saves table to get store_id and store_name
+        console.log('[3DViewerModifier] Querying store_saves for zipPath:', zipPath);
+        const { data: storeRecords, error: queryError } = await supabase
+          .from('store_saves')
+          .select('store_id, store_name, entity')
+          .eq('zip_path', zipPath)
+          .limit(1);
+
+        if (queryError) {
+          console.warn('[3DViewerModifier] Failed to query store_saves:', queryError);
+        } else if (storeRecords && storeRecords.length > 0) {
+          const record = storeRecords[0];
+          console.log('[3DViewerModifier] Found store record:', record.store_id, record.store_name);
+          setSaveStoreId(record.store_id || '');
+          setSaveStoreName(record.store_name || '');
+          if (record.entity) {
+            setSaveEntity(record.entity);
+          }
+        } else {
+          console.warn('[3DViewerModifier] No store record found for zipPath:', zipPath);
+        }
+
         const bucket = bucketParam || DEFAULT_BUCKET;
         const blob = await downloadZip(zipPath, bucket);
         const extracted = await extractZipFiles(blob);
@@ -3146,6 +3249,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
+          onDownloadSpaceTracker={handleDownloadSpaceTracker}
           onSaveStoreClick={() => setSaveDialogOpen(true)}
           onManageFloorsClick={() => setFloorManagementModalOpen(true)}
           onAddFixtureClick={() => {

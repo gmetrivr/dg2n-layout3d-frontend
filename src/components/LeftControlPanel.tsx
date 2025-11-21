@@ -67,6 +67,7 @@ interface LeftControlPanelProps {
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
+  onDownloadSpaceTracker?: () => void;
   onSaveStoreClick?: () => void;
   onManageFloorsClick?: () => void;
   onAddFixtureClick?: () => void;
@@ -114,6 +115,7 @@ export function LeftControlPanel({
   onTransformSpaceChange,
   onDownloadGLB,
   onDownloadModifiedZip,
+  onDownloadSpaceTracker,
   onSaveStoreClick,
   onManageFloorsClick,
   onAddFixtureClick,
@@ -550,7 +552,17 @@ export function LeftControlPanel({
           <div className="text-xs text-muted-foreground">
             Downloads all original files with edited CSV values updated in place.
           </div>
-          
+
+          {onDownloadSpaceTracker && (
+            <button
+              onClick={onDownloadSpaceTracker}
+              disabled={extractedFiles.length === 0}
+              className="text-sm underline text-foreground hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed block"
+            >
+              Download Space Tracker
+            </button>
+          )}
+
           {/* Transform Space Toggle */}
           {editMode && (
             <div className="pt-2 border-t border-border">
