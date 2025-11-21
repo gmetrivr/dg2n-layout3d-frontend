@@ -19,6 +19,7 @@ interface LeftControlPanelProps {
   showWalls: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
+  setSpawnPointMode: boolean;
   transformSpace: 'world' | 'local';
 
   // Fixture data
@@ -50,6 +51,9 @@ interface LeftControlPanelProps {
   // Architectural objects
   architecturalObjectsCount?: number;
 
+  // Spawn points
+  spawnPoints?: Map<number, [number, number, number]>;
+
   // Event handlers
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
@@ -59,6 +63,7 @@ interface LeftControlPanelProps {
   onShowFixtureLabelsChange: (show: boolean) => void;
   onShowWallsChange: (show: boolean) => void;
   onEditModeChange: (enabled: boolean) => void;
+  onSetSpawnPointModeChange: (enabled: boolean) => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
@@ -79,6 +84,7 @@ export function LeftControlPanel({
   showWalls,
   editMode,
   editFloorplatesMode,
+  setSpawnPointMode,
   transformSpace,
   fixtureTypes,
   selectedFixtureType,
@@ -95,6 +101,7 @@ export function LeftControlPanel({
   floorDisplayOrder,
   initialFloorCount,
   architecturalObjectsCount,
+  spawnPoints,
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
@@ -103,6 +110,7 @@ export function LeftControlPanel({
   onShowFixtureLabelsChange,
   onShowWallsChange,
   onEditModeChange,
+  onSetSpawnPointModeChange,
   onTransformSpaceChange,
   onDownloadGLB,
   onDownloadModifiedZip,
@@ -186,7 +194,8 @@ export function LeftControlPanel({
                     hasDuplicatedFixtures() ||
                     hasFloorReordering() ||
                     hasFloorDeletion() ||
-                    (architecturalObjectsCount && architecturalObjectsCount > 0);
+                    (architecturalObjectsCount && architecturalObjectsCount > 0) ||
+                    (spawnPoints && spawnPoints.size > 0);
 
   return (
     <div className="absolute top-4 left-4 z-40">
@@ -328,7 +337,27 @@ export function LeftControlPanel({
         
         {/* Horizontal Separator */}
         <div className="border-t border-border"></div>
-        
+
+        {/* Set Spawn Point Switch */}
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">Set Spawn Point:</label>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={setSpawnPointMode}
+              onChange={(e) => onSetSpawnPointModeChange(e.target.checked)}
+              className="sr-only"
+            />
+            <div className={`w-11 h-6 rounded-full transition-colors ${
+              setSpawnPointMode ? 'bg-green-600' : 'bg-gray-300'
+            }`}>
+              <div className={`w-5 h-5 bg-white rounded-full transition-transform ${
+                setSpawnPointMode ? 'translate-x-5' : 'translate-x-0.5'
+              } mt-0.5`} />
+            </div>
+          </label>
+        </div>
+
         {/* Edit Fixtures Switch */}
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium">Edit Fixtures:</label>

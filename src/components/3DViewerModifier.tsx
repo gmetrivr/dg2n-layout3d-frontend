@@ -218,6 +218,8 @@ export function ThreeDViewerModifier() {
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
+  const [setSpawnPointMode, setSetSpawnPointMode] = useState(false);
+  const [spawnPoints, setSpawnPoints] = useState<Map<number, [number, number, number]>>(new Map());
   const [isTransforming, setIsTransforming] = useState(false);
   const [floorPlatesData, setFloorPlatesData] = useState<Record<string, Record<string, any[]>>>({});
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
@@ -716,6 +718,26 @@ export function ThreeDViewerModifier() {
       setObjectPlacementPoint(null);
     }
   }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
+
+  // Handler for floor click during spawn point setting
+  const handleFloorClickForSpawnPoint = useCallback((point: [number, number, number]) => {
+    if (!setSpawnPointMode) return;
+
+    const fileForFloorExtraction = selectedFloorFile || selectedFile;
+    const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+    const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Set spawn point at ground level (y = 0) for the current floor
+    const spawnPoint: [number, number, number] = [point[0], 0, point[2]];
+
+    setSpawnPoints(prev => {
+      const updated = new Map(prev);
+      updated.set(currentFloor, spawnPoint);
+      return updated;
+    });
+
+    console.log(`Spawn point set for floor ${currentFloor}:`, spawnPoint);
+  }, [setSpawnPointMode, selectedFloorFile, selectedFile]);
 
   // Handler for object click
   const handleObjectClick = useCallback((object: ArchitecturalObject) => {
@@ -1223,7 +1245,9 @@ const isFloorPlatesCsv = (name: string) => {
 // Generate store config JSON with floor data and fixture mappings from API
 const createStoreConfigJSON = useCallback(async (
   workingLocationData: LocationData[],
-  workingExtractedFiles: ExtractedFile[]
+  workingExtractedFiles: ExtractedFile[],
+  currentSpawnPoints: Map<number, [number, number, number]>,
+  currentFloorNames: Map<number, string>
 ): Promise<string> => {
   log('Generating store config JSON...');
 
@@ -1297,12 +1321,25 @@ const createStoreConfigJSON = useCallback(async (
     // Use existing name and spawn point if available, otherwise use defaults
     // If existing name is "dg2n-3d", replace it with the extracted name
     let floorName: string;
-    if (existingFloor?.name && existingFloor.name.toLowerCase() !== 'dg2n-3d') {
+
+    // Priority: currentFloorNames > existingFloor?.name > defaultFloorName
+    if (currentFloorNames.has(floorIndex)) {
+      floorName = currentFloorNames.get(floorIndex)!;
+    } else if (existingFloor?.name && existingFloor.name.toLowerCase() !== 'dg2n-3d') {
       floorName = existingFloor.name;
     } else {
       floorName = defaultFloorName;
     }
-    const spawnPoint = existingFloor?.spawn_point || [0, 0, 0];
+
+    // Priority: currentSpawnPoints > existingFloor?.spawn_point > [0, 0, 0]
+    let spawnPoint: [number, number, number];
+    if (currentSpawnPoints.has(floorIndex)) {
+      spawnPoint = currentSpawnPoints.get(floorIndex)!;
+    } else if (existingFloor?.spawn_point) {
+      spawnPoint = existingFloor.spawn_point as [number, number, number];
+    } else {
+      spawnPoint = [0, 0, 0];
+    }
 
     return {
       name: floorName,
@@ -1635,7 +1672,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Generate and add store config JSON
     try {
       log('Creating store config JSON...');
-      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles);
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames);
       zip.file('store-config.json', configJson);
       log('Added store-config.json to ZIP');
     } catch (error) {
@@ -1646,7 +1683,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     log('Modified ZIP built.');
     const blob = await zip.generateAsync({ type: 'blob' });
     return blob;
-  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects, createStoreConfigJSON]);
+  }, [extractedFiles, modifiedFloorPlates, deletedFixturePositions, locationData, deletedFixtures, floorPlatesData, getFloorIndexMapping, remapLocationData, remapFloorPlatesData, remapFloorFileName, architecturalObjects, spawnPoints, floorNames, createStoreConfigJSON]);
 
   const handleDownloadModifiedZip = useCallback(async () => {
     if (isExportingZip) return;
@@ -3079,6 +3116,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           showWalls={showWalls}
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
+          setSpawnPointMode={setSpawnPointMode}
           transformSpace={transformSpace}
           fixtureTypes={fixtureTypes}
           selectedFixtureType={selectedFixtureType}
@@ -3095,6 +3133,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           floorDisplayOrder={floorDisplayOrder}
           initialFloorCount={initialFloorCount}
           architecturalObjectsCount={architecturalObjects.length}
+          spawnPoints={spawnPoints}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
@@ -3103,6 +3142,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onShowFixtureLabelsChange={setShowFixtureLabels}
           onShowWallsChange={setShowWalls}
           onEditModeChange={handleEditModeChange}
+          onSetSpawnPointModeChange={setSetSpawnPointMode}
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
@@ -3143,6 +3183,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
           onObjectClick={handleObjectClick}
           onObjectPositionChange={handleObjectPositionChange}
+          setSpawnPointMode={setSpawnPointMode}
+          spawnPoints={spawnPoints}
+          onFloorClickForSpawnPoint={handleFloorClickForSpawnPoint}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
           onFixtureClick={handleFixtureClickWithObjectClear}
