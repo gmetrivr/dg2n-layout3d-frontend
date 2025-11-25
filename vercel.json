@@ -1,5 +1,9 @@
 {
   "rewrites": [
+    {
+      "source": "/api/tooling/processStore3DZip",
+      "destination": "https://stockflow-core.dg2n.com/api/tooling/processStore3DZip"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

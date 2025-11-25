@@ -16,6 +16,7 @@ export default defineConfig({
       // Stockflow backend - only handles store 3D zip processing
       '/api/tooling/processStore3DZip': {
         target: 'https://stockflow-core.rc.dg2n.com',
+        // target: 'https://stockflow-core.dg2n.com', // Use this for production backend
         changeOrigin: true,
         secure: true,
       },
