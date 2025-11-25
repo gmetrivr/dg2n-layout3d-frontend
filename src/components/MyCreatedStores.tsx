@@ -451,7 +451,7 @@ export function MyCreatedStores() {
 
       // Extract and parse CSV
       const csvText = await zip.files[locationMasterFile].async('text');
-      const lines = csvText.split('\n').filter(line => line.trim());
+      const lines = csvText.split(/\r?\n/).filter(line => line.trim()); // Split by both CRLF and LF
 
       // Parse current fixtures
       const currentFixtures: CurrentFixture[] = [];
@@ -647,7 +647,7 @@ export function MyCreatedStores() {
 
       // Extract and parse CSV
       const csvText = await zip.files[locationMasterFile].async('text');
-      const lines = csvText.split('\n').filter(line => line.trim());
+      const lines = csvText.split(/\r?\n/).filter(line => line.trim()); // Split by both CRLF and LF
 
       // Parse current fixtures from CSV
       const currentFixtures: CurrentFixture[] = [];
@@ -690,7 +690,23 @@ export function MyCreatedStores() {
       }
 
       // Update CSV with assigned fixture IDs
-      const header = lines[0];
+      let header = lines[0].trim(); // Trim to remove any trailing newlines
+
+      // Ensure header has "Fixture ID" column (15th column)
+      const headerColumns = header.split(',').map(col => col.trim()); // Trim each column
+      console.log(`[Make Live] Original header columns: ${headerColumns.length}`, headerColumns);
+      if (headerColumns.length < 15 || !headerColumns[14]) {
+        // Add or replace the 15th column header with "Fixture ID"
+        console.log(`[Make Live] Adding Fixture ID header (was ${headerColumns.length} columns)`);
+        while (headerColumns.length < 14) {
+          headerColumns.push('');
+        }
+        headerColumns[14] = 'Fixture ID';
+        console.log('[Make Live] New header columns:', headerColumns);
+      } else {
+        console.log('[Make Live] Header already has Fixture ID:', headerColumns[14]);
+      }
+      header = headerColumns.join(',');
       const updatedLines = [header];
 
       for (let i = 0; i < currentFixtures.length; i++) {

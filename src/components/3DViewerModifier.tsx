@@ -50,7 +50,7 @@ async function migrateBrandsInZip(zipBlob: Blob, pipelineVersion: string = '02')
 
   console.log('[3DViewerModifier] Found location-master.csv, extracting brand names...');
   const locationCsvText = await locationCsvFile.async('text');
-  const locationLines = locationCsvText.split('\n');
+  const locationLines = locationCsvText.split(/\r?\n/); // Split by both CRLF and LF
 
   // Parse CSV header to find Brand column index
   const headerLine = locationLines[0];
@@ -112,7 +112,23 @@ async function migrateBrandsInZip(zipBlob: Blob, pipelineVersion: string = '02')
   }
 
   // Apply migrations to CSV
-  const updatedLines = [locationLines[0]]; // Keep header
+  // Ensure header has "Fixture ID" column (15th column)
+  let updatedHeaderLine = locationLines[0].trim(); // Trim to remove any trailing newlines
+  const updatedHeaderColumns = updatedHeaderLine.split(',').map(col => col.trim()); // Trim each column
+  console.log(`[migrateBrandsInZip] Original header columns: ${updatedHeaderColumns.length}`, updatedHeaderColumns);
+  if (updatedHeaderColumns.length < 15 || !updatedHeaderColumns[14]) {
+    // Add or replace the 15th column header with "Fixture ID"
+    console.log(`[migrateBrandsInZip] Adding Fixture ID header (was ${updatedHeaderColumns.length} columns)`);
+    while (updatedHeaderColumns.length < 14) {
+      updatedHeaderColumns.push('');
+    }
+    updatedHeaderColumns[14] = 'Fixture ID';
+    console.log('[migrateBrandsInZip] New header columns:', updatedHeaderColumns);
+  } else {
+    console.log('[migrateBrandsInZip] Header already has Fixture ID:', updatedHeaderColumns[14]);
+  }
+  updatedHeaderLine = updatedHeaderColumns.join(',');
+  const updatedLines = [updatedHeaderLine]; // Keep header with Fixture ID
   for (let i = 1; i < locationLines.length; i++) {
     const line = locationLines[i].trim();
     if (!line) {
@@ -2156,11 +2172,26 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     // Read original CSV content directly from blob (avoid URL caching issues)
     const csvText = await originalFile.blob.text();
-    const lines = csvText.split('\n');
+    const lines = csvText.split(/\r?\n/); // Split by both CRLF and LF
     if (lines.length === 0) return;
 
-    // Keep header
-    const modifiedLines = [lines[0]];
+    // Keep header, ensuring it has Fixture ID column (15th column)
+    let headerLine = lines[0].trim(); // Trim to remove any trailing newlines
+    const headerColumns = headerLine.split(',').map(col => col.trim()); // Trim each column
+    console.log(`[createModifiedLocationMasterCSV] Original header columns: ${headerColumns.length}`, headerColumns);
+    if (headerColumns.length < 15 || !headerColumns[14]) {
+      // Add or replace the 15th column header with "Fixture ID"
+      console.log(`[createModifiedLocationMasterCSV] Adding Fixture ID header (was ${headerColumns.length} columns)`);
+      while (headerColumns.length < 14) {
+        headerColumns.push('');
+      }
+      headerColumns[14] = 'Fixture ID';
+      console.log('[createModifiedLocationMasterCSV] New header columns:', headerColumns);
+    } else {
+      console.log('[createModifiedLocationMasterCSV] Header already has Fixture ID:', headerColumns[14]);
+    }
+    headerLine = headerColumns.join(',');
+    const modifiedLines = [headerLine];
 
     // Helper to build a stable key from original CSV coordinates
     const buildOriginalCsvKey = (block: string, x: number, y: number, z: number) =>
