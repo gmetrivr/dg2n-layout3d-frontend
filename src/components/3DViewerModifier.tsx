@@ -227,6 +227,7 @@ export function ThreeDViewerModifier() {
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
   const [selectedFloorPlate, setSelectedFloorPlate] = useState<any | null>(null); // Selected floor plate data
   const [showWireframe, setShowWireframe] = useState(false);
+
   const [showFixtureLabels, setShowFixtureLabels] = useState(false);
   const [showWalls, setShowWalls] = useState(true);
   const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('local');
@@ -2729,7 +2730,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     return () => {
       cleanupExtractedFiles(extractedFiles);
     };
-  }, [jobId, zipUrl]);
+  }, [jobId, zipUrl, zipPath]);
 
   // Fetch brand categories from API
   useEffect(() => {
@@ -2902,26 +2903,28 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
   // Load and parse CSV data from extracted files
   useEffect(() => {
+    const abortController = new AbortController();
+
     const loadLocationData = async () => {
       if (extractedFiles.length === 0) return;
-      
+
       try {
         // Find the location-master.csv file in extracted files
         const csvFile = extractedFiles.find(file => isLocationCsv(file.name));
-        
+
         if (!csvFile) {
           console.warn('location-master.csv not found in extracted files');
           console.log('Available files:', extractedFiles.map(f => f.name));
           return;
         }
-        
+
         // Verify the CSV file URL is valid
         if (!csvFile.url || csvFile.url === '') {
           console.warn('Invalid CSV file URL');
           return;
         }
-        
-        const response = await fetch(csvFile.url);
+
+        const response = await fetch(csvFile.url, { signal: abortController.signal });
         if (!response.ok) {
           console.warn(`Failed to fetch CSV file: ${response.status} ${response.statusText}`);
           return;
@@ -3033,8 +3036,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           const newData = [...dataWithGLBs];
           return newData;
         });
-        
+
       } catch (err) {
+        // Ignore AbortError - it's expected when component unmounts
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
         console.error('Failed to load location data:', err);
         // Set empty location data so the component continues to work
         setLocationData([]);
@@ -3043,27 +3050,27 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     const loadFloorPlatesData = async () => {
       if (extractedFiles.length === 0) return;
-      
+
       try {
         // Find the floor plates CSV file in extracted files
-        const csvFile = extractedFiles.find(file => 
+        const csvFile = extractedFiles.find(file =>
           file.name.toLowerCase().includes('floor-plate-master.csv') ||
           file.name.toLowerCase().includes('floor-plates-all.csv')
         );
-        
+
         if (!csvFile) {
           console.warn('floor plates CSV file not found in extracted files');
           console.log('Available files:', extractedFiles.map(f => f.name));
           return;
         }
-        
+
         // Verify the CSV file URL is valid
         if (!csvFile.url || csvFile.url === '') {
           console.warn('Invalid floor plates CSV file URL');
           return;
         }
-        
-        const response = await fetch(csvFile.url);
+
+        const response = await fetch(csvFile.url, { signal: abortController.signal });
         if (!response.ok) {
           console.warn(`Failed to fetch floor plates CSV file: ${response.status} ${response.statusText}`);
           return;
@@ -3094,8 +3101,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         });
         
         setFloorPlatesData(floorData);
-        
+
       } catch (err) {
+        // Ignore AbortError - it's expected when component unmounts
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
         console.error('Failed to load floor plates data:', err);
         // Set empty floor plates data so the component continues to work
         setFloorPlatesData({});
@@ -3104,6 +3115,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     loadLocationData();
     loadFloorPlatesData();
+
+    // Cleanup: abort pending fetch requests
+    return () => {
+      abortController.abort();
+    };
   }, [extractedFiles, loadFixtureGLBs]);
 
   if (loading || extracting) {
