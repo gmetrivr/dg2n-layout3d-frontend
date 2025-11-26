@@ -62,6 +62,9 @@ interface RightInfoPanelProps {
   // Mode flags
   editMode: boolean;
   editFloorplatesMode: boolean;
+  setSpawnPointMode?: boolean;
+  currentFloorIndex?: number;
+  spawnPoints?: Map<number, [number, number, number]>;
 
   // Data maps for tracking changes
   modifiedFloorPlates: Map<string, any>;
@@ -93,6 +96,9 @@ export function RightInfoPanel({
   selectedFloorPlate,
   editMode,
   editFloorplatesMode,
+  setSpawnPointMode = false,
+  currentFloorIndex,
+  spawnPoints = new Map(),
   modifiedFloorPlates,
   fixtureTypeMap,
   availableFloorIndices = [],
@@ -837,6 +843,39 @@ export function RightInfoPanel({
       </div>
     );
   }
-  
+
+  // Spawn Point Mode Panel
+  if (setSpawnPointMode && currentFloorIndex !== undefined) {
+    const spawnPoint = spawnPoints.get(currentFloorIndex);
+    const floorName = floorNames.get(currentFloorIndex) || `Floor ${currentFloorIndex}`;
+
+    return (
+      <div className="absolute top-4 right-4 bg-background/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg w-64">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-sm">Spawn Point Mode</h3>
+        </div>
+        <div className="space-y-1 text-xs">
+          <div><span className="font-medium">Floor:</span> {floorName}</div>
+          {spawnPoint ? (
+            <>
+              <div className="mt-2">
+                <span className="font-medium">Spawn Point Position:</span>
+              </div>
+              <div className="ml-2">
+                <div><span className="font-medium">X:</span> {spawnPoint[0].toFixed(2)}</div>
+                <div><span className="font-medium">Y:</span> {spawnPoint[1].toFixed(2)}</div>
+                <div><span className="font-medium">Z:</span> {spawnPoint[2].toFixed(2)}</div>
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 text-muted-foreground italic">
+              Click on the floor to set spawn point
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return null;
 }

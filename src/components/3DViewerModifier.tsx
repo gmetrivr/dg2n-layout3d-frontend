@@ -227,6 +227,7 @@ export function ThreeDViewerModifier() {
   const [glbFiles, setGlbFiles] = useState<ExtractedFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ExtractedFile | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [fixturesLoaded, setFixturesLoaded] = useState(false);
   const [locationData, setLocationData] = useState<LocationData[]>([]);
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -2085,6 +2086,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     handleEditModeChangeOriginal(enabled ? 'fixtures' : 'off');
   }, []);
 
+  // Clear selections when spawn point mode changes
+  useEffect(() => {
+    if (setSpawnPointMode) {
+      // Clear fixture selections when entering spawn point mode
+      setSelectedLocation(null);
+      setSelectedLocations([]);
+      setSelectedFloorPlate(null);
+      setSelectedObject(null);
+    }
+  }, [setSpawnPointMode]);
+
   const handleEditModeChangeOriginal = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
     if (mode === "off") {
       setEditMode(false);
@@ -2545,6 +2557,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
 
     setExtracting(true);
+    setFixturesLoaded(false);
     setError(null);
 
     try {
@@ -2620,6 +2633,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         setJob(jobData);
 
         setExtracting(true);
+        setFixturesLoaded(false);
         const zipBlob = await apiService.fetchJobFilesAsZip(jobData.job_id);
         const extracted = await extractZipFiles(zipBlob);
 
@@ -2664,6 +2678,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       try {
         setLoading(true);
         setExtracting(true);
+        setFixturesLoaded(false);
         const resp = await fetch(zipUrl);
         if (!resp.ok) throw new Error(`Failed to fetch ZIP (${resp.status})`);
         const zipBlob = await resp.blob();
@@ -2697,6 +2712,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       try {
         setLoading(true);
         setExtracting(true);
+        setFixturesLoaded(false);
 
         // Query store_saves table to get store_id and store_name
         console.log('[3DViewerModifier] Querying store_saves for zipPath:', zipPath);
@@ -2742,6 +2758,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       } catch (err) {
         console.error('Failed to load zip from Supabase:', err);
         setError('Failed to load ZIP from saved store.');
+        setLoading(false);
+        setExtracting(false);
       } finally {
         setLoading(false);
         setExtracting(false);
@@ -2759,7 +2777,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
 
     return () => {
-      cleanupExtractedFiles(extractedFiles);
+      // Defer cleanup to not block navigation
+      setTimeout(() => {
+        cleanupExtractedFiles(extractedFiles);
+      }, 0);
     };
   }, [jobId, zipUrl, zipPath]);
 
@@ -2833,11 +2854,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
       }
 
-      // Extract floor names from store-config.json or from file names
+      // Extract floor names and spawn points from store-config.json or from file names
       // Only run once on initial load to avoid overwriting manual changes
       if (!floorNamesInitializedRef.current) {
         const extractFloorNames = async () => {
           const namesMap = new Map<number, string>();
+          const spawnPointsMap = new Map<number, [number, number, number]>();
 
           // Check if store-config.json exists
           const storeConfigFile = extractedFiles.find(file =>
@@ -2866,10 +2888,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                       namesMap.set(floor.floor_index, floor.name);
                     }
                   }
+
+                  // Extract spawn point if it exists
+                  if (floor.floor_index !== undefined && floor.spawn_point && Array.isArray(floor.spawn_point)) {
+                    spawnPointsMap.set(floor.floor_index, floor.spawn_point as [number, number, number]);
+                  }
                 });
               }
             } catch (error) {
-              console.warn('Failed to parse store-config.json for floor names:', error);
+              console.warn('Failed to parse store-config.json for floor names and spawn points:', error);
             }
           }
 
@@ -2891,6 +2918,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           });
 
           setFloorNames(namesMap);
+
+          // Set spawn points if any were found in store-config.json
+          if (spawnPointsMap.size > 0) {
+            console.log('[3DViewerModifier] Loading spawn points from store-config.json:', spawnPointsMap);
+            setSpawnPoints(spawnPointsMap);
+          }
+
           floorNamesInitializedRef.current = true;
         };
 
@@ -3068,6 +3102,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           return newData;
         });
 
+        // Mark fixtures as loaded after location data is set
+        setFixturesLoaded(true);
+
       } catch (err) {
         // Ignore AbortError - it's expected when component unmounts
         if (err instanceof Error && err.name === 'AbortError') {
@@ -3076,6 +3113,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         console.error('Failed to load location data:', err);
         // Set empty location data so the component continues to work
         setLocationData([]);
+        // Mark as loaded even on error to unblock UI
+        setFixturesLoaded(true);
       }
     };
 
@@ -3151,15 +3190,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     return () => {
       abortController.abort();
     };
-  }, [extractedFiles, loadFixtureGLBs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extractedFiles]);
 
-  if (loading || extracting) {
+  if (loading || extracting || !fixturesLoaded) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
           <p className="text-muted-foreground">
-            {extracting ? 'Extracting files from ZIP...' : 'Loading 3D models...'}
+            {extracting ? 'Extracting files from ZIP...' : 'Loading fixtures...'}
           </p>
         </div>
       </div>
@@ -3467,6 +3507,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             selectedFloorPlate={selectedFloorPlate}
             editMode={editMode}
             editFloorplatesMode={editFloorplatesMode}
+            setSpawnPointMode={setSpawnPointMode}
+            currentFloorIndex={(() => {
+              const fileForFloorExtraction = selectedFloorFile || selectedFile;
+              const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+              return floorMatch ? parseInt(floorMatch[1]) : 0;
+            })()}
+            spawnPoints={spawnPoints}
             modifiedFloorPlates={modifiedFloorPlates}
             fixtureTypeMap={fixtureTypeMap}
             onCloseLocation={() => setSelectedLocation(null)}

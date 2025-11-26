@@ -976,15 +976,29 @@ function FloorClickHandler({ isAddingObject, onFloorClick }: FloorClickHandlerPr
       const intersects = raycaster.intersectObjects(scene.children, true);
 
       // Find first floor mesh intersection
+      let foundFloorMesh = false;
       for (const intersect of intersects) {
         const mesh = intersect.object as THREE.Mesh;
 
         // Check if this is a floor mesh (not a fixture or other object)
-        // Floor meshes typically don't have interactive userData
-        if (mesh.isMesh && !mesh.userData.interactive) {
+        // Floor meshes have interactive === false (explicitly set)
+        // Fixtures and other objects have interactive === undefined or true
+        if (mesh.isMesh && mesh.userData.interactive === false) {
           const point = intersect.point;
           onFloorClick([point.x, point.y, point.z]);
+          foundFloorMesh = true;
           break;
+        }
+      }
+
+      // If no floor mesh was hit, intersect with ground plane at y=0
+      if (!foundFloorMesh) {
+        const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // Plane at y=0
+        const planeIntersect = new THREE.Vector3();
+        raycaster.ray.intersectPlane(groundPlane, planeIntersect);
+
+        if (planeIntersect) {
+          onFloorClick([planeIntersect.x, planeIntersect.y, planeIntersect.z]);
         }
       }
 
@@ -1207,8 +1221,8 @@ export function Canvas3D({
               <LocationGLB
                 key={generateFixtureUID(location)}
                 location={location}
-                onClick={editFloorplatesMode ? undefined : onFixtureClick}
-                isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
+                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? undefined : onFixtureClick}
+                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? false : isLocationSelected(location)}
                 isSingleSelection={selectedLocations.length === 1}
                 onError={onGLBError}
                 editMode={editMode}
@@ -1230,8 +1244,8 @@ export function Canvas3D({
                 key={`${location.blockName}-${index}`}
                 location={location}
                 color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
-                onClick={editFloorplatesMode ? undefined : onFixtureClick}
-                isSelected={editFloorplatesMode ? false : isLocationSelected(location)}
+                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? undefined : onFixtureClick}
+                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? false : isLocationSelected(location)}
               />
             )
           ));
