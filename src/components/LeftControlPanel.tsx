@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Loader2, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
 import { Select } from "./ui/select";
 import { Button } from "@/shadcn/components/ui/button";
-import { getGlbTitle, isShatteredFloorPlateFile } from '../utils/zipUtils';
+import { getGlbTitle, isShatteredFloorPlateFile, isFloorFile } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
 
 interface LeftControlPanelProps {
@@ -124,6 +124,28 @@ export function LeftControlPanel({
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
 
+  // Check if all floors have spawn points set
+  const allFloorsHaveSpawnPoints = () => {
+    const floorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name) && isFloorFile(file.name));
+    const floorIndices = floorFiles.map(file => {
+      const match = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
+      return match ? parseInt(match[1]) : 0;
+    });
+
+    // Check if all floors have spawn points
+    return floorIndices.every(floorIndex => spawnPoints?.has(floorIndex));
+  };
+
+  const getMissingSpawnPointFloors = () => {
+    const floorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name) && isFloorFile(file.name));
+    const floorIndices = floorFiles.map(file => {
+      const match = file.name.match(/floor[_-]?(\d+)/i) || file.name.match(/(\d+)/i);
+      return match ? parseInt(match[1]) : 0;
+    });
+
+    return floorIndices.filter(floorIndex => !spawnPoints?.has(floorIndex));
+  };
+
   // Sort floor files by display order
   const getSortedFloorFiles = () => {
     const floorFiles = glbFiles.filter(file => !isShatteredFloorPlateFile(file.name));
@@ -223,14 +245,20 @@ export function LeftControlPanel({
         }`}>
           <div className="flex flex-col gap-4 p-4 pt-0">
             {/* Save Store */}
-            <div className="flex">
+            <div className="flex flex-col gap-1">
               <button
                 onClick={onSaveStoreClick}
-                disabled={extractedFiles.length === 0}
+                disabled={extractedFiles.length === 0 || !allFloorsHaveSpawnPoints()}
                 className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Save Store
               </button>
+              {!allFloorsHaveSpawnPoints() && extractedFiles.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Set spawn points on all floors to save
+                  {getMissingSpawnPointFloors().length > 0 && ` (missing: ${getMissingSpawnPointFloors().join(', ')})`}
+                </p>
+              )}
             </div>
         
         {/* Model Selector */}

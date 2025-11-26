@@ -1351,14 +1351,15 @@ const createStoreConfigJSON = useCallback(async (
       floorName = defaultFloorName;
     }
 
-    // Priority: currentSpawnPoints > existingFloor?.spawn_point > [0, 0, 0]
+    // Priority: currentSpawnPoints > existingFloor?.spawn_point > throw error (spawn point required)
     let spawnPoint: [number, number, number];
     if (currentSpawnPoints.has(floorIndex)) {
       spawnPoint = currentSpawnPoints.get(floorIndex)!;
     } else if (existingFloor?.spawn_point) {
       spawnPoint = existingFloor.spawn_point as [number, number, number];
     } else {
-      spawnPoint = [0, 0, 0];
+      // Don't default to [0, 0, 0] - spawn point must be set
+      throw new Error(`Spawn point not set for floor ${floorIndex}. Please set spawn points on all floors before saving.`);
     }
 
     return {
@@ -1697,7 +1698,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       log('Added store-config.json to ZIP');
     } catch (error) {
       console.error('Failed to create store config JSON:', error);
-      // Continue with export even if config generation fails
+      // If spawn point is missing, throw error to prevent saving
+      if (error instanceof Error && error.message.includes('Spawn point not set')) {
+        throw error;
+      }
+      // Continue with export for other errors
     }
 
     log('Modified ZIP built.');
