@@ -7,7 +7,7 @@ import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { apiService, type JobStatus, type BrandCategoriesResponse } from '../services/api';
-import { extractZipFiles, cleanupExtractedFiles, isFloorFile, isShatteredFloorPlateFile, type ExtractedFile } from '../utils/zipUtils';
+import { extractZipFiles, isFloorFile, isShatteredFloorPlateFile, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
 import { FixtureTypeSelectionModal } from './FixtureTypeSelectionModal';
@@ -215,6 +215,15 @@ export interface ArchitecturalObject {
 
 
 export function ThreeDViewerModifier() {
+  const renderCount = useRef(0);
+  renderCount.current++;
+
+  console.log('[3DViewerModifier] Component rendering', {
+    renderNumber: renderCount.current,
+    timestamp: Date.now(),
+    stackTrace: new Error().stack?.split('\n').slice(0, 3).join('\n')
+  });
+
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get('jobId');
   const zipUrl = searchParams.get('zipUrl');
@@ -228,6 +237,7 @@ export function ThreeDViewerModifier() {
   const [selectedFile, setSelectedFile] = useState<ExtractedFile | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [fixturesLoaded, setFixturesLoaded] = useState(false);
+
   const [locationData, setLocationData] = useState<LocationData[]>([]);
   const [showSpheres, setShowSpheres] = useState<boolean>(true);
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -260,10 +270,10 @@ export function ThreeDViewerModifier() {
   const [saveStoreId, setSaveStoreId] = useState('');
   const [saveStoreName, setSaveStoreName] = useState('');
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
-  const [fixtureCache, setFixtureCache] = useState<Map<string, string>>(new Map());
+  const fixtureCache = useRef<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
-  const [fixtureTypeMap, setFixtureTypeMap] = useState<Map<string, string>>(new Map());
+  const fixtureTypeMap = useRef<Map<string, string>>(new Map());
   const [brands, setBrands] = useState<string[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
   const [storeData, setStoreData] = useState<StoreData[]>([]);
@@ -287,6 +297,7 @@ export function ThreeDViewerModifier() {
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
   const [isDragging, setIsDragging] = useState(false); // Track drag state for file upload
   const floorNamesInitializedRef = useRef<boolean>(false); // Track if floor names have been extracted
+  const isUnmountingRef = useRef(false); // Track unmounting state to prevent operations during unmount
 
   const { uploadStoreZip, insertStoreRecord, downloadZip } = useSupabaseService();
 
@@ -369,6 +380,31 @@ export function ThreeDViewerModifier() {
     }
   }, []);
 
+  // Track what's causing re-renders (placed after all state/hooks declarations)
+  useEffect(() => {
+    console.log('[STATE] locationData length:', locationData.length);
+  }, [locationData]);
+
+  useEffect(() => {
+    console.log('[STATE] selectedLocations length:', selectedLocations.length);
+  }, [selectedLocations]);
+
+  useEffect(() => {
+    console.log('[STATE] cameraPosition:', cameraPosition);
+  }, [cameraPosition]);
+
+  useEffect(() => {
+    console.log('[STATE] orbitTarget:', orbitTarget);
+  }, [orbitTarget]);
+
+  useEffect(() => {
+    console.log('[STATE] currentOrbitTarget:', currentOrbitTarget);
+  }, [currentOrbitTarget]);
+
+  useEffect(() => {
+    console.log('[STATE] loading:', loading, 'extracting:', extracting, 'fixturesLoaded:', fixturesLoaded);
+  }, [loading, extracting, fixturesLoaded]);
+
   // Extract available floor indices from glbFiles
   const availableFloorIndices = useMemo(() => {
     const floorIndices = new Set<number>();
@@ -384,15 +420,16 @@ export function ThreeDViewerModifier() {
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
+    if (isUnmountingRef.current) return new Map(); // Skip if unmounting
     const urlMap = new Map<string, string>();
-    
+
     // Filter out already cached blocks
-    const uncachedBlocks = blockNames.filter(name => !fixtureCache.has(name));
-    
+    const uncachedBlocks = blockNames.filter(name => !fixtureCache.current.has(name));
+
     if (uncachedBlocks.length === 0) {
       // All blocks are cached, return cached URLs
       blockNames.forEach(name => {
-        const cachedUrl = fixtureCache.get(name);
+        const cachedUrl = fixtureCache.current.get(name);
         if (cachedUrl) {
           urlMap.set(name, cachedUrl);
         }
@@ -402,46 +439,60 @@ export function ThreeDViewerModifier() {
 
     try {
       const fixtureBlocks = await apiService.getFixtureBlocks(uncachedBlocks);
-      
+
       // Update cache and build URL map, also store fixture types
-      const newCacheEntries = new Map(fixtureCache);
-      const newTypeMap = new Map(fixtureTypeMap);
       fixtureBlocks.forEach(block => {
         if (block.glb_url) {
-          newCacheEntries.set(block.block_name, block.glb_url);
+          fixtureCache.current.set(block.block_name, block.glb_url);
           urlMap.set(block.block_name, block.glb_url);
           // Store the fixture type for filtering
           if (block.fixture_type) {
-            newTypeMap.set(block.block_name, block.fixture_type);
+            fixtureTypeMap.current.set(block.block_name, block.fixture_type);
           }
         }
       });
-      
-      setFixtureTypeMap(newTypeMap);
-      
+
       // Add previously cached URLs to the result
       blockNames.forEach(name => {
-        if (fixtureCache.has(name)) {
-          const cachedUrl = fixtureCache.get(name)!;
+        if (fixtureCache.current.has(name)) {
+          const cachedUrl = fixtureCache.current.get(name)!;
           urlMap.set(name, cachedUrl);
         }
       });
-      
-      setFixtureCache(newCacheEntries);
+
       return urlMap;
     } catch (error) {
       console.warn('Failed to load fixture GLBs:', error);
       return urlMap;
     }
-  }, [fixtureCache, fixtureTypeMap]);
+  }, []); // No dependencies needed since refs are stable
 
-  const handleBoundsCalculated = (center: [number, number, number], size: [number, number, number]) => {
+  const handleBoundsCalculated = useCallback((center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
     const maxDimension = Math.max(...size);
     const distance = maxDimension * 1.5; // Adjust multiplier as needed
-    setCameraPosition([center[0] + distance, center[1] + distance, center[2] + distance]);
-    setOrbitTarget(center); // Set orbit target to the model center
-  };
+    const newCameraPos: [number, number, number] = [center[0] + distance, center[1] + distance, center[2] + distance];
+
+    // Only update if values actually changed (avoid infinite re-renders)
+    setCameraPosition(prev => {
+      if (prev[0] === newCameraPos[0] && prev[1] === newCameraPos[1] && prev[2] === newCameraPos[2]) {
+        console.log('[handleBoundsCalculated] Camera position unchanged, skipping update');
+        return prev;
+      }
+      console.log('[handleBoundsCalculated] Camera position changed from', prev, 'to', newCameraPos);
+      return newCameraPos;
+    });
+
+    // Only update orbit target if values actually changed
+    setOrbitTarget(prev => {
+      if (prev[0] === center[0] && prev[1] === center[1] && prev[2] === center[2]) {
+        console.log('[handleBoundsCalculated] Orbit target unchanged, skipping update');
+        return prev;
+      }
+      console.log('[handleBoundsCalculated] Orbit target changed from', prev, 'to', center);
+      return center;
+    });
+  }, []);
 
   const handleGLBError = (blockName: string, url: string) => {
     setFailedGLBs(prev => {
@@ -485,19 +536,10 @@ export function ThreeDViewerModifier() {
       console.log(`[handleFixtureTypeChange] Fixture type: ${newType}, Block name: ${mappedBlockName}`);
       
       // Update the fixture cache with new GLB URL
-      setFixtureCache(prev => {
-        const newCache = new Map(prev);
-        // Use the mapped block name for modified fixtures
-        newCache.set(mappedBlockName, newGlbUrl);
-        return newCache;
-      });
-      
+      fixtureCache.current.set(mappedBlockName, newGlbUrl);
+
       // Update the fixture type map
-      setFixtureTypeMap(prev => {
-        const newMap = new Map(prev);
-        newMap.set(mappedBlockName, newType);
-        return newMap;
-      });
+      fixtureTypeMap.current.set(mappedBlockName, newType);
       
       // Mark the original fixture for deletion and create a new one with the new type
       const selectedUID = generateFixtureUID(selectedLocation);
@@ -542,7 +584,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to change fixture type:', error);
       // Could add error toast here
     }
-  }, [selectedLocation, fixtureTypeMap]);
+  }, [selectedLocation]);
 
   const handleAddFixture = useCallback(async (fixtureType: string) => {
     try {
@@ -571,18 +613,10 @@ export function ThreeDViewerModifier() {
       useGLTF.preload(glbUrl);
 
       // Update the fixture cache with new GLB URL
-      setFixtureCache(prev => {
-        const newCache = new Map(prev);
-        newCache.set(mappedBlockName, glbUrl);
-        return newCache;
-      });
+      fixtureCache.current.set(mappedBlockName, glbUrl);
 
       // Update the fixture type map
-      setFixtureTypeMap(prev => {
-        const newMap = new Map(prev);
-        newMap.set(mappedBlockName, fixtureType);
-        return newMap;
-      });
+      fixtureTypeMap.current.set(mappedBlockName, fixtureType);
 
       // Calculate position at screen center (currentOrbitTarget) with y=0
       // Note: currentOrbitTarget is [x, y, z] in world space
@@ -664,7 +698,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to add fixture:', error);
       alert('Failed to add fixture. Please try again.');
     }
-  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, setFixtureCache, setFixtureTypeMap]);
+  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
 
   // Handler for object type selection from modal
   const handleObjectTypeSelect = useCallback((objectType: 'glazing' | 'partition') => {
@@ -1799,7 +1833,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const trackerData = generateSpaceTrackerData(
         locationData,
         selectedStore,
-        fixtureTypeMap,
+        fixtureTypeMap.current,
         floorNames,
         deletedFixtures
       );
@@ -1819,7 +1853,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       console.error('Failed to generate Space Tracker CSV:', error);
       alert('Failed to generate Space Tracker CSV file');
     }
-  }, [locationData, storeData, saveStoreId, jobId, zipPath, fixtureTypeMap, floorNames, deletedFixtures]);
+  }, [locationData, storeData, saveStoreId, jobId, zipPath, floorNames, deletedFixtures]);
 
   const handleSaveStore = useCallback(async () => {
     if (!saveStoreId.trim() || !saveStoreName.trim()) {
@@ -2090,6 +2124,40 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Call the original function with the appropriate mode
     handleEditModeChangeOriginal(enabled ? 'fixtures' : 'off');
   }, []);
+
+  const handleOrbitTargetUpdate = useCallback((newTarget: [number, number, number]) => {
+    setCurrentOrbitTarget(prev => {
+      // Only update if actually changed (avoid unnecessary re-renders)
+      if (prev[0] === newTarget[0] && prev[1] === newTarget[1] && prev[2] === newTarget[2]) {
+        console.log('[handleOrbitTargetUpdate] Target unchanged, skipping update');
+        return prev;
+      }
+      console.log('[handleOrbitTargetUpdate] Target changed from', prev, 'to', newTarget);
+      return newTarget;
+    });
+  }, []);
+
+  const handleFloorPlateClick = useCallback((plateData: any) => {
+    setSelectedFloorPlate(plateData);
+  }, []);
+
+  const handlePointerMissed = useCallback(() => {
+    // Don't clear selection when:
+    // - Adding objects
+    // - Just created an object
+    // - Currently transforming
+    // - Mouse is/was down on transform controls
+    // - Just finished transforming
+    if (isAddingObject || justCreatedObjectRef.current || isTransforming || isMouseDownOnTransformRef.current || justFinishedTransformRef.current) return;
+
+    if (editFloorplatesMode) {
+      setSelectedFloorPlate(null);
+    } else {
+      setSelectedLocations([]);
+      setSelectedLocation(null);
+      setSelectedObject(null);
+    }
+  }, [isAddingObject, isTransforming, editFloorplatesMode, setSelectedLocations, setSelectedLocation]);
 
   // Clear selections when spawn point mode changes
   useEffect(() => {
@@ -2626,6 +2694,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
   useEffect(() => {
     const fetchJobZip = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       if (!jobId) return;
 
       try {
@@ -2679,6 +2748,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     };
 
     const fetchZipFromUrl = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       if (!zipUrl) return;
       try {
         setLoading(true);
@@ -2713,6 +2783,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       }
     };
     const fetchZipFromSupabase = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       if (!zipPath) return;
       try {
         setLoading(true);
@@ -2782,16 +2853,25 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
 
     return () => {
-      // Defer cleanup to not block navigation
-      setTimeout(() => {
-        cleanupExtractedFiles(extractedFiles);
-      }, 0);
+      // Skip cleanup during unmount to prevent blocking navigation
+      // Memory will be reclaimed when page is fully unloaded
     };
   }, [jobId, zipUrl, zipPath]);
+
+  // Log component lifecycle
+  useEffect(() => {
+    console.log('[3DViewerModifier] Component mounted');
+    return () => {
+      console.log('[3DViewerModifier] Component unmounting - START');
+      isUnmountingRef.current = true; // Stop all effects immediately
+      console.log('[3DViewerModifier] Component unmounting - END');
+    };
+  }, []);
 
   // Fetch brand categories from API
   useEffect(() => {
     const fetchBrandCategories = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       try {
         const categories = await apiService.getBrandCategories();
         setBrandCategories(categories);
@@ -2807,6 +2887,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   // Load all available fixture types from API
   useEffect(() => {
     const loadAllFixtureTypes = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       try {
         const allTypes = await apiService.getAllFixtureTypes();
         setFixtureTypes(allTypes);
@@ -2823,6 +2904,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   // Load store master data
   useEffect(() => {
     const loadStores = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       setIsLoadingStores(true);
       try {
         const stores = await loadStoreMasterData();
@@ -2863,6 +2945,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       // Only run once on initial load to avoid overwriting manual changes
       if (!floorNamesInitializedRef.current) {
         const extractFloorNames = async () => {
+          if (isUnmountingRef.current) return; // Skip if unmounting
           const namesMap = new Map<number, string>();
           const spawnPointsMap = new Map<number, [number, number, number]>();
 
@@ -2973,10 +3056,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
   // Load and parse CSV data from extracted files
   useEffect(() => {
+    console.log('[loadLocationData useEffect] Running, extractedFiles.length:', extractedFiles.length);
     const abortController = new AbortController();
 
     const loadLocationData = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       if (extractedFiles.length === 0) return;
+      console.log('[loadLocationData] Starting to load data');
 
       try {
         // Find the location-master.csv file in extracted files
@@ -3086,12 +3172,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           }
           return location;
         });
-        
+
+        if (isUnmountingRef.current) return; // Skip setState if unmounting
+
+        console.log('[loadLocationData] About to call setLocationData');
         // Preserve any modified fixtures when setting new location data
         setLocationData(prev => {
+          console.log('[loadLocationData setLocationData] prev.length:', prev.length, 'new data length:', data.length);
           // If we already have location data, preserve all modifications
           // Only reload from CSV if we have no previous data
           if (prev.length > 0) {
+            console.log('[loadLocationData] Preserving existing data, just updating GLB URLs');
             // Don't reload - this prevents losing modifications when cache/typeMap updates
             // Just update GLB URLs for any fixtures that need them
             return prev.map(location => {
@@ -3102,11 +3193,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             });
           }
 
+          console.log('[loadLocationData] First load, setting new data');
           // First time loading: use CSV data
           const newData = [...dataWithGLBs];
           return newData;
         });
 
+        if (isUnmountingRef.current) return; // Skip setState if unmounting
+
+        console.log('[loadLocationData] Setting fixturesLoaded to true');
         // Mark fixtures as loaded after location data is set
         setFixturesLoaded(true);
 
@@ -3124,6 +3219,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     };
 
     const loadFloorPlatesData = async () => {
+      if (isUnmountingRef.current) return; // Skip if unmounting
       if (extractedFiles.length === 0) return;
 
       try {
@@ -3174,8 +3270,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             layerSource
           });
         });
-        
-        setFloorPlatesData(floorData);
+
+        if (!isUnmountingRef.current) {
+          setFloorPlatesData(floorData);
+        }
 
       } catch (err) {
         // Ignore AbortError - it's expected when component unmounts
@@ -3360,7 +3458,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           editFloorplatesMode={editFloorplatesMode}
           selectedFixtureType={selectedFixtureType}
           selectedBrand={selectedBrand}
-          fixtureTypeMap={fixtureTypeMap}
+          fixtureTypeMap={fixtureTypeMap.current}
           deletedFixtures={deletedFixtures}
           editMode={editMode}
           transformSpace={transformSpace}
@@ -3387,26 +3485,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFixtureClick={handleFixtureClickWithObjectClear}
           isLocationSelected={isLocationSelected}
           onPositionChange={handlePositionChange}
-          onFloorPlateClick={(plateData) => setSelectedFloorPlate(plateData)}
-          onPointerMissed={() => {
-            // Don't clear selection when:
-            // - Adding objects
-            // - Just created an object
-            // - Currently transforming
-            // - Mouse is/was down on transform controls
-            // - Just finished transforming
-            if (isAddingObject || justCreatedObjectRef.current || isTransforming || isMouseDownOnTransformRef.current || justFinishedTransformRef.current) return;
-
-            if (editFloorplatesMode) {
-              setSelectedFloorPlate(null);
-            } else {
-              setSelectedLocations([]);
-              setSelectedLocation(null);
-              setSelectedObject(null);
-            }
-          }}
+          onFloorPlateClick={handleFloorPlateClick}
+          onPointerMissed={handlePointerMissed}
           setIsTransforming={handleSetIsTransforming}
-          onOrbitTargetUpdate={setCurrentOrbitTarget}
+          onOrbitTargetUpdate={handleOrbitTargetUpdate}
         />
         
         {/* Show MultiRightInfoPanel when multiple fixtures are selected */}
@@ -3414,7 +3496,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           <MultiRightInfoPanel
             selectedLocations={selectedLocations}
             editMode={editMode}
-            fixtureTypeMap={fixtureTypeMap}
+            fixtureTypeMap={fixtureTypeMap.current}
             onClose={clearSelections}
             onOpenBrandModal={() => setBrandModalOpen(true)}
             onRotateFixture={handleMultiRotateFixture}
@@ -3520,7 +3602,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             })()}
             spawnPoints={spawnPoints}
             modifiedFloorPlates={modifiedFloorPlates}
-            fixtureTypeMap={fixtureTypeMap}
+            fixtureTypeMap={fixtureTypeMap.current}
             onCloseLocation={() => setSelectedLocation(null)}
             onCloseFloorPlate={() => setSelectedFloorPlate(null)}
             onOpenFixtureTypeModal={() => setFixtureTypeModalOpen(true)}
@@ -3649,7 +3731,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             setIsAddingFixture(false);
           }
         }}
-        currentType={isAddingFixture ? '' : (selectedLocation ? (fixtureTypeMap.get(selectedLocation.blockName) || 'Unknown') : '')}
+        currentType={isAddingFixture ? '' : (selectedLocation ? (fixtureTypeMap.current.get(selectedLocation.blockName) || 'Unknown') : '')}
         availableTypes={fixtureTypes}
         onTypeSelect={(type) => {
           if (isAddingFixture) {

@@ -16,19 +16,28 @@ export function Navbar() {
 
   const handleNavigation = (path: string, event: React.MouseEvent) => {
     event.preventDefault();
+    console.log('[Navbar] Navigation clicked to:', path, 'from:', location.pathname);
 
     // If already on the target page, do nothing
-    if (location.pathname === path) return;
+    if (location.pathname === path) {
+      console.log('[Navbar] Already on target page, skipping navigation');
+      return;
+    }
 
     // Show loading overlay immediately
+    console.log('[Navbar] Setting isNavigating to true');
     setIsNavigating(true);
 
     // Small delay to let the loading overlay render before heavy unmount
     requestAnimationFrame(() => {
+      console.log('[Navbar] First requestAnimationFrame');
       requestAnimationFrame(() => {
+        console.log('[Navbar] Second requestAnimationFrame, starting transition');
         // Use transition to make navigation non-blocking
         startTransition(() => {
+          console.log('[Navbar] Inside transition, calling navigate to:', path);
           navigate(path);
+          console.log('[Navbar] Navigate called');
         });
       });
     });
@@ -42,7 +51,9 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
+    console.log('[Navbar] Location changed to:', location.pathname);
     setMobileOpen(false);
+    console.log('[Navbar] Clearing isNavigating (setting to false)');
     setIsNavigating(false); // Clear loading state when route changes
   }, [location.pathname]);
 
