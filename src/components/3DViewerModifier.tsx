@@ -3463,7 +3463,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
-            onFloorChange={(locations, newFloorIndex) => {
+            onFloorChange={(locations, newFloorIndex, keepSamePosition = false) => {
               // Update floor index, origin values, and position for all selected locations
               const keys = locations.map(loc => generateFixtureUID(loc));
 
@@ -3480,8 +3480,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                     const currentOriginY = loc.originY ?? 0;
 
                     // Calculate the origin difference to adjust position
-                    const originDiffX = currentOriginX - newOriginX;
-                    const originDiffY = currentOriginY - newOriginY;
+                    const originDiffX = keepSamePosition ? 0 : currentOriginX - newOriginX;
+                    const originDiffY = keepSamePosition ? 0 : currentOriginY - newOriginY;
 
                     return {
                       ...loc,
@@ -3507,8 +3507,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   const currentOriginY = loc.originY ?? 0;
 
                   // Calculate the origin difference to adjust position
-                  const originDiffX = currentOriginX - newOriginX;
-                  const originDiffY = currentOriginY - newOriginY;
+                  const originDiffX = keepSamePosition ? 0 : currentOriginX - newOriginX;
+                  const originDiffY = keepSamePosition ? 0 : currentOriginY - newOriginY;
 
                   return {
                     ...loc,
@@ -3609,7 +3609,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
-            onFloorChange={(location, newFloorIndex) => {
+            onFloorChange={(location, newFloorIndex, keepSamePosition = false) => {
               // Update the location's floor index, origin values, and position
               const key = generateFixtureUID(location);
 
@@ -3623,8 +3623,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               const newOriginY = targetFloorFixture?.originY ?? 0;
 
               // Calculate the origin difference to adjust position
-              const originDiffX = currentOriginX - newOriginX;
-              const originDiffY = currentOriginY - newOriginY;
+              const originDiffX = keepSamePosition ? 0 : currentOriginX - newOriginX;
+              const originDiffY = keepSamePosition ? 0 : currentOriginY - newOriginY;
 
               setLocationData(prev => {
                 return prev.map(loc => {

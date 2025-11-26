@@ -56,7 +56,7 @@ interface MultiRightInfoPanelProps {
   canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
   onCountChange?: (locations: LocationData[], newCount: number) => void;
   onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
-  onFloorChange?: (locations: LocationData[], newFloorIndex: number) => void;
+  onFloorChange?: (locations: LocationData[], newFloorIndex: number, keepSamePosition?: boolean) => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -99,6 +99,7 @@ export function MultiRightInfoPanel({
   const [hierarchyValue, setHierarchyValue] = useState('');
   const [isEditingFloor, setIsEditingFloor] = useState(false);
   const [floorValue, setFloorValue] = useState('');
+  const [keepSamePosition, setKeepSamePosition] = useState(false);
   
   const handleCustomRotation = () => {
     const angle = parseFloat(customRotationValue);
@@ -189,6 +190,7 @@ export function MultiRightInfoPanel({
 
   const handleFloorEdit = () => {
     setIsEditingFloor(true);
+    setKeepSamePosition(false);
     const commonFloor = getCommonValue(selectedLocations.map(loc => loc.floorIndex));
     if (commonFloor !== "Multiple Values" && commonFloor !== "N/A") {
       setFloorValue(commonFloor.toString());
@@ -201,15 +203,17 @@ export function MultiRightInfoPanel({
     const newFloorIndex = parseInt(floorValue);
     // Validate floor index is in available floors
     if (!isNaN(newFloorIndex) && availableFloorIndices.includes(newFloorIndex) && onFloorChange) {
-      onFloorChange(selectedLocations, newFloorIndex);
+      onFloorChange(selectedLocations, newFloorIndex, keepSamePosition);
     }
     setIsEditingFloor(false);
     setFloorValue('');
+    setKeepSamePosition(false);
   };
 
   const handleFloorCancel = () => {
     setIsEditingFloor(false);
     setFloorValue('');
+    setKeepSamePosition(false);
   };
 
   const handleFloorKeyPress = (e: React.KeyboardEvent) => {
@@ -459,6 +463,17 @@ export function MultiRightInfoPanel({
             >
               <Check className="h-3 w-3" />
             </Button>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="flex items-center gap-1 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={keepSamePosition}
+                onChange={(e) => setKeepSamePosition(e.target.checked)}
+                className="cursor-pointer"
+              />
+              <span>Keep same position values</span>
+            </label>
           </div>
         </div>
       )}

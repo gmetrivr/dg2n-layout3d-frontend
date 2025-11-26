@@ -88,7 +88,7 @@ interface RightInfoPanelProps {
   onHierarchyChange?: (location: LocationData, newHierarchy: number) => void;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
   onRotationChange?: (location: LocationData, newRotation: [number, number, number]) => void;
-  onFloorChange?: (location: LocationData, newFloorIndex: number) => void;
+  onFloorChange?: (location: LocationData, newFloorIndex: number, keepSamePosition?: boolean) => void;
 }
 
 export function RightInfoPanel({
@@ -133,6 +133,7 @@ export function RightInfoPanel({
   const [showSplitModal, setShowSplitModal] = useState(false);
   const [isEditingFloor, setIsEditingFloor] = useState(false);
   const [floorValue, setFloorValue] = useState('');
+  const [keepSamePosition, setKeepSamePosition] = useState(false);
   
   // Reset all editing states when selectedLocation changes
   useEffect(() => {
@@ -149,6 +150,7 @@ export function RightInfoPanel({
     setShowSplitModal(false);
     setIsEditingFloor(false);
     setFloorValue('');
+    setKeepSamePosition(false);
   }, [selectedLocation]);
   
   const handleCustomRotation = () => {
@@ -308,6 +310,7 @@ export function RightInfoPanel({
   // Floor editing handlers
   const handleFloorEdit = () => {
     setIsEditingFloor(true);
+    setKeepSamePosition(false);
     setFloorValue(selectedLocation?.floorIndex?.toString() || '0');
   };
 
@@ -315,15 +318,17 @@ export function RightInfoPanel({
     const newFloorIndex = parseInt(floorValue);
     // Validate floor index is in available floors
     if (!isNaN(newFloorIndex) && availableFloorIndices.includes(newFloorIndex) && selectedLocation && onFloorChange) {
-      onFloorChange(selectedLocation, newFloorIndex);
+      onFloorChange(selectedLocation, newFloorIndex, keepSamePosition);
     }
     setIsEditingFloor(false);
     setFloorValue('');
+    setKeepSamePosition(false);
   };
 
   const handleFloorCancel = () => {
     setIsEditingFloor(false);
     setFloorValue('');
+    setKeepSamePosition(false);
   };
 
   const handleFloorKeyPress = (e: React.KeyboardEvent) => {
@@ -576,36 +581,49 @@ export function RightInfoPanel({
               </div>
             )}
             {isEditingFloor && (
-              <div className="flex gap-1 mb-2">
-                <select
-                  value={floorValue}
-                  onChange={(e) => setFloorValue(e.target.value)}
-                  onKeyDown={handleFloorKeyPress}
-                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
-                  autoFocus
-                >
-                  {(() => {
-                    // Sort by floor display order if available, otherwise by index
-                    const sortedIndices = floorDisplayOrder.length > 0
-                      ? floorDisplayOrder.filter(idx => availableFloorIndices.includes(idx))
-                      : [...availableFloorIndices].sort((a, b) => a - b);
+              <>
+                <div className="flex gap-1 mb-2">
+                  <select
+                    value={floorValue}
+                    onChange={(e) => setFloorValue(e.target.value)}
+                    onKeyDown={handleFloorKeyPress}
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                    autoFocus
+                  >
+                    {(() => {
+                      // Sort by floor display order if available, otherwise by index
+                      const sortedIndices = floorDisplayOrder.length > 0
+                        ? floorDisplayOrder.filter(idx => availableFloorIndices.includes(idx))
+                        : [...availableFloorIndices].sort((a, b) => a - b);
 
-                    return sortedIndices.map(floorIndex => (
-                      <option key={floorIndex} value={floorIndex}>
-                        {floorNames.get(floorIndex) || `Floor ${floorIndex}`}
-                      </option>
-                    ));
-                  })()}
-                </select>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleFloorSave}
-                  className="text-xs px-2 py-1 h-auto"
-                >
-                  <Check className="h-3 w-3" />
-                </Button>
-              </div>
+                      return sortedIndices.map(floorIndex => (
+                        <option key={floorIndex} value={floorIndex}>
+                          {floorNames.get(floorIndex) || `Floor ${floorIndex}`}
+                        </option>
+                      ));
+                    })()}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleFloorSave}
+                    className="text-xs px-2 py-1 h-auto"
+                  >
+                    <Check className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="flex items-center gap-1 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={keepSamePosition}
+                      onChange={(e) => setKeepSamePosition(e.target.checked)}
+                      className="cursor-pointer"
+                    />
+                    <span>Keep same position values</span>
+                  </label>
+                </div>
+              </>
             )}
             {isEditingPosition && (
               <div className="mb-2 space-y-2">
