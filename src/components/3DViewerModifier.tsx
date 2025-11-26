@@ -1,5 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useStore } from '../contexts/StoreContext';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
@@ -215,15 +216,7 @@ export interface ArchitecturalObject {
 
 
 export function ThreeDViewerModifier() {
-  const renderCount = useRef(0);
-  renderCount.current++;
-
-  console.log('[3DViewerModifier] Component rendering', {
-    renderNumber: renderCount.current,
-    timestamp: Date.now(),
-    stackTrace: new Error().stack?.split('\n').slice(0, 3).join('\n')
-  });
-
+  const { setStoreName } = useStore();
   const [searchParams] = useSearchParams();
   const jobId = searchParams.get('jobId');
   const zipUrl = searchParams.get('zipUrl');
@@ -380,31 +373,6 @@ export function ThreeDViewerModifier() {
     }
   }, []);
 
-  // Track what's causing re-renders (placed after all state/hooks declarations)
-  useEffect(() => {
-    console.log('[STATE] locationData length:', locationData.length);
-  }, [locationData]);
-
-  useEffect(() => {
-    console.log('[STATE] selectedLocations length:', selectedLocations.length);
-  }, [selectedLocations]);
-
-  useEffect(() => {
-    console.log('[STATE] cameraPosition:', cameraPosition);
-  }, [cameraPosition]);
-
-  useEffect(() => {
-    console.log('[STATE] orbitTarget:', orbitTarget);
-  }, [orbitTarget]);
-
-  useEffect(() => {
-    console.log('[STATE] currentOrbitTarget:', currentOrbitTarget);
-  }, [currentOrbitTarget]);
-
-  useEffect(() => {
-    console.log('[STATE] loading:', loading, 'extracting:', extracting, 'fixturesLoaded:', fixturesLoaded);
-  }, [loading, extracting, fixturesLoaded]);
-
   // Extract available floor indices from glbFiles
   const availableFloorIndices = useMemo(() => {
     const floorIndices = new Set<number>();
@@ -476,20 +444,16 @@ export function ThreeDViewerModifier() {
     // Only update if values actually changed (avoid infinite re-renders)
     setCameraPosition(prev => {
       if (prev[0] === newCameraPos[0] && prev[1] === newCameraPos[1] && prev[2] === newCameraPos[2]) {
-        console.log('[handleBoundsCalculated] Camera position unchanged, skipping update');
         return prev;
       }
-      console.log('[handleBoundsCalculated] Camera position changed from', prev, 'to', newCameraPos);
       return newCameraPos;
     });
 
     // Only update orbit target if values actually changed
     setOrbitTarget(prev => {
       if (prev[0] === center[0] && prev[1] === center[1] && prev[2] === center[2]) {
-        console.log('[handleBoundsCalculated] Orbit target unchanged, skipping update');
         return prev;
       }
-      console.log('[handleBoundsCalculated] Orbit target changed from', prev, 'to', center);
       return center;
     });
   }, []);
@@ -533,8 +497,6 @@ export function ThreeDViewerModifier() {
         ) || newType; // fallback to newType if not found in mapping
       }
 
-      console.log(`[handleFixtureTypeChange] Fixture type: ${newType}, Block name: ${mappedBlockName}`);
-      
       // Update the fixture cache with new GLB URL
       fixtureCache.current.set(mappedBlockName, newGlbUrl);
 
@@ -606,8 +568,6 @@ export function ThreeDViewerModifier() {
           blockName => FIXTURE_TYPE_MAPPING[blockName] === fixtureType
         ) || fixtureType; // fallback to fixtureType if not found in mapping
       }
-
-      console.log(`[handleAddFixture] Fixture type: ${fixtureType}, Block name: ${mappedBlockName}`);
 
       // Preload the GLB
       useGLTF.preload(glbUrl);
@@ -2129,10 +2089,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setCurrentOrbitTarget(prev => {
       // Only update if actually changed (avoid unnecessary re-renders)
       if (prev[0] === newTarget[0] && prev[1] === newTarget[1] && prev[2] === newTarget[2]) {
-        console.log('[handleOrbitTargetUpdate] Target unchanged, skipping update');
         return prev;
       }
-      console.log('[handleOrbitTargetUpdate] Target changed from', prev, 'to', newTarget);
       return newTarget;
     });
   }, []);
@@ -2858,15 +2816,18 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     };
   }, [jobId, zipUrl, zipPath]);
 
-  // Log component lifecycle
+  // Track unmounting state and clear store name on unmount
   useEffect(() => {
-    console.log('[3DViewerModifier] Component mounted');
     return () => {
-      console.log('[3DViewerModifier] Component unmounting - START');
       isUnmountingRef.current = true; // Stop all effects immediately
-      console.log('[3DViewerModifier] Component unmounting - END');
+      setStoreName(null); // Clear store name when leaving the page
     };
-  }, []);
+  }, [setStoreName]);
+
+  // Update store name in navbar when it changes
+  useEffect(() => {
+    setStoreName(saveStoreName || null);
+  }, [saveStoreName, setStoreName]);
 
   // Fetch brand categories from API
   useEffect(() => {
@@ -3056,13 +3017,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
   // Load and parse CSV data from extracted files
   useEffect(() => {
-    console.log('[loadLocationData useEffect] Running, extractedFiles.length:', extractedFiles.length);
     const abortController = new AbortController();
 
     const loadLocationData = async () => {
       if (isUnmountingRef.current) return; // Skip if unmounting
       if (extractedFiles.length === 0) return;
-      console.log('[loadLocationData] Starting to load data');
 
       try {
         // Find the location-master.csv file in extracted files
@@ -3175,14 +3134,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         if (isUnmountingRef.current) return; // Skip setState if unmounting
 
-        console.log('[loadLocationData] About to call setLocationData');
         // Preserve any modified fixtures when setting new location data
         setLocationData(prev => {
-          console.log('[loadLocationData setLocationData] prev.length:', prev.length, 'new data length:', data.length);
           // If we already have location data, preserve all modifications
           // Only reload from CSV if we have no previous data
           if (prev.length > 0) {
-            console.log('[loadLocationData] Preserving existing data, just updating GLB URLs');
             // Don't reload - this prevents losing modifications when cache/typeMap updates
             // Just update GLB URLs for any fixtures that need them
             return prev.map(location => {
@@ -3193,7 +3149,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             });
           }
 
-          console.log('[loadLocationData] First load, setting new data');
           // First time loading: use CSV data
           const newData = [...dataWithGLBs];
           return newData;
@@ -3201,7 +3156,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         if (isUnmountingRef.current) return; // Skip setState if unmounting
 
-        console.log('[loadLocationData] Setting fixturesLoaded to true');
         // Mark fixtures as loaded after location data is set
         setFixturesLoaded(true);
 

@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
+import { useStore } from '../contexts/StoreContext';
 
 export function Navbar() {
   const location = useLocation();
@@ -13,31 +14,25 @@ export function Navbar() {
   const [, startTransition] = useTransition();
   const [isNavigating, setIsNavigating] = useState(false);
   const { logout, username } = useAuth();
+  const { storeName } = useStore();
 
   const handleNavigation = (path: string, event: React.MouseEvent) => {
     event.preventDefault();
-    console.log('[Navbar] Navigation clicked to:', path, 'from:', location.pathname);
 
     // If already on the target page, do nothing
     if (location.pathname === path) {
-      console.log('[Navbar] Already on target page, skipping navigation');
       return;
     }
 
     // Show loading overlay immediately
-    console.log('[Navbar] Setting isNavigating to true');
     setIsNavigating(true);
 
     // Small delay to let the loading overlay render before heavy unmount
     requestAnimationFrame(() => {
-      console.log('[Navbar] First requestAnimationFrame');
       requestAnimationFrame(() => {
-        console.log('[Navbar] Second requestAnimationFrame, starting transition');
         // Use transition to make navigation non-blocking
         startTransition(() => {
-          console.log('[Navbar] Inside transition, calling navigate to:', path);
           navigate(path);
-          console.log('[Navbar] Navigate called');
         });
       });
     });
@@ -51,9 +46,7 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
-    console.log('[Navbar] Location changed to:', location.pathname);
     setMobileOpen(false);
-    console.log('[Navbar] Clearing isNavigating (setting to false)');
     setIsNavigating(false); // Clear loading state when route changes
   }, [location.pathname]);
 
@@ -102,6 +95,11 @@ export function Navbar() {
           </Link>
 
           <div className="hidden md:flex items-center gap-4">
+            {storeName && (
+              <span className="text-sm font-medium text-white border border-white/20 px-3 py-1 rounded-md bg-white/5">
+                {storeName}
+              </span>
+            )}
             {username && <span className="text-sm text-muted-foreground">{username}</span>}
             <Button size="sm" variant="outline" onClick={() => void logout()}>
               Log out
@@ -179,6 +177,11 @@ export function Navbar() {
               </Link>
             </div>
             <div className="mt-auto flex flex-col gap-3">
+              {storeName && (
+                <div className="text-sm font-medium border border-border px-3 py-2 rounded-md bg-muted/20">
+                  {storeName}
+                </div>
+              )}
               {username && <span className="text-sm text-muted-foreground">Signed in as {username}</span>}
               <Button variant="outline" onClick={() => void logout()}>
                 Log out
