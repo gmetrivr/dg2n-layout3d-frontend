@@ -731,8 +731,78 @@ export function MyCreatedStores() {
       const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
 
       // Upload updated ZIP back to Supabase storage (with fixture IDs in CSV)
+      // This is the FULL ZIP containing:
+      // - Original GLB files (floor1.glb, floor2.glb, etc.) - used by 3D modifier for editing
+      // - Baked GLB files (floor1_baked.glb, floor2_baked.glb, etc.) - used for live deployment
+      // - location-master.csv with fixture IDs
+      // - store-config.json referencing ORIGINAL GLB files
+      // - arch-objects.json with architectural element definitions
       await uploadStoreZip(r.zip_path, updatedZipBlob, { bucket: DEFAULT_BUCKET });
-      console.log(`Updated ZIP uploaded to storage: ${r.zip_path}`);
+      console.log(`Updated FULL ZIP uploaded to storage: ${r.zip_path}`);
+
+      // Create a FILTERED ZIP for live deployment
+      // This contains ONLY what's needed for live deployment:
+      // - Baked GLB files (floor1_baked.glb, floor2_baked.glb, etc.) with architectural elements merged
+      // - location-master.csv with fixture IDs
+      // - store-config.json MODIFIED to reference BAKED GLB files
+      // NOTE: arch-objects.json is excluded because elements are now baked into the GLB files
+      console.log('[MyCreatedStores] Creating filtered ZIP for live deployment...');
+      const liveZip = new JSZip();
+
+      // Add only baked GLB models (ending with _baked.glb)
+      let bakedGlbCount = 0;
+      for (const fileName of Object.keys(zip.files)) {
+        const file = zip.files[fileName];
+        if (!file.dir && fileName.toLowerCase().endsWith('_baked.glb')) {
+          const content = await file.async('blob');
+          liveZip.file(fileName, content);
+          bakedGlbCount++;
+          console.log(`[MyCreatedStores] Added baked GLB to live ZIP: ${fileName}`);
+        }
+      }
+
+      // Safety check: Ensure at least one baked GLB was found
+      if (bakedGlbCount === 0) {
+        throw new Error('No baked GLB files found in ZIP. Cannot create live deployment without baked models.');
+      }
+
+      // Add location-master.csv
+      if (!zip.files[locationMasterFile]) {
+        throw new Error('location-master.csv not found in ZIP. Cannot create live deployment.');
+      }
+      const csvContent = await zip.files[locationMasterFile].async('blob');
+      liveZip.file(locationMasterFile, csvContent);
+      console.log(`[MyCreatedStores] Added location-master.csv to live ZIP`);
+
+      // Add store-config.json with updated glb_file_name references (pointing to baked files)
+      const storeConfigFile = Object.keys(zip.files).find(
+        name => name.toLowerCase() === 'store-config.json'
+      );
+      if (!storeConfigFile || !zip.files[storeConfigFile]) {
+        throw new Error('store-config.json not found in ZIP. Cannot create live deployment.');
+      }
+
+      // Parse store-config.json and create a modified copy for live deployment
+      const configText = await zip.files[storeConfigFile].async('text');
+      const config = JSON.parse(configText);
+
+      if (config.floor && Array.isArray(config.floor)) {
+        config.floor.forEach((floor: any) => {
+          if (floor.glb_file_name && floor.glb_file_name.toLowerCase().endsWith('.glb')) {
+            // Update to reference the baked GLB file
+            floor.glb_file_name = floor.glb_file_name.replace(/\.glb$/i, '_baked.glb');
+            console.log(`[MyCreatedStores] Updated floor ${floor.floor_index} to use baked file: ${floor.glb_file_name}`);
+          }
+        });
+      }
+
+      const updatedConfigContent = JSON.stringify(config, null, 2);
+      liveZip.file(storeConfigFile, updatedConfigContent);
+      console.log(`[MyCreatedStores] Added updated store-config.json to live ZIP`);
+
+      // Generate the filtered ZIP blob for live deployment
+      const liveZipBlob = await liveZip.generateAsync({ type: 'blob' });
+      console.log(`[MyCreatedStores] Created filtered live ZIP with ${bakedGlbCount} baked GLB models`);
 
       // Insert new entries into SFI table (history tracking - always insert, never update)
       await insertFixtures(finalFixtures);
@@ -765,11 +835,12 @@ export function MyCreatedStores() {
       // Find store metadata from CSV by store_id
       const storeInfo = storeData.find(store => store.storeCode === r.store_id);
 
-      // Make the store live using the API with updated ZIP
+      // Make the store live using the API with the FILTERED live ZIP (baked models only)
+      console.log('[MyCreatedStores] Making store live with filtered ZIP containing only baked models...');
       await makeStoreLive(
         r.store_id,
         r.store_name,
-        updatedZipBlob,
+        liveZipBlob, // Use filtered live ZIP instead of full ZIP
         (r.entity || 'trends').toLowerCase(),
         '0,0,0',
         {

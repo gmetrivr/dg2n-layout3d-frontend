@@ -1609,7 +1609,279 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedFile, selectedFloorFile, locationData, deletedFixtures, architecturalObjects, isExporting]);
 
-  
+  // Export a baked floor GLB with architectural elements merged (for live deployment)
+  const exportBakedFloorGLB = useCallback(async (
+    floorFile: ExtractedFile,
+    floorIndex: number,
+    workingArchObjects: typeof architecturalObjects
+  ): Promise<Blob> => {
+    let dracoLoader: DRACOLoader | null = null;
+
+    try {
+      // Create a new scene to combine floor and architectural elements
+      const exportScene = new THREE.Scene();
+
+      // Load the floor model using GLTFLoader directly
+      const loader = new GLTFLoader();
+
+      // Set up DRACO loader for compressed GLBs
+      dracoLoader = new DRACOLoader();
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+      loader.setDRACOLoader(dracoLoader);
+
+      // Add the floor model
+      const floorGLTF = await new Promise<GLTF>((resolve, reject) => {
+        loader.load(floorFile.url, resolve, undefined, reject);
+      });
+      const floorModel = floorGLTF.scene.clone();
+      exportScene.add(floorModel);
+
+      // Add architectural objects (glazing, partitions, and doors) for this floor
+      const currentFloorObjects = workingArchObjects.filter(obj => obj.floorIndex === floorIndex);
+
+      for (const obj of currentFloorObjects) {
+        // Handle door objects (entrance_door, exit_door) - single point with rotation
+        if (obj.type === 'entrance_door' || obj.type === 'exit_door') {
+          const { posX, posY, posZ, rotationX, rotationY, rotationZ, width, height, depth } = obj;
+
+          // Skip if missing required properties
+          if (posX === undefined || posY === undefined || posZ === undefined) {
+            console.warn(`Skipping door ${obj.id}: missing required position properties`);
+            continue;
+          }
+
+          // Transform CSV coordinates to Three.js world coordinates
+          // CSV: posX=x, posY=-z, posZ=y
+          // Three.js: [x, y, z]
+          const threePosition: [number, number, number] = [
+            posX,           // X stays the same
+            posZ || 0,      // Y comes from CSV posZ
+            -(posY || 0)    // Z is negated CSV posY
+          ];
+
+          // Create door group at the correct position (matching DoorGLB component)
+          const doorGroup = new THREE.Group();
+          doorGroup.position.set(threePosition[0], threePosition[1], threePosition[2]);
+
+          // Apply rotation - convert from degrees to radians (matching DoorGLB component)
+          // Canvas3D.tsx:778 uses rotation order: [rotationX, rotationZ, rotationY]
+          const rotX = ((rotationX || 0) * Math.PI) / 180;
+          const rotY = ((rotationY || 0) * Math.PI) / 180;
+          const rotZ = ((rotationZ || 0) * Math.PI) / 180;
+          doorGroup.rotation.set(rotX, rotZ, rotY); // Note: Y and Z are swapped!
+
+          // Check if door has a GLB URL (actual door model)
+          const glbUrl = obj.customProperties?.glbUrl;
+
+          if (glbUrl) {
+            // Load the actual door GLB model
+            try {
+              const doorGLTF = await new Promise<GLTF>((resolve, reject) => {
+                loader.load(glbUrl, resolve, undefined, reject);
+              });
+
+              // Clone the door model and add to group
+              const doorModel = doorGLTF.scene.clone();
+              doorGroup.add(doorModel);
+              console.log(`[Baking] Loaded door GLB model from ${glbUrl}`);
+            } catch (error) {
+              console.error(`[Baking] Failed to load door GLB from ${glbUrl}, using fallback geometry:`, error);
+              // Fall through to create fallback geometry
+            }
+          }
+
+          // If no GLB URL or loading failed, create fallback geometry
+          if (!glbUrl || doorGroup.children.length === 0) {
+            console.log(`[Baking] Using fallback box geometry for door ${obj.id}`);
+            const fallbackWidth = width || 1.5;
+            const fallbackHeight = height || 3.0;
+            const fallbackDepth = depth || 0.1;
+
+            // Create door frame (darker material)
+            const frameMaterial = new THREE.MeshStandardMaterial({
+              color: obj.type === 'entrance_door' ? 0x333333 : 0xCC0000,
+              metalness: 0.5,
+              roughness: 0.5
+            });
+
+            // Door panel (slightly inset from frame)
+            const doorMaterial = new THREE.MeshStandardMaterial({
+              color: obj.type === 'entrance_door' ? 0x8B4513 : 0xFF6666,
+              metalness: 0.1,
+              roughness: 0.8
+            });
+
+            // Main door panel - centered at group origin
+            const doorPanel = new THREE.Mesh(
+              new THREE.BoxGeometry(fallbackWidth * 0.9, fallbackHeight * 0.9, fallbackDepth * 0.5),
+              doorMaterial
+            );
+            doorPanel.position.set(0, 0, 0);
+            doorGroup.add(doorPanel);
+
+            // Door frame - top
+            const topFrame = new THREE.Mesh(
+              new THREE.BoxGeometry(fallbackWidth, fallbackHeight * 0.05, fallbackDepth),
+              frameMaterial
+            );
+            topFrame.position.set(0, fallbackHeight / 2 - (fallbackHeight * 0.025), 0);
+            doorGroup.add(topFrame);
+
+            // Door frame - bottom
+            const bottomFrame = new THREE.Mesh(
+              new THREE.BoxGeometry(fallbackWidth, fallbackHeight * 0.05, fallbackDepth),
+              frameMaterial
+            );
+            bottomFrame.position.set(0, -fallbackHeight / 2 + (fallbackHeight * 0.025), 0);
+            doorGroup.add(bottomFrame);
+
+            // Door frame - left
+            const leftFrame = new THREE.Mesh(
+              new THREE.BoxGeometry(fallbackWidth * 0.05, fallbackHeight * 0.9, fallbackDepth),
+              frameMaterial
+            );
+            leftFrame.position.set(-fallbackWidth / 2 + (fallbackWidth * 0.025), 0, 0);
+            doorGroup.add(leftFrame);
+
+            // Door frame - right
+            const rightFrame = new THREE.Mesh(
+              new THREE.BoxGeometry(fallbackWidth * 0.05, fallbackHeight * 0.9, fallbackDepth),
+              frameMaterial
+            );
+            rightFrame.position.set(fallbackWidth / 2 - (fallbackWidth * 0.025), 0, 0);
+            doorGroup.add(rightFrame);
+          }
+
+          exportScene.add(doorGroup);
+          continue; // Skip to next object
+        }
+
+        // Handle two-point objects (glazing and partitions)
+        const { startPoint, endPoint, height } = obj;
+
+        // Skip objects without required properties (two-point elements)
+        if (!startPoint || !endPoint || height === undefined) {
+          continue;
+        }
+
+        // Calculate dimensions and position
+        const dx = endPoint[0] - startPoint[0];
+        const dz = endPoint[2] - startPoint[2];
+        const length = Math.sqrt(dx * dx + dz * dz);
+        const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
+
+        // Position at midpoint - origin at ground level
+        const position = new THREE.Vector3(
+          (startPoint[0] + endPoint[0]) / 2,
+          startPoint[1],  // Ground level
+          (startPoint[2] + endPoint[2]) / 2
+        );
+
+        let geometry: THREE.BufferGeometry;
+        let material: THREE.Material;
+
+        // Create a group for proper origin positioning
+        const objectGroup = new THREE.Group();
+        objectGroup.position.copy(position);
+        objectGroup.rotation.set(0, angle, 0);
+
+        if (obj.type === 'glazing') {
+          // Create plane geometry for glazing (glass)
+          geometry = new THREE.PlaneGeometry(length, height);
+          material = new THREE.MeshStandardMaterial({
+            color: 0x88ccff,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide
+          });
+
+          // Create glass mesh offset upward by height/2 (since origin is at ground level)
+          const glassMesh = new THREE.Mesh(geometry, material);
+          glassMesh.position.set(0, height / 2, 0);
+          objectGroup.add(glassMesh);
+
+          // Add metal frame around the glass (50mm thickness, 100mm depth)
+          const frameThickness = 0.05; // 50mm
+          const frameDepth = 0.1; // 100mm
+          const frameMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444, // Dark grey metal
+            metalness: 0.8,
+            roughness: 0.2
+          });
+
+          // Top frame
+          const topFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(length, frameThickness, frameDepth),
+            frameMaterial
+          );
+          topFrame.position.set(0, height - frameThickness / 2, 0);
+          objectGroup.add(topFrame);
+
+          // Bottom frame
+          const bottomFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(length, frameThickness, frameDepth),
+            frameMaterial
+          );
+          bottomFrame.position.set(0, frameThickness / 2, 0);
+          objectGroup.add(bottomFrame);
+
+          // Left frame
+          const leftFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+            frameMaterial
+          );
+          leftFrame.position.set(-length / 2 + frameThickness / 2, height / 2, 0);
+          objectGroup.add(leftFrame);
+
+          // Right frame
+          const rightFrame = new THREE.Mesh(
+            new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
+            frameMaterial
+          );
+          rightFrame.position.set(length / 2 - frameThickness / 2, height / 2, 0);
+          objectGroup.add(rightFrame);
+        } else {
+          // Create box geometry for partition (60mm width)
+          const width = 0.06;
+          geometry = new THREE.BoxGeometry(length, height, width);
+          material = new THREE.MeshStandardMaterial({
+            color: 0xcccccc
+          });
+
+          // Create mesh offset upward by height/2 (since origin is at ground level)
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.position.set(0, height / 2, 0);
+
+          objectGroup.add(mesh);
+        }
+
+        exportScene.add(objectGroup);
+      }
+
+      // Export the combined scene as GLB
+      const exporter = new GLTFExporter();
+
+      const result = await new Promise<ArrayBuffer>((resolve, reject) => {
+        exporter.parse(
+          exportScene,
+          (gltf) => resolve(gltf as ArrayBuffer),
+          (error) => reject(error),
+          { binary: true }
+        );
+      });
+
+      // Return as blob
+      return new Blob([result], { type: 'application/octet-stream' });
+
+    } finally {
+      // Cleanup DRACO loader
+      if (dracoLoader) {
+        dracoLoader.dispose();
+      }
+    }
+  }, []);
+
+
 
   // Build a modified ZIP Blob (without downloading)
 // Helpers to recognize CSV filenames across underscore/hyphen variants
@@ -1909,6 +2181,43 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } catch (error) {
       console.error('Failed to create arch objects JSON:', error);
       // Continue with export even if arch objects fail
+    }
+
+    // Generate and add baked floor GLBs (with architectural elements merged)
+    // These will be used for live deployment
+    try {
+      log('Generating baked floor GLB models with architectural elements...');
+
+      // Apply floor remapping to architectural objects if needed
+      let workingArchObjects = architecturalObjects;
+      if (floorMapping) {
+        workingArchObjects = architecturalObjects.map(obj => ({
+          ...obj,
+          floorIndex: floorMapping.get(obj.floorIndex) ?? obj.floorIndex
+        }));
+      }
+
+      const floorFiles = workingExtractedFiles.filter(file =>
+        isFloorFile(file.name) && !isShatteredFloorPlateFile(file.name)
+      );
+
+      for (const floorFile of floorFiles) {
+        const floorMatch = floorFile.name.match(/floor[_-]?(\d+)/i);
+        const floorIndex = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+        log(`Generating baked GLB for floor ${floorIndex}...`);
+        const bakedBlob = await exportBakedFloorGLB(floorFile, floorIndex, workingArchObjects);
+
+        // Add baked GLB with "_baked" suffix before the extension
+        const bakedFileName = floorFile.name.replace(/\.glb$/i, '_baked.glb');
+        zip.file(bakedFileName, bakedBlob);
+        log(`Added baked floor GLB: ${bakedFileName}`);
+      }
+
+      log(`Generated ${floorFiles.length} baked floor GLB models`);
+    } catch (error) {
+      console.error('Failed to generate baked floor GLBs:', error);
+      // Continue with export even if baking fails
     }
 
     log('Modified ZIP built.');
