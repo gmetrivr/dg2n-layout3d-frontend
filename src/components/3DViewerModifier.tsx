@@ -392,6 +392,10 @@ export function ThreeDViewerModifier() {
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
   const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
+
+  // Measurement tool state
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  const [measurementPoints, setMeasurementPoints] = useState<[number, number, number][]>([]);
   const justCreatedObjectRef = useRef<boolean>(false); // Track if we just created an object
   const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
@@ -951,6 +955,30 @@ export function ThreeDViewerModifier() {
       }
     }
   }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
+
+  // Handler for floor click during measurement
+  const handleFloorClickForMeasurement = useCallback((point: [number, number, number]) => {
+    if (!isMeasuring) return;
+
+    // Force placement at ground level (y = 0)
+    const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
+
+    if (measurementPoints.length === 0) {
+      // First click - set first measurement point
+      setMeasurementPoints([groundLevelPoint]);
+    } else if (measurementPoints.length === 1) {
+      // Second click - set second measurement point
+      setMeasurementPoints([measurementPoints[0], groundLevelPoint]);
+    } else {
+      // Already have 2 points, reset and start new measurement
+      setMeasurementPoints([groundLevelPoint]);
+    }
+  }, [isMeasuring, measurementPoints]);
+
+  // Handler to clear measurement
+  const handleClearMeasurement = useCallback(() => {
+    setMeasurementPoints([]);
+  }, []);
 
   // Handler for floor click during spawn point setting
   const handleFloorClickForSpawnPoint = useCallback((point: [number, number, number]) => {
@@ -4036,6 +4064,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           initialFloorCount={initialFloorCount}
           architecturalObjectsCount={architecturalObjects.length}
           spawnPoints={spawnPoints}
+          isMeasuring={isMeasuring}
+          measurementPoints={measurementPoints}
+          onMeasuringChange={setIsMeasuring}
+          onClearMeasurement={handleClearMeasurement}
           onFloorFileChange={handleFloorFileChange}
           onShowSpheresChange={setShowSpheres}
           onFixtureTypeChange={setSelectedFixtureType}
@@ -4089,6 +4121,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           setSpawnPointMode={setSpawnPointMode}
           spawnPoints={spawnPoints}
           onFloorClickForSpawnPoint={handleFloorClickForSpawnPoint}
+          isMeasuring={isMeasuring}
+          measurementPoints={measurementPoints}
+          onFloorClickForMeasurement={handleFloorClickForMeasurement}
           onBoundsCalculated={handleBoundsCalculated}
           onGLBError={handleGLBError}
           onFixtureClick={handleFixtureClickWithObjectClear}

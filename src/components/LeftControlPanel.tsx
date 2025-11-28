@@ -54,6 +54,10 @@ interface LeftControlPanelProps {
   // Spawn points
   spawnPoints?: Map<number, [number, number, number]>;
 
+  // Measurement tool
+  isMeasuring?: boolean;
+  measurementPoints?: [number, number, number][];
+
   // Event handlers
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
@@ -72,6 +76,8 @@ interface LeftControlPanelProps {
   onManageFloorsClick?: () => void;
   onAddFixtureClick?: () => void;
   onAddObjectsClick?: () => void;
+  onMeasuringChange?: (enabled: boolean) => void;
+  onClearMeasurement?: () => void;
 }
 
 export function LeftControlPanel({
@@ -103,6 +109,8 @@ export function LeftControlPanel({
   initialFloorCount,
   architecturalObjectsCount,
   spawnPoints,
+  isMeasuring,
+  measurementPoints,
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
@@ -120,6 +128,8 @@ export function LeftControlPanel({
   onManageFloorsClick,
   onAddFixtureClick,
   onAddObjectsClick,
+  onMeasuringChange,
+  onClearMeasurement,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -614,7 +624,64 @@ export function LeftControlPanel({
             </div>
           )}
         </div>
-        
+
+        {/* Tools */}
+        <div className="border-t border-border pt-2 space-y-2">
+          <div className="text-sm font-semibold mb-1">Tools</div>
+          <button
+            onClick={() => {
+              if (onMeasuringChange) {
+                onMeasuringChange(!isMeasuring);
+                // Clear measurements when toggling off
+                if (isMeasuring && onClearMeasurement) {
+                  onClearMeasurement();
+                }
+              }
+            }}
+            className={`text-sm px-3 py-1.5 rounded w-full ${
+              isMeasuring
+                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                : 'bg-primary text-primary-foreground hover:opacity-90'
+            }`}
+          >
+            {isMeasuring ? 'Stop Measuring' : 'Measuring Tool'}
+          </button>
+
+          {isMeasuring && (
+            <div className="text-xs text-muted-foreground">
+              {measurementPoints && measurementPoints.length === 0 && (
+                <p>Click on the floor to place first point</p>
+              )}
+              {measurementPoints && measurementPoints.length === 1 && (
+                <p>Click on the floor to place second point</p>
+              )}
+              {measurementPoints && measurementPoints.length === 2 && (() => {
+                const [point1, point2] = measurementPoints;
+                const distance = Math.sqrt(
+                  Math.pow(point2[0] - point1[0], 2) +
+                  Math.pow(point2[1] - point1[1], 2) +
+                  Math.pow(point2[2] - point1[2], 2)
+                );
+                return (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground">Distance: {distance.toFixed(2)}m</p>
+                    <button
+                      onClick={() => {
+                        if (onClearMeasurement) {
+                          onClearMeasurement();
+                        }
+                      }}
+                      className="text-xs underline text-foreground hover:text-primary"
+                    >
+                      Clear & Restart
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+
         {/* Job Info */}
         {jobId && (
           <div className="text-xs text-muted-foreground border-t border-border pt-2">

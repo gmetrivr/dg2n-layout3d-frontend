@@ -1208,6 +1208,10 @@ interface Canvas3DProps {
   setSpawnPointMode?: boolean;
   spawnPoints?: Map<number, [number, number, number]>;
   onFloorClickForSpawnPoint?: (point: [number, number, number]) => void;
+  // Measurement tool props
+  isMeasuring?: boolean;
+  measurementPoints?: [number, number, number][];
+  onFloorClickForMeasurement?: (point: [number, number, number]) => void;
   // Existing callbacks
   onBoundsCalculated: (center: [number, number, number], size: [number, number, number]) => void;
   onGLBError: (blockName: string, url: string) => void;
@@ -1252,6 +1256,9 @@ export function Canvas3D({
   setSpawnPointMode = false,
   spawnPoints = new Map(),
   onFloorClickForSpawnPoint,
+  isMeasuring = false,
+  measurementPoints = [],
+  onFloorClickForMeasurement,
   onBoundsCalculated,
   onGLBError,
   onFixtureClick,
@@ -1558,6 +1565,84 @@ export function Canvas3D({
           onFloorClick={onFloorClickForSpawnPoint}
         />
       )}
+
+      {/* Floor click handler for measurement */}
+      {isMeasuring && onFloorClickForMeasurement && (
+        <FloorClickHandler
+          isAddingObject={isMeasuring}
+          onFloorClick={onFloorClickForMeasurement}
+        />
+      )}
+
+      {/* Measurement visualization */}
+      {isMeasuring && measurementPoints.length > 0 && (() => {
+        const [point1, point2] = measurementPoints;
+
+        // Calculate distance if we have 2 points
+        const distance = point2
+          ? Math.sqrt(
+              Math.pow(point2[0] - point1[0], 2) +
+              Math.pow(point2[1] - point1[1], 2) +
+              Math.pow(point2[2] - point1[2], 2)
+            )
+          : 0;
+
+        // Calculate midpoint for label
+        const midpoint: [number, number, number] = point2
+          ? [
+              (point1[0] + point2[0]) / 2,
+              (point1[1] + point2[1]) / 2 + 0.5, // Offset upward for visibility
+              (point1[2] + point2[2]) / 2,
+            ]
+          : point1;
+
+        return (
+          <group>
+            {/* First point marker */}
+            <mesh position={point1}>
+              <sphereGeometry args={[0.075]} />
+              <meshStandardMaterial color="#0088ff" emissive="#0088ff" emissiveIntensity={0.5} />
+            </mesh>
+
+            {/* Second point marker (if exists) */}
+            {point2 && (
+              <>
+                <mesh position={point2}>
+                  <sphereGeometry args={[0.075]} />
+                  <meshStandardMaterial color="#0088ff" emissive="#0088ff" emissiveIntensity={0.5} />
+                </mesh>
+
+                {/* Line connecting points */}
+                <line>
+                  <bufferGeometry
+                    attach="geometry"
+                    onUpdate={(self) => {
+                      const positions = new Float32Array([
+                        point1[0], point1[1], point1[2],
+                        point2[0], point2[1], point2[2],
+                      ]);
+                      self.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                    }}
+                  />
+                  <lineBasicMaterial attach="material" color="#0088ff" linewidth={2} />
+                </line>
+
+                {/* Distance label */}
+                <Billboard position={midpoint}>
+                  <Text
+                    fontSize={0.3}
+                    color="#0088ff"
+                    anchorX="center"
+                    anchorY="middle"
+                  >
+                    {distance.toFixed(2)}m
+                  </Text>
+                </Billboard>
+              </>
+            )}
+          </group>
+        );
+      })()}
 
       <OrbitControls
         ref={orbitControlsRef}
