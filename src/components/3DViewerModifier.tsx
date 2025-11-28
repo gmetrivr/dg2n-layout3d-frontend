@@ -189,24 +189,131 @@ function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' 
   return 'legacy';
 }
 
+// Door identification configuration
+const DOOR_BLOCK_NAMES = {
+  entrance: ['1500 DOUBLE GLAZING 2', '1500 DOUBLE GLAZING2'],
+  exit: ['FIRE EXIT']
+};
+
+// Helper to identify if a block name represents a door
+function isDoorBlockName(blockName: string): { isDoor: boolean; type: 'entrance_door' | 'exit_door' | null } {
+  const normalized = blockName.trim().toUpperCase();
+
+  // Check entrance doors
+  if (DOOR_BLOCK_NAMES.entrance.some(name => name.toUpperCase() === normalized)) {
+    return { isDoor: true, type: 'entrance_door' };
+  }
+
+  // Check exit doors
+  if (DOOR_BLOCK_NAMES.exit.some(name => name.toUpperCase() === normalized)) {
+    return { isDoor: true, type: 'exit_door' };
+  }
+
+  return { isDoor: false, type: null };
+}
+
+// Convert fixture (LocationData) to architectural door element
+function convertFixtureToDoor(location: any, doorType: 'entrance_door' | 'exit_door'): ArchitecturalObject {
+  // Generate unique ID
+  const id = `${doorType}_${location.floorIndex}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  // Default door dimensions based on type
+  const defaultDimensions = doorType === 'entrance_door'
+    ? { width: 1.5, height: 3.0, depth: 0.1 } // 1500mm wide entrance
+    : { width: 1.0, height: 2.5, depth: 0.1 }; // 1000mm wide exit
+
+  return {
+    id,
+    type: doorType,
+    variant: location.blockName, // Keep original block name as variant
+    floorIndex: location.floorIndex,
+    posX: location.posX,
+    posY: location.posY,
+    posZ: location.posZ,
+    rotationX: location.rotationX || 0,
+    rotationY: location.rotationY || 0,
+    rotationZ: location.rotationZ || 0,
+    width: defaultDimensions.width,
+    height: defaultDimensions.height,
+    depth: defaultDimensions.depth,
+    originalPosX: location.posX,
+    originalPosY: location.posY,
+    originalPosZ: location.posZ,
+    originalRotationX: location.rotationX || 0,
+    originalRotationY: location.rotationY || 0,
+    originalRotationZ: location.rotationZ || 0,
+    originalWidth: defaultDimensions.width,
+    originalHeight: defaultDimensions.height,
+    originalDepth: defaultDimensions.depth,
+    wasMoved: false,
+    wasRotated: false,
+    wasResized: false,
+    customProperties: {
+      originalBlockName: location.blockName,
+      brand: location.brand,
+      migratedFromFixture: true,
+      fixtureId: location.fixtureId,
+      glbUrl: location.glbUrl // Preserve GLB URL from fixture
+    }
+  };
+}
+
 // Architectural object type definition
+export type ArchitecturalObjectType =
+  | 'glazing'
+  | 'partition'
+  | 'entrance_door'
+  | 'exit_door'
+  | 'window'
+  | 'column'
+  | 'wall';
+
 export interface ArchitecturalObject {
   id: string;
-  type: 'glazing' | 'partition';
-  variant?: string; // Variant name (e.g., "Partition variant 1", "Glazing variant 2")
+  type: ArchitecturalObjectType;
+  variant?: string; // Variant name (e.g., "Small", "Medium", "Large", "Double Door")
   floorIndex: number;
-  startPoint: [number, number, number]; // [x, y, z] in world coordinates
-  endPoint: [number, number, number]; // [x, y, z] in world coordinates
-  height: number; // Height variant in meters
-  rotation?: number; // Additional rotation in radians (applied after line rotation) - kept for backward compatibility
-  // Track modifications
+
+  // Single-point elements (doors, columns, etc.) - position-based
+  posX?: number;
+  posY?: number;
+  posZ?: number;
+  rotationX?: number;
+  rotationY?: number;
+  rotationZ?: number;
+  width?: number;   // For single-point elements
+  height?: number;  // Used by both types
+  depth?: number;   // For single-point elements
+
+  // Two-point elements (glazing, partitions, walls) - start/end point based
+  startPoint?: [number, number, number]; // [x, y, z] in world coordinates
+  endPoint?: [number, number, number];   // [x, y, z] in world coordinates
+  rotation?: number; // Additional rotation in radians - kept for backward compatibility
+
+  // Original values for single-point elements
+  originalPosX?: number;
+  originalPosY?: number;
+  originalPosZ?: number;
+  originalRotationX?: number;
+  originalRotationY?: number;
+  originalRotationZ?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  originalDepth?: number;
+
+  // Original values for two-point elements
   originalStartPoint?: [number, number, number];
   originalEndPoint?: [number, number, number];
-  originalHeight?: number;
   originalRotation?: number;
+
+  // Modification tracking
   wasMoved?: boolean;
   wasRotated?: boolean;
-  wasHeightChanged?: boolean;
+  wasHeightChanged?: boolean; // Used for two-point elements
+  wasResized?: boolean;       // Used for single-point elements
+
+  // Custom properties (extensible per element type)
+  customProperties?: Record<string, any>;
 }
 
 
@@ -281,7 +388,7 @@ export function ThreeDViewerModifier() {
   const [architecturalObjects, setArchitecturalObjects] = useState<ArchitecturalObject[]>([]);
   const [addObjectModalOpen, setAddObjectModalOpen] = useState(false);
   const [isAddingObject, setIsAddingObject] = useState(false);
-  const [currentObjectType, setCurrentObjectType] = useState<'glazing' | 'partition' | null>(null);
+  const [currentObjectType, setCurrentObjectType] = useState<ArchitecturalObjectType | null>(null);
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
   const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
@@ -661,7 +768,7 @@ export function ThreeDViewerModifier() {
   }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
 
   // Handler for object type selection from modal
-  const handleObjectTypeSelect = useCallback((objectType: 'glazing' | 'partition') => {
+  const handleObjectTypeSelect = useCallback((objectType: ArchitecturalObjectType) => {
     setCurrentObjectType(objectType);
     setIsAddingObject(true);
     setObjectPlacementPoint(null); // Reset placement point
@@ -679,57 +786,169 @@ export function ThreeDViewerModifier() {
     // Force placement at ground level (y = 0)
     const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
 
-    if (objectPlacementPoint === null) {
-      // First click - set start point at ground level
-      setObjectPlacementPoint(groundLevelPoint);
-    } else {
-      // Second click - create object with start and end points at ground level
+    // Check if this is a single-point element (doors)
+    const isSinglePoint = currentObjectType === 'entrance_door' || currentObjectType === 'exit_door';
+
+    if (isSinglePoint) {
+      // Single-point placement - create immediately on first click
+      const defaultDimensions = currentObjectType === 'entrance_door'
+        ? { width: 1.5, height: 3.0, depth: 0.1 }
+        : { width: 1.0, height: 2.5, depth: 0.1 };
+
+      // Default block names for doors
+      const defaultBlockName = currentObjectType === 'entrance_door'
+        ? '1500 DOUBLE GLAZING 2'  // Default entrance door block name
+        : 'FIRE EXIT';  // Default exit door block name
+
+      // Coordinate mapping: groundLevelPoint is [x, y, z] in Three.js world (y=0 is ground)
+      // DoorGLB renders with position [posX, posZ, -posY], so we need to reverse this:
+      // - posX = Three.js X (horizontal)
+      // - posY = -(Three.js Z) (depth, negated)
+      // - posZ = Three.js Y (height/up)
       const newObject: ArchitecturalObject = {
-        id: `${currentObjectType}-${Date.now()}-${Math.random()}`,
+        id: `${currentObjectType}_${currentFloor}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: currentObjectType,
+        variant: defaultBlockName,  // Set default variant/block name
         floorIndex: currentFloor,
-        startPoint: objectPlacementPoint,
-        endPoint: groundLevelPoint,
-        height: objectHeight,
-        rotation: 0,
+        posX: groundLevelPoint[0],      // X stays same
+        posY: -groundLevelPoint[2],     // 3D Z -> CSV Y (negated)
+        posZ: groundLevelPoint[1],      // 3D Y (0 for ground) -> CSV Z
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
+        width: defaultDimensions.width,
+        height: defaultDimensions.height,
+        depth: defaultDimensions.depth,
         // Store original values
-        originalStartPoint: objectPlacementPoint,
-        originalEndPoint: groundLevelPoint,
-        originalHeight: objectHeight,
-        originalRotation: 0,
+        originalPosX: groundLevelPoint[0],
+        originalPosY: -groundLevelPoint[2],
+        originalPosZ: groundLevelPoint[1],
+        originalRotationX: 0,
+        originalRotationY: 0,
+        originalRotationZ: 0,
+        originalWidth: defaultDimensions.width,
+        originalHeight: defaultDimensions.height,
+        originalDepth: defaultDimensions.depth,
         wasMoved: false,
         wasRotated: false,
-        wasHeightChanged: false
+        wasResized: false,
+        customProperties: {
+          doorType: currentObjectType === 'entrance_door' ? 'entrance' : 'exit'
+        }
       };
 
-      // Add the new object to the list
-      setArchitecturalObjects(prev => [...prev, newObject]);
+      // Fetch GLB URL for the default block name and add the object
+      loadFixtureGLBs([defaultBlockName]).then(glbUrlMap => {
+        const glbUrl = glbUrlMap.get(defaultBlockName);
 
-      // Set flag to prevent onPointerMissed from clearing selection
-      justCreatedObjectRef.current = true;
+        const objectWithGlb: ArchitecturalObject = {
+          ...newObject,
+          customProperties: {
+            ...newObject.customProperties,
+            glbUrl: glbUrl
+          }
+        };
 
-      // Use setTimeout to ensure state updates are processed before selection
-      setTimeout(() => {
-        console.log('Selecting newly created object:', newObject.id, newObject.type);
+        console.log(`[3DViewerModifier] Creating new door with GLB URL:`, {
+          type: currentObjectType,
+          variant: defaultBlockName,
+          hasGlbUrl: !!glbUrl
+        });
+
+        setArchitecturalObjects(prev => [...prev, objectWithGlb]);
+
+        // Set flag to prevent onPointerMissed from clearing selection
+        justCreatedObjectRef.current = true;
 
         // Select the newly created object
-        setSelectedObject(newObject);
-
-        // Clear fixture selections
-        setSelectedLocation(null);
-        setSelectedLocations([]);
-        setSelectedFloorPlate(null);
-
-        // Reset the flag after a short delay to allow normal behavior again
         setTimeout(() => {
-          justCreatedObjectRef.current = false;
-        }, 100);
-      }, 0);
+          console.log('Selecting newly created door:', objectWithGlb.id, objectWithGlb.type);
+          setSelectedObject(objectWithGlb);
+          setSelectedLocation(null);
+          setSelectedLocations([]);
+          setSelectedFloorPlate(null);
 
-      // Reset placement state
+          setTimeout(() => {
+            justCreatedObjectRef.current = false;
+          }, 100);
+        }, 0);
+      }).catch(err => {
+        console.error(`[3DViewerModifier] Failed to fetch GLB URL for ${defaultBlockName}:`, err);
+
+        // Add object without GLB as fallback
+        setArchitecturalObjects(prev => [...prev, newObject]);
+
+        // Set flag to prevent onPointerMissed from clearing selection
+        justCreatedObjectRef.current = true;
+
+        // Select the newly created object
+        setTimeout(() => {
+          console.log('Selecting newly created door:', newObject.id, newObject.type);
+          setSelectedObject(newObject);
+          setSelectedLocation(null);
+          setSelectedLocations([]);
+          setSelectedFloorPlate(null);
+
+          setTimeout(() => {
+            justCreatedObjectRef.current = false;
+          }, 100);
+        }, 0);
+      });
+
+      // Reset placement state immediately for single-point elements
       setIsAddingObject(false);
       setCurrentObjectType(null);
       setObjectPlacementPoint(null);
+
+    } else {
+      // Two-point placement for glazing, partition, etc.
+      if (objectPlacementPoint === null) {
+        // First click - set start point at ground level
+        setObjectPlacementPoint(groundLevelPoint);
+      } else {
+        // Second click - create object with start and end points at ground level
+        const newObject: ArchitecturalObject = {
+          id: `${currentObjectType}_${currentFloor}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          type: currentObjectType,
+          floorIndex: currentFloor,
+          startPoint: objectPlacementPoint,
+          endPoint: groundLevelPoint,
+          height: objectHeight,
+          rotation: 0,
+          // Store original values
+          originalStartPoint: objectPlacementPoint,
+          originalEndPoint: groundLevelPoint,
+          originalHeight: objectHeight,
+          originalRotation: 0,
+          wasMoved: false,
+          wasRotated: false,
+          wasHeightChanged: false
+        };
+
+        // Add the new object to the list
+        setArchitecturalObjects(prev => [...prev, newObject]);
+
+        // Set flag to prevent onPointerMissed from clearing selection
+        justCreatedObjectRef.current = true;
+
+        // Select the newly created object
+        setTimeout(() => {
+          console.log('Selecting newly created object:', newObject.id, newObject.type);
+          setSelectedObject(newObject);
+          setSelectedLocation(null);
+          setSelectedLocations([]);
+          setSelectedFloorPlate(null);
+
+          setTimeout(() => {
+            justCreatedObjectRef.current = false;
+          }, 100);
+        }, 0);
+
+        // Reset placement state
+        setIsAddingObject(false);
+        setCurrentObjectType(null);
+        setObjectPlacementPoint(null);
+      }
     }
   }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
 
@@ -774,11 +993,30 @@ export function ThreeDViewerModifier() {
   const handleObjectPositionChange = useCallback((object: ArchitecturalObject, newCenterPosition: [number, number, number]) => {
     setArchitecturalObjects(prev => prev.map(obj => {
       if (obj.id === object.id) {
-        // Calculate offset from original center (origin is now at ground level)
+        // Check if this is a single-point element (doors)
+        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+
+        if (isSinglePoint) {
+          // For single-point elements: Convert Three.js position to CSV coordinates
+          // Three.js: [x, y, z] where y is up
+          // CSV: posX=x, posY=-z, posZ=y
+          return {
+            ...obj,
+            posX: newCenterPosition[0],
+            posZ: newCenterPosition[1], // Three.js Y -> CSV Z
+            posY: -newCenterPosition[2], // Three.js Z -> CSV Y (negated)
+            wasMoved: true,
+            originalPosX: obj.originalPosX ?? obj.posX,
+            originalPosY: obj.originalPosY ?? obj.posY,
+            originalPosZ: obj.originalPosZ ?? obj.posZ
+          };
+        }
+
+        // For two-point elements: Calculate offset from original center
         const originalCenter: [number, number, number] = [
-          (obj.startPoint[0] + obj.endPoint[0]) / 2,
-          obj.startPoint[1],  // Ground level (y coordinate of start/end points)
-          (obj.startPoint[2] + obj.endPoint[2]) / 2
+          (obj.startPoint![0] + obj.endPoint![0]) / 2,
+          obj.startPoint![1],  // Ground level (y coordinate of start/end points)
+          (obj.startPoint![2] + obj.endPoint![2]) / 2
         ];
 
         // Force Y to stay at ground level (0), only allow X and Z movement
@@ -790,15 +1028,15 @@ export function ThreeDViewerModifier() {
 
         // Apply offset to both start and end points (Y remains at 0)
         const newStartPoint: [number, number, number] = [
-          obj.startPoint[0] + offset[0],
+          obj.startPoint![0] + offset[0],
           0,  // Force ground level
-          obj.startPoint[2] + offset[2]
+          obj.startPoint![2] + offset[2]
         ];
 
         const newEndPoint: [number, number, number] = [
-          obj.endPoint[0] + offset[0],
+          obj.endPoint![0] + offset[0],
           0,  // Force ground level
-          obj.endPoint[2] + offset[2]
+          obj.endPoint![2] + offset[2]
         ];
 
         return {
@@ -817,10 +1055,28 @@ export function ThreeDViewerModifier() {
     if (selectedObject?.id === object.id) {
       setSelectedObject(prev => {
         if (!prev) return null;
+
+        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
+
+        if (isSinglePoint) {
+          // For single-point elements
+          return {
+            ...prev,
+            posX: newCenterPosition[0],
+            posZ: newCenterPosition[1],
+            posY: -newCenterPosition[2],
+            wasMoved: true,
+            originalPosX: prev.originalPosX ?? prev.posX,
+            originalPosY: prev.originalPosY ?? prev.posY,
+            originalPosZ: prev.originalPosZ ?? prev.posZ
+          };
+        }
+
+        // For two-point elements
         const originalCenter: [number, number, number] = [
-          (prev.startPoint[0] + prev.endPoint[0]) / 2,
-          prev.startPoint[1],  // Ground level
-          (prev.startPoint[2] + prev.endPoint[2]) / 2
+          (prev.startPoint![0] + prev.endPoint![0]) / 2,
+          prev.startPoint![1],  // Ground level
+          (prev.startPoint![2] + prev.endPoint![2]) / 2
         ];
 
         const offset: [number, number, number] = [
@@ -832,14 +1088,14 @@ export function ThreeDViewerModifier() {
         return {
           ...prev,
           startPoint: [
-            prev.startPoint[0] + offset[0],
-            prev.startPoint[1] + offset[1],
-            prev.startPoint[2] + offset[2]
+            prev.startPoint![0] + offset[0],
+            prev.startPoint![1] + offset[1],
+            prev.startPoint![2] + offset[2]
           ],
           endPoint: [
-            prev.endPoint[0] + offset[0],
-            prev.endPoint[1] + offset[1],
-            prev.endPoint[2] + offset[2]
+            prev.endPoint![0] + offset[0],
+            prev.endPoint![1] + offset[1],
+            prev.endPoint![2] + offset[2]
           ],
           wasMoved: true,
           originalStartPoint: prev.originalStartPoint || prev.startPoint,
@@ -853,23 +1109,55 @@ export function ThreeDViewerModifier() {
   const handleObjectRotate = useCallback((object: ArchitecturalObject, angle: number) => {
     setArchitecturalObjects(prev => prev.map(obj => {
       if (obj.id === object.id) {
-        return {
-          ...obj,
-          rotation: (obj.rotation || 0) + angle,
-          wasRotated: true,
-          originalRotation: obj.originalRotation ?? (obj.rotation || 0)
-        };
+        // Check if this is a single-point element (doors)
+        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+
+        if (isSinglePoint) {
+          // For single-point elements: angle is in radians, convert to degrees and update rotationZ
+          // rotationZ in CSV corresponds to Three.js Y-axis (vertical/up axis)
+          const angleInDegrees = (angle * 180) / Math.PI;
+          return {
+            ...obj,
+            rotationZ: (obj.rotationZ || 0) + angleInDegrees,
+            wasRotated: true,
+            originalRotationZ: obj.originalRotationZ ?? (obj.rotationZ || 0)
+          };
+        } else {
+          // For two-point elements: update rotation (in radians)
+          return {
+            ...obj,
+            rotation: (obj.rotation || 0) + angle,
+            wasRotated: true,
+            originalRotation: obj.originalRotation ?? (obj.rotation || 0)
+          };
+        }
       }
       return obj;
     }));
 
     if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => prev ? {
-        ...prev,
-        rotation: (prev.rotation || 0) + angle,
-        wasRotated: true,
-        originalRotation: prev.originalRotation ?? (prev.rotation || 0)
-      } : null);
+      setSelectedObject(prev => {
+        if (!prev) return null;
+
+        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
+
+        if (isSinglePoint) {
+          const angleInDegrees = (angle * 180) / Math.PI;
+          return {
+            ...prev,
+            rotationZ: (prev.rotationZ || 0) + angleInDegrees,
+            wasRotated: true,
+            originalRotationZ: prev.originalRotationZ ?? (prev.rotationZ || 0)
+          };
+        } else {
+          return {
+            ...prev,
+            rotation: (prev.rotation || 0) + angle,
+            wasRotated: true,
+            originalRotation: prev.originalRotation ?? (prev.rotation || 0)
+          };
+        }
+      });
     }
   }, [selectedObject]);
 
@@ -893,6 +1181,38 @@ export function ThreeDViewerModifier() {
         height: newHeight,
         wasHeightChanged: true,
         originalHeight: prev.originalHeight ?? prev.height
+      } : null);
+    }
+  }, [selectedObject]);
+
+  // Handler for single-point position change (for doors, columns, etc.)
+  const handleSinglePointPositionChange = useCallback((object: ArchitecturalObject, newPosX: number, newPosY: number, newPosZ: number) => {
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          posX: newPosX,
+          posY: newPosY,
+          posZ: newPosZ,
+          wasMoved: true,
+          originalPosX: obj.originalPosX ?? obj.posX,
+          originalPosY: obj.originalPosY ?? obj.posY,
+          originalPosZ: obj.originalPosZ ?? obj.posZ
+        };
+      }
+      return obj;
+    }));
+
+    if (selectedObject?.id === object.id) {
+      setSelectedObject(prev => prev ? {
+        ...prev,
+        posX: newPosX,
+        posY: newPosY,
+        posZ: newPosZ,
+        wasMoved: true,
+        originalPosX: prev.originalPosX ?? prev.posX,
+        originalPosY: prev.originalPosY ?? prev.posY,
+        originalPosZ: prev.originalPosZ ?? prev.posZ
       } : null);
     }
   }, [selectedObject]);
@@ -935,31 +1255,78 @@ export function ThreeDViewerModifier() {
   const handleObjectReset = useCallback((object: ArchitecturalObject) => {
     setArchitecturalObjects(prev => prev.map(obj => {
       if (obj.id === object.id) {
-        return {
-          ...obj,
-          startPoint: obj.originalStartPoint || obj.startPoint,
-          endPoint: obj.originalEndPoint || obj.endPoint,
-          height: obj.originalHeight ?? obj.height,
-          rotation: obj.originalRotation ?? obj.rotation ?? 0,
-          wasMoved: false,
-          wasRotated: false,
-          wasHeightChanged: false
-        };
+        // Check if this is a single-point element (doors)
+        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+
+        if (isSinglePoint) {
+          // Reset single-point element properties
+          return {
+            ...obj,
+            posX: obj.originalPosX ?? obj.posX,
+            posY: obj.originalPosY ?? obj.posY,
+            posZ: obj.originalPosZ ?? obj.posZ,
+            rotationX: obj.originalRotationX ?? obj.rotationX ?? 0,
+            rotationY: obj.originalRotationY ?? obj.rotationY ?? 0,
+            rotationZ: obj.originalRotationZ ?? obj.rotationZ ?? 0,
+            width: obj.originalWidth ?? obj.width,
+            height: obj.originalHeight ?? obj.height,
+            depth: obj.originalDepth ?? obj.depth,
+            wasMoved: false,
+            wasRotated: false,
+            wasResized: false
+          };
+        } else {
+          // Reset two-point element properties
+          return {
+            ...obj,
+            startPoint: obj.originalStartPoint || obj.startPoint,
+            endPoint: obj.originalEndPoint || obj.endPoint,
+            height: obj.originalHeight ?? obj.height,
+            rotation: obj.originalRotation ?? obj.rotation ?? 0,
+            wasMoved: false,
+            wasRotated: false,
+            wasHeightChanged: false
+          };
+        }
       }
       return obj;
     }));
 
     if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => prev ? {
-        ...prev,
-        startPoint: prev.originalStartPoint || prev.startPoint,
-        endPoint: prev.originalEndPoint || prev.endPoint,
-        height: prev.originalHeight ?? prev.height,
-        rotation: prev.originalRotation ?? prev.rotation ?? 0,
-        wasMoved: false,
-        wasRotated: false,
-        wasHeightChanged: false
-      } : null);
+      setSelectedObject(prev => {
+        if (!prev) return null;
+
+        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
+
+        if (isSinglePoint) {
+          return {
+            ...prev,
+            posX: prev.originalPosX ?? prev.posX,
+            posY: prev.originalPosY ?? prev.posY,
+            posZ: prev.originalPosZ ?? prev.posZ,
+            rotationX: prev.originalRotationX ?? prev.rotationX ?? 0,
+            rotationY: prev.originalRotationY ?? prev.rotationY ?? 0,
+            rotationZ: prev.originalRotationZ ?? prev.rotationZ ?? 0,
+            width: prev.originalWidth ?? prev.width,
+            height: prev.originalHeight ?? prev.height,
+            depth: prev.originalDepth ?? prev.depth,
+            wasMoved: false,
+            wasRotated: false,
+            wasResized: false
+          };
+        } else {
+          return {
+            ...prev,
+            startPoint: prev.originalStartPoint || prev.startPoint,
+            endPoint: prev.originalEndPoint || prev.endPoint,
+            height: prev.originalHeight ?? prev.height,
+            rotation: prev.originalRotation ?? prev.rotation ?? 0,
+            wasMoved: false,
+            wasRotated: false,
+            wasHeightChanged: false
+          };
+        }
+      });
     }
   }, [selectedObject]);
 
@@ -1107,6 +1474,11 @@ export function ThreeDViewerModifier() {
 
       for (const obj of currentFloorObjects) {
         const { startPoint, endPoint, height } = obj;
+
+        // Skip objects without required properties (two-point elements)
+        if (!startPoint || !endPoint || height === undefined) {
+          continue;
+        }
 
         // Calculate dimensions and position
         const dx = endPoint[0] - startPoint[0];
@@ -1261,7 +1633,8 @@ const createStoreConfigJSON = useCallback(async (
   workingLocationData: LocationData[],
   workingExtractedFiles: ExtractedFile[],
   currentSpawnPoints: Map<number, [number, number, number]>,
-  currentFloorNames: Map<number, string>
+  currentFloorNames: Map<number, string>,
+  currentArchitecturalObjects: ArchitecturalObject[]
 ): Promise<string> => {
   log('Generating store config JSON...');
 
@@ -1273,6 +1646,7 @@ const createStoreConfigJSON = useCallback(async (
   let existingFloorData: Record<number, { name: string; spawn_point: number[] }> = {};
   let existingBlockFixtureTypes: Record<string, string> = {};
   let existingFixtureTypeUrls: Record<string, string> = {};
+  let existingArchitecturalElements: ArchitecturalObject[] = [];
 
   if (existingConfigFile) {
     try {
@@ -1302,6 +1676,12 @@ const createStoreConfigJSON = useCallback(async (
       if (existingConfig.fixture_type_glb_urls && typeof existingConfig.fixture_type_glb_urls === 'object') {
         existingFixtureTypeUrls = { ...existingConfig.fixture_type_glb_urls };
         log('Preserved fixture_type_glb_urls from existing config:', existingFixtureTypeUrls);
+      }
+
+      // Preserve architectural elements (will be overwritten by currentArchitecturalObjects)
+      if (existingConfig.architectural_elements && Array.isArray(existingConfig.architectural_elements)) {
+        existingArchitecturalElements = existingConfig.architectural_elements;
+        log('Found architectural elements in existing config:', existingArchitecturalElements.length);
       }
     } catch (error) {
       console.warn('Failed to parse existing store-config.json, using defaults:', error);
@@ -1437,10 +1817,11 @@ const createStoreConfigJSON = useCallback(async (
     floor: floors,
     block_fixture_types: blockFixtureTypes,
     fixture_type_glb_urls: fixtureTypeGlbUrls,
-    additional_block_fixture_type: directRenderTypes
+    additional_block_fixture_type: directRenderTypes,
+    architectural_elements: currentArchitecturalObjects // Store architectural elements in config
   };
 
-  log('Store config generated with', floors.length, 'floors');
+  log('Store config generated with', floors.length, 'floors and', currentArchitecturalObjects.length, 'architectural elements');
   return JSON.stringify(config, null, 2);
 }, []);
 
@@ -1472,11 +1853,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     log('Extracted files:', workingExtractedFiles.map(f => f.name));
 
-    // Find floors with architectural objects
-    const floorsWithObjects = new Set(architecturalObjects.map(obj => obj.floorIndex));
-    log('Floors with architectural objects:', Array.from(floorsWithObjects));
-
-    // Add all original files except the CSVs that need to be modified, GLBs with architectural objects, and store-config.json
+    // Add all original files except the CSVs that need to be modified and store-config.json
+    // NOTE: Architectural elements are stored in store-config.json (not CSV or GLB)
     for (const file of workingExtractedFiles) {
       if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
         log('Skipping original CSV in bundle:', file.name);
@@ -1489,16 +1867,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         continue;
       }
 
-      // Check if this is a floor GLB that has architectural objects
-      const floorMatch = file.name.match(/floor[_-]?(\d+)/i);
-      if (floorMatch && !isShatteredFloorPlateFile(file.name)) {
-        const floorNum = parseInt(floorMatch[1]);
-        if (floorsWithObjects.has(floorNum)) {
-          log('Skipping floor GLB (will regenerate with objects):', file.name);
-          continue;
-        }
-      }
-
+      // Add all other files including floor GLBs (without architectural elements baked in)
       zip.file(file.name, file.blob);
     }
 
@@ -1516,180 +1885,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       }
     }
 
-    // Export GLB files with architectural objects
-    if (floorsWithObjects.size > 0) {
-      log('Exporting floors with architectural objects...');
-      const loader = new GLTFLoader();
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-      loader.setDRACOLoader(dracoLoader);
+    // NOTE: Architectural elements are saved in store-config.json (see below)
+    // They are NOT baked into GLB files, allowing them to remain editable
 
-      for (const floorNum of floorsWithObjects) {
-        // Find the floor file
-        const floorFile = workingExtractedFiles.find(file => {
-          const match = file.name.match(/floor[_-]?(\d+)/i);
-          return match && parseInt(match[1]) === floorNum && !isShatteredFloorPlateFile(file.name);
-        });
-
-        if (!floorFile) {
-          log('Floor file not found for floor:', floorNum);
-          continue;
-        }
-
-        log('Exporting floor with objects:', floorFile.name);
-
-        try {
-          // Create a new scene to combine floor + fixtures + objects
-          const exportScene = new THREE.Scene();
-
-          // Load the floor model
-          const floorGLTF = await new Promise<GLTF>((resolve, reject) => {
-            loader.load(floorFile.url, resolve, undefined, reject);
-          });
-          const floorModel = floorGLTF.scene.clone();
-          exportScene.add(floorModel);
-
-          // Add architectural objects for this floor (fixtures are NOT exported, only objects)
-          const floorObjects = architecturalObjects.filter(obj => obj.floorIndex === floorNum);
-
-          // Create shared materials for each object type (reused across all objects)
-          const glazingMaterial = new THREE.MeshStandardMaterial({
-            color: 0x88ccff,
-            transparent: true,
-            opacity: 0.6,
-            side: THREE.DoubleSide
-          });
-
-          const frameMaterial = new THREE.MeshStandardMaterial({
-            color: 0x444444, // Dark grey metal
-            metalness: 0.8,
-            roughness: 0.2
-          });
-
-          const partitionMaterial = new THREE.MeshStandardMaterial({
-            color: 0xcccccc
-          });
-
-          // Count objects by type for naming
-          const glazingCount = { count: 0 };
-          const partitionCount = { count: 0 };
-
-          for (const obj of floorObjects) {
-            const { startPoint, endPoint, height } = obj;
-
-            const dx = endPoint[0] - startPoint[0];
-            const dz = endPoint[2] - startPoint[2];
-            const length = Math.sqrt(dx * dx + dz * dz);
-            const angle = Math.atan2(-dz, dx);
-
-            const position = new THREE.Vector3(
-              (startPoint[0] + endPoint[0]) / 2,
-              startPoint[1],
-              (startPoint[2] + endPoint[2]) / 2
-            );
-
-            let objectName: string;
-            const objectGroup = new THREE.Group();
-            objectGroup.position.copy(position);
-            objectGroup.rotation.set(0, angle, 0);
-
-            if (obj.type === 'glazing') {
-              glazingCount.count++;
-              objectName = `glazing_${glazingCount.count}`;
-              objectGroup.name = objectName;
-
-              // Create glass plane
-              const glassGeometry = new THREE.PlaneGeometry(length, height);
-              const glassMesh = new THREE.Mesh(glassGeometry, glazingMaterial);
-              glassMesh.name = `${objectName}_glass`;
-              glassMesh.position.set(0, height / 2, 0);
-              objectGroup.add(glassMesh);
-
-              // Add metal frame around the glass (50mm thickness, 100mm depth)
-              const frameThickness = 0.05; // 50mm
-              const frameDepth = 0.1; // 100mm
-
-              // Top frame
-              const topFrame = new THREE.Mesh(
-                new THREE.BoxGeometry(length, frameThickness, frameDepth),
-                frameMaterial
-              );
-              topFrame.name = `${objectName}_frame_top`;
-              topFrame.position.set(0, height - frameThickness / 2, 0);
-              objectGroup.add(topFrame);
-
-              // Bottom frame
-              const bottomFrame = new THREE.Mesh(
-                new THREE.BoxGeometry(length, frameThickness, frameDepth),
-                frameMaterial
-              );
-              bottomFrame.name = `${objectName}_frame_bottom`;
-              bottomFrame.position.set(0, frameThickness / 2, 0);
-              objectGroup.add(bottomFrame);
-
-              // Left frame
-              const leftFrame = new THREE.Mesh(
-                new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
-                frameMaterial
-              );
-              leftFrame.name = `${objectName}_frame_left`;
-              leftFrame.position.set(-length / 2 + frameThickness / 2, height / 2, 0);
-              objectGroup.add(leftFrame);
-
-              // Right frame
-              const rightFrame = new THREE.Mesh(
-                new THREE.BoxGeometry(frameThickness, height - 2 * frameThickness, frameDepth),
-                frameMaterial
-              );
-              rightFrame.name = `${objectName}_frame_right`;
-              rightFrame.position.set(length / 2 - frameThickness / 2, height / 2, 0);
-              objectGroup.add(rightFrame);
-            } else {
-              partitionCount.count++;
-              objectName = `partition_${partitionCount.count}`;
-              objectGroup.name = objectName;
-
-              const width = 0.06; // 60mm
-              const geometry = new THREE.BoxGeometry(length, height, width);
-              const mesh = new THREE.Mesh(geometry, partitionMaterial);
-              mesh.name = objectName;
-              mesh.position.set(0, height / 2, 0);
-              objectGroup.add(mesh);
-            }
-
-            exportScene.add(objectGroup);
-          }
-
-          // Export the combined scene as GLB
-          const exporter = new GLTFExporter();
-          const result = await new Promise<ArrayBuffer>((resolve, reject) => {
-            exporter.parse(
-              exportScene,
-              (gltf) => resolve(gltf as ArrayBuffer),
-              (error) => reject(error),
-              { binary: true }
-            );
-          });
-
-          // Add to zip
-          const blob = new Blob([result], { type: 'application/octet-stream' });
-          zip.file(floorFile.name, blob);
-          log('Exported floor GLB with objects:', floorFile.name);
-
-        } catch (error) {
-          console.error('Failed to export floor with objects:', floorFile.name, error);
-        }
-      }
-
-      dracoLoader.dispose();
-    }
-
-    // Generate and add store config JSON
+    // Generate and add store config JSON (includes architectural elements)
     try {
       log('Creating store config JSON...');
-      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames);
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames, architecturalObjects);
       zip.file('store-config.json', configJson);
-      log('Added store-config.json to ZIP');
+      log('Added store-config.json to ZIP with', architecturalObjects.length, 'architectural elements');
     } catch (error) {
       console.error('Failed to create store config JSON:', error);
       // If spawn point is missing, throw error to prevent saving
@@ -2944,6 +3148,83 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   }
                 });
               }
+
+              // Load architectural elements from config
+              if (config.architectural_elements && Array.isArray(config.architectural_elements)) {
+                console.log(`[3DViewerModifier] Loading ${config.architectural_elements.length} architectural elements from store-config.json`);
+
+                let elements = config.architectural_elements as ArchitecturalObject[];
+
+                // First, assign default variants to doors that don't have them
+                elements = elements.map(obj => {
+                  if ((obj.type === 'entrance_door' || obj.type === 'exit_door') && !obj.variant) {
+                    const defaultBlockName = obj.type === 'entrance_door'
+                      ? '1500 DOUBLE GLAZING 2'
+                      : 'FIRE EXIT';
+                    console.log(`[3DViewerModifier] Assigning default variant to ${obj.type}: ${defaultBlockName}`);
+                    return {
+                      ...obj,
+                      variant: defaultBlockName
+                    };
+                  }
+                  return obj;
+                });
+
+                // Check if any doors are missing GLB URLs
+                const doorsNeedingGlb = elements.filter(obj =>
+                  (obj.type === 'entrance_door' || obj.type === 'exit_door') &&
+                  !obj.customProperties?.glbUrl &&
+                  obj.variant // Now all doors should have variants
+                );
+
+                if (doorsNeedingGlb.length > 0) {
+                  console.log(`[3DViewerModifier] ${doorsNeedingGlb.length} doors missing GLB URLs, fetching from backend...`);
+
+                  // Get unique block names from doors
+                  const blockNames = [...new Set(doorsNeedingGlb.map(obj => obj.variant!))];
+
+                  // Fetch GLB URLs
+                  loadFixtureGLBs(blockNames).then(glbUrlMap => {
+                    console.log(`[3DViewerModifier] Received GLB URLs for block names:`, Array.from(glbUrlMap.keys()));
+
+                    // Update doors with GLB URLs
+                    const updatedElements = elements.map(obj => {
+                      if ((obj.type === 'entrance_door' || obj.type === 'exit_door') &&
+                          obj.variant &&
+                          !obj.customProperties?.glbUrl) {
+                        const glbUrl = glbUrlMap.get(obj.variant);
+                        if (glbUrl) {
+                          console.log(`[3DViewerModifier] Adding GLB URL for door ${obj.id} (${obj.variant}): ${glbUrl}`);
+                          return {
+                            ...obj,
+                            customProperties: {
+                              ...obj.customProperties,
+                              glbUrl: glbUrl
+                            }
+                          };
+                        } else {
+                          console.warn(`[3DViewerModifier] No GLB URL found for door variant: ${obj.variant}`);
+                        }
+                      }
+                      return obj;
+                    });
+
+                    console.log(`[3DViewerModifier] Updated architectural objects:`, updatedElements.map(obj => ({
+                      id: obj.id,
+                      type: obj.type,
+                      variant: obj.variant,
+                      hasGlbUrl: !!obj.customProperties?.glbUrl
+                    })));
+
+                    setArchitecturalObjects(updatedElements);
+                  }).catch(err => {
+                    console.error('[3DViewerModifier] Failed to fetch GLB URLs for doors:', err);
+                    setArchitecturalObjects(elements);
+                  });
+                } else {
+                  setArchitecturalObjects(elements);
+                }
+              }
             } catch (error) {
               console.warn('Failed to parse store-config.json for floor names and spawn points:', error);
             }
@@ -3021,7 +3302,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     const loadLocationData = async () => {
       if (isUnmountingRef.current) return; // Skip if unmounting
-      if (extractedFiles.length === 0) return;
+      if (extractedFiles.length === 0) {
+        // No extracted files yet - set fixtures loaded to unblock UI
+        setFixturesLoaded(true);
+        return;
+      }
 
       try {
         // Find the location-master.csv file in extracted files
@@ -3030,18 +3315,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         if (!csvFile) {
           console.warn('location-master.csv not found in extracted files');
           console.log('Available files:', extractedFiles.map(f => f.name));
+          setFixturesLoaded(true); // Unblock UI even without CSV
           return;
         }
 
         // Verify the CSV file URL is valid
         if (!csvFile.url || csvFile.url === '') {
           console.warn('Invalid CSV file URL');
+          setFixturesLoaded(true); // Unblock UI even with invalid URL
           return;
         }
 
         const response = await fetch(csvFile.url, { signal: abortController.signal });
         if (!response.ok) {
           console.warn(`Failed to fetch CSV file: ${response.status} ${response.statusText}`);
+          setFixturesLoaded(true); // Unblock UI even with failed fetch
           return;
         }
         const csvText = await response.text();
@@ -3113,24 +3401,48 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             data.push(locationItem);
           }
         }
-        
-        // Load GLB URLs for fixtures that have block names (batch API call)
+
+        // Load GLB URLs for ALL fixtures first (including doors)
         const blockNames = data
           .filter(location => location.blockName && location.blockName.trim() !== '')
           .map(location => location.blockName);
-        
+
         let glbUrlMap = new Map<string, string>();
         if (blockNames.length > 0) {
           glbUrlMap = await loadFixtureGLBs(blockNames);
         }
-        
-        // Apply GLB URLs to location data
+
+        // Apply GLB URLs to all data
         const dataWithGLBs = data.map(location => {
           if (location.blockName && glbUrlMap.has(location.blockName)) {
             return { ...location, glbUrl: glbUrlMap.get(location.blockName) };
           }
           return location;
         });
+
+        // NOW migrate doors from fixtures to architectural elements (with GLB URLs)
+        const migratedDoors: ArchitecturalObject[] = [];
+        const nonDoorFixtures: LocationData[] = [];
+
+        dataWithGLBs.forEach(location => {
+          const doorCheck = isDoorBlockName(location.blockName);
+          if (doorCheck.isDoor && doorCheck.type) {
+            // Convert to architectural door element (now has glbUrl)
+            const doorElement = convertFixtureToDoor(location, doorCheck.type);
+            migratedDoors.push(doorElement);
+            console.log(`[Migration] Converted ${location.blockName} to ${doorCheck.type} at floor ${location.floorIndex}`, location.glbUrl ? '(with GLB)' : '(no GLB)');
+          } else {
+            // Keep as regular fixture
+            nonDoorFixtures.push(location);
+          }
+        });
+
+        if (migratedDoors.length > 0) {
+          console.log(`[Migration] Successfully migrated ${migratedDoors.length} doors to architectural elements`);
+        }
+
+        // Use non-door fixtures for final data
+        const finalDataWithGLBs = nonDoorFixtures;
 
         if (isUnmountingRef.current) return; // Skip setState if unmounting
 
@@ -3149,10 +3461,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             });
           }
 
-          // First time loading: use CSV data
-          const newData = [...dataWithGLBs];
+          // First time loading: use CSV data (without doors)
+          const newData = [...finalDataWithGLBs];
           return newData;
         });
+
+        // Add migrated doors to architectural objects (only on first load)
+        if (migratedDoors.length > 0) {
+          setArchitecturalObjects(prev => {
+            // Only add migrated doors if we don't already have them
+            if (prev.length === 0) {
+              return migratedDoors;
+            }
+            // If we already have architectural objects, preserve them
+            return prev;
+          });
+        }
 
         if (isUnmountingRef.current) return; // Skip setState if unmounting
 
@@ -3536,6 +3860,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onRotate={handleObjectRotate}
             onHeightChange={handleObjectHeightChange}
             onPositionChange={handleObjectPointsChange}
+            onSinglePointPositionChange={handleSinglePointPositionChange}
             onDelete={handleObjectDelete}
             onReset={handleObjectReset}
           />

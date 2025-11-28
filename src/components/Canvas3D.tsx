@@ -4,7 +4,26 @@ import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } fr
 import * as THREE from 'three';
 import type { ExtractedFile } from '../utils/zipUtils';
 import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
-import type { ArchitecturalObject } from './3DViewerModifier';
+import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
+
+// Common bounding box component for all fixtures and architectural objects
+interface BoundingBoxProps {
+  size: [number, number, number] | THREE.Vector3;
+  position: [number, number, number];
+  color: string;
+  renderOrder?: number;
+}
+
+function BoundingBox({ size, position, color, renderOrder = 999 }: BoundingBoxProps) {
+  const sizeArray = Array.isArray(size) ? size : [size.x, size.y, size.z];
+
+  return (
+    <lineSegments position={position} renderOrder={renderOrder}>
+      <edgesGeometry args={[new THREE.BoxGeometry(sizeArray[0], sizeArray[1], sizeArray[2])]} />
+      <lineBasicMaterial color={color} />
+    </lineSegments>
+  );
+}
 
 interface BillboardProps {
   children: React.ReactNode;
@@ -52,10 +71,12 @@ function LocationSphere({ location, color = "#ff6b6b", onClick, isSelected }: Lo
 
       {/* Red bounding box when selected */}
       {isSelected && (
-        <lineSegments renderOrder={999}>
-          <edgesGeometry args={[new THREE.BoxGeometry(0.5, 0.5, 0.5)]} />
-          <lineBasicMaterial color="red" />
-        </lineSegments>
+        <BoundingBox
+          size={[0.5, 0.5, 0.5]}
+          position={[0, 0, 0]}
+          color="red"
+          renderOrder={999}
+        />
       )}
     </group>
   );
@@ -225,37 +246,24 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           <meshBasicMaterial transparent opacity={0} />
         </mesh>
 
-        {/* Yellow edge outline for brand-modified or fixture-type-modified fixtures - use stack bounding box */}
-        {(location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged || location.wasSplit || location.wasMerged) && !isSelected && !location.wasMoved && !location.wasRotated && (
-          <lineSegments
+        {/* Purple edge outline for modified fixtures - use stack bounding box */}
+        {!isSelected && (location.wasMoved || location.wasRotated || location.wasBrandChanged || location.wasTypeChanged || location.wasCountChanged || location.wasHierarchyChanged || location.wasSplit || location.wasMerged) && (
+          <BoundingBox
+            size={stackBoundingBox.size as [number, number, number]}
             position={stackBoundingBox.center as [number, number, number]}
-            renderOrder={997}
-          >
-            <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
-            <lineBasicMaterial color="purple" />
-          </lineSegments>
-        )}
-
-        {/* Orange edge outline for moved/rotated fixtures - use stack bounding box */}
-        {(location.wasMoved || location.wasRotated) && !isSelected && (
-          <lineSegments
-            position={stackBoundingBox.center as [number, number, number]}
+            color="purple"
             renderOrder={998}
-          >
-            <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
-            <lineBasicMaterial color="purple" />
-          </lineSegments>
+          />
         )}
 
         {/* Red edge outline when selected - use stack bounding box */}
         {isSelected && (
-          <lineSegments
+          <BoundingBox
+            size={stackBoundingBox.size as [number, number, number]}
             position={stackBoundingBox.center as [number, number, number]}
+            color="red"
             renderOrder={999}
-          >
-            <edgesGeometry args={[new THREE.BoxGeometry(...stackBoundingBox.size)]} />
-            <lineBasicMaterial color="red" />
-          </lineSegments>
+          />
         )}
 
         {/* Fixture name label positioned 0.3m above bounding box */}
@@ -699,10 +707,136 @@ interface GlazingProps {
   onTransformEnd?: () => void;
 }
 
+// Door GLB component for rendering doors with their actual GLB models
+interface DoorGLBProps {
+  object: ArchitecturalObject;
+  glbUrl: string;
+  isSelected: boolean;
+  editMode?: boolean;
+  transformSpace?: 'world' | 'local';
+  onClick?: (obj: ArchitecturalObject, event?: any) => void;
+  onPositionChange?: (obj: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
+}
+
+function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: DoorGLBProps) {
+  const gltfResult = useGLTF(glbUrl);
+  const scene = gltfResult?.scene;
+  const groupRef = useRef<THREE.Group>(null);
+  const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
+
+  if (!scene) {
+    return null;
+  }
+
+  // Calculate bounding box from the actual GLB model
+  const bbox = new THREE.Box3().setFromObject(scene);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  bbox.getSize(size);
+  bbox.getCenter(center);
+
+  // Door uses posX, posY, posZ for position
+  const position: [number, number, number] = pendingPosition || [
+    object.posX || 0,
+    object.posZ || 0,  // Y and Z are swapped
+    -(object.posY || 0)
+  ];
+
+  // Convert rotations from degrees to radians
+  const rotationX = ((object.rotationX || 0) * Math.PI) / 180;
+  const rotationY = ((object.rotationY || 0) * Math.PI) / 180;
+  const rotationZ = ((object.rotationZ || 0) * Math.PI) / 180;
+
+  const handleTransformChange = () => {
+    // Store position locally during transform to avoid global state updates
+    if (groupRef.current) {
+      const newPosition = groupRef.current.position;
+      setPendingPosition([newPosition.x, newPosition.y, newPosition.z]);
+    }
+  };
+
+  const handleTransformEnd = () => {
+    if (pendingPosition && onPositionChange) {
+      // Pass the Three.js position directly - let the parent handler convert it
+      onPositionChange(object, pendingPosition);
+      setPendingPosition(null);
+    }
+
+    // Always delay clearing isTransforming flag to prevent onPointerMissed from clearing selection
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
+  };
+
+  return (
+    <>
+      <group
+        ref={groupRef}
+        position={position}
+        rotation={[rotationX, rotationZ, rotationY]}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.(object, event);
+        }}
+      >
+        <primitive object={scene.clone()} scale={[1, 1, 1]} />
+
+        {/* Transparent bounding box for clicking */}
+        <mesh position={[center.x, center.y, center.z]}>
+          <boxGeometry args={[size.x, size.y, size.z]} />
+          <meshBasicMaterial transparent opacity={0} />
+        </mesh>
+
+        {/* Purple edge outline for moved/rotated doors */}
+        {!isSelected && (object.wasMoved || object.wasRotated) && (
+          <BoundingBox
+            size={[size.x, size.y, size.z]}
+            position={[center.x, center.y, center.z]}
+            color="purple"
+            renderOrder={998}
+          />
+        )}
+
+        {/* Red edge outline when selected */}
+        {isSelected && (
+          <BoundingBox
+            size={[size.x, size.y, size.z]}
+            position={[center.x, center.y, center.z]}
+            color="red"
+            renderOrder={999}
+          />
+        )}
+      </group>
+
+      {/* Transform controls for editing mode - only show for selected object */}
+      {editMode && isSelected && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode="translate"
+          space={transformSpace}
+          showX={true}
+          showY={false}
+          showZ={true}
+          onObjectChange={handleTransformChange}
+          onMouseDown={onTransformStart}
+          onMouseUp={handleTransformEnd}
+        />
+      )}
+    </>
+  );
+}
+
 function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: GlazingProps) {
   const { startPoint, endPoint, height, rotation: additionalRotation } = object;
   const groupRef = useRef<THREE.Group>(null);
   const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
+
+  // Guard: Ensure required properties exist
+  if (!startPoint || !endPoint || height === undefined) {
+    return null;
+  }
 
   // Calculate position, rotation, and dimensions
   const dx = endPoint[0] - startPoint[0];
@@ -803,11 +937,15 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
           />
         </mesh>
 
-        {/* Edge outline */}
-        <lineSegments position={[0, height / 2, 0]}>
-          <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
-          <lineBasicMaterial color={isSelected ? "red" : (object.wasMoved || object.wasRotated || object.wasHeightChanged ? "purple" : "#0066cc")} linewidth={2} />
-        </lineSegments>
+        {/* Edge outline - red for selected, purple for modified, no default */}
+        {(isSelected || object.wasMoved || object.wasRotated || object.wasHeightChanged) && (
+          <BoundingBox
+            size={[length, height, frameDepth]}
+            position={[0, height / 2, 0]}
+            color={isSelected ? "red" : "purple"}
+            renderOrder={isSelected ? 999 : 998}
+          />
+        )}
       </group>
 
       {/* Transform controls for editing mode - only show for selected object */}
@@ -844,6 +982,11 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
   const { startPoint, endPoint, height, rotation: additionalRotation } = object;
   const groupRef = useRef<THREE.Group>(null);
   const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
+
+  // Guard: Ensure required properties exist
+  if (!startPoint || !endPoint || height === undefined) {
+    return null;
+  }
 
   // Calculate position, rotation, and dimensions
   const dx = endPoint[0] - startPoint[0];
@@ -894,11 +1037,15 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
           <boxGeometry args={[length, height, width]} />
           <meshStandardMaterial color={isSelected ? "#aaaaaa" : "#cccccc"} />
         </mesh>
-        {/* Edge outline */}
-        <lineSegments position={[0, height / 2, 0]}>
-          <edgesGeometry args={[new THREE.BoxGeometry(length, height, width)]} />
-          <lineBasicMaterial color={isSelected ? "red" : (object.wasMoved || object.wasRotated || object.wasHeightChanged ? "purple" : "#666666")} linewidth={2} />
-        </lineSegments>
+        {/* Edge outline - red for selected, purple for modified, no default */}
+        {(isSelected || object.wasMoved || object.wasRotated || object.wasHeightChanged) && (
+          <BoundingBox
+            size={[length, height, width]}
+            position={[0, height / 2, 0]}
+            color={isSelected ? "red" : "purple"}
+            renderOrder={isSelected ? 999 : 998}
+          />
+        )}
       </group>
 
       {/* Transform controls for editing mode - only show for selected object */}
@@ -1051,7 +1198,7 @@ interface Canvas3DProps {
   // Architectural objects props
   architecturalObjects?: ArchitecturalObject[];
   isAddingObject?: boolean;
-  currentObjectType?: 'glazing' | 'partition' | null;
+  currentObjectType?: ArchitecturalObjectType | null;
   objectPlacementPoint?: [number, number, number] | null;
   selectedObject?: ArchitecturalObject | null;
   onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
@@ -1251,7 +1398,7 @@ export function Canvas3D({
           ));
       })()}
 
-      {/* Render architectural objects (glazing and partitions) */}
+      {/* Render architectural objects */}
       {architecturalObjects.map(obj => {
         const fileForFloorExtraction = selectedFloorFile || selectedFile;
         const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
@@ -1262,31 +1409,95 @@ export function Canvas3D({
 
         const isSelected = selectedObject?.id === obj.id;
 
-        return obj.type === 'glazing' ? (
-          <Glazing
-            key={obj.id}
-            object={obj}
-            isSelected={isSelected}
-            editMode={editMode}
-            transformSpace={transformSpace}
-            onClick={onObjectClick}
-            onPositionChange={onObjectPositionChange}
-            onTransformStart={() => setIsTransforming(true)}
-            onTransformEnd={() => setIsTransforming(false)}
-          />
-        ) : (
-          <Partition
-            key={obj.id}
-            object={obj}
-            isSelected={isSelected}
-            editMode={editMode}
-            transformSpace={transformSpace}
-            onClick={onObjectClick}
-            onPositionChange={onObjectPositionChange}
-            onTransformStart={() => setIsTransforming(true)}
-            onTransformEnd={() => setIsTransforming(false)}
-          />
-        );
+        // Render based on object type
+        if (obj.type === 'glazing') {
+          return (
+            <Glazing
+              key={obj.id}
+              object={obj}
+              isSelected={isSelected}
+              editMode={editMode}
+              transformSpace={transformSpace}
+              onClick={onObjectClick}
+              onPositionChange={onObjectPositionChange}
+              onTransformStart={() => setIsTransforming(true)}
+              onTransformEnd={() => setIsTransforming(false)}
+            />
+          );
+        } else if (obj.type === 'partition') {
+          return (
+            <Partition
+              key={obj.id}
+              object={obj}
+              isSelected={isSelected}
+              editMode={editMode}
+              transformSpace={transformSpace}
+              onClick={onObjectClick}
+              onPositionChange={onObjectPositionChange}
+              onTransformStart={() => setIsTransforming(true)}
+              onTransformEnd={() => setIsTransforming(false)}
+            />
+          );
+        } else if (obj.type === 'entrance_door' || obj.type === 'exit_door') {
+          // Check if door has GLB URL
+          const glbUrl = obj.customProperties?.glbUrl;
+
+          if (glbUrl) {
+            // Render door using GLB file
+            return (
+              <DoorGLB
+                key={obj.id}
+                object={obj}
+                glbUrl={glbUrl}
+                isSelected={isSelected}
+                editMode={editMode}
+                transformSpace={transformSpace}
+                onClick={onObjectClick}
+                onPositionChange={onObjectPositionChange}
+                onTransformStart={() => setIsTransforming(true)}
+                onTransformEnd={() => setIsTransforming(false)}
+              />
+            );
+          } else {
+            // Fallback: render as simple box if no GLB
+            console.warn(`[Canvas3D] Door ${obj.id} (${obj.variant || 'unknown'}) has no GLB URL, using fallback box rendering`);
+            const width = obj.width || 1.5;
+            const height = obj.height || 3.0;
+            const depth = obj.depth || 0.1;
+            const doorColor = obj.type === 'entrance_door' ? '#8B4513' : '#DC143C';
+
+            return (
+              <group
+                key={obj.id}
+                position={[obj.posX || 0, (obj.posY || 0) + height / 2, obj.posZ || 0]}
+                rotation={[obj.rotationX || 0, obj.rotationY || 0, obj.rotationZ || 0]}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onObjectClick) {
+                    onObjectClick(obj);
+                  }
+                }}
+              >
+                <mesh>
+                  <boxGeometry args={[width, height, depth]} />
+                  <meshStandardMaterial color={doorColor} roughness={0.7} metalness={0.1} />
+                </mesh>
+                <mesh position={[width * 0.35, 0, depth / 2 + 0.05]}>
+                  <cylinderGeometry args={[0.02, 0.02, 0.15, 8]} />
+                  <meshStandardMaterial color="#C0C0C0" metalness={0.9} roughness={0.2} />
+                </mesh>
+                {isSelected && (
+                  <lineSegments>
+                    <edgesGeometry args={[new THREE.BoxGeometry(width * 1.1, height * 1.1, depth * 1.1)]} />
+                    <lineBasicMaterial color="#ff0000" linewidth={2} />
+                  </lineSegments>
+                )}
+              </group>
+            );
+          }
+        }
+
+        return null;
       })}
 
       {/* Preview line during object placement */}

@@ -10,6 +10,7 @@ interface ObjectInfoPanelProps {
   onRotate: (object: ArchitecturalObject, angle: number) => void;
   onHeightChange: (object: ArchitecturalObject, height: number) => void;
   onPositionChange?: (object: ArchitecturalObject, startPoint: [number, number, number], endPoint: [number, number, number]) => void;
+  onSinglePointPositionChange?: (object: ArchitecturalObject, posX: number, posY: number, posZ: number) => void;
   onDelete: (object: ArchitecturalObject) => void;
   onReset: (object: ArchitecturalObject) => void;
 }
@@ -21,6 +22,7 @@ export function ObjectInfoPanel({
   onRotate,
   onHeightChange,
   onPositionChange,
+  onSinglePointPositionChange,
   onDelete,
   onReset
 }: ObjectInfoPanelProps) {
@@ -51,27 +53,36 @@ export function ObjectInfoPanel({
 
   if (!selectedObject) return null;
 
-  const hasChanges = selectedObject.wasMoved || selectedObject.wasRotated || selectedObject.wasHeightChanged;
+  // Check if this is a single-point element (door, column, etc.)
+  const isSinglePoint = selectedObject.posX !== undefined && selectedObject.posY !== undefined && selectedObject.posZ !== undefined;
+  const isTwoPoint = selectedObject.startPoint !== undefined && selectedObject.endPoint !== undefined;
 
-  // Calculate length from start and end points
-  const dx = selectedObject.endPoint[0] - selectedObject.startPoint[0];
-  const dz = selectedObject.endPoint[2] - selectedObject.startPoint[2];
-  const length = Math.sqrt(dx * dx + dz * dz);
+  const hasChanges = selectedObject.wasMoved || selectedObject.wasRotated || (selectedObject.wasHeightChanged || selectedObject.wasResized);
 
-  // Calculate center position
-  const centerPosition: [number, number, number] = [
-    (selectedObject.startPoint[0] + selectedObject.endPoint[0]) / 2,
-    (selectedObject.startPoint[1] + selectedObject.endPoint[1]) / 2,
-    (selectedObject.startPoint[2] + selectedObject.endPoint[2]) / 2
-  ];
+  // For two-point elements: calculate length from start and end points
+  const dx = isTwoPoint ? (selectedObject.endPoint![0] - selectedObject.startPoint![0]) : 0;
+  const dz = isTwoPoint ? (selectedObject.endPoint![2] - selectedObject.startPoint![2]) : 0;
+  const length = isTwoPoint ? Math.sqrt(dx * dx + dz * dz) : 0;
 
-  const originalCenterPosition: [number, number, number] | undefined =
-    (selectedObject.originalStartPoint && selectedObject.originalEndPoint)
+  // Calculate position based on element type
+  const centerPosition: [number, number, number] = isTwoPoint
+    ? [
+        (selectedObject.startPoint![0] + selectedObject.endPoint![0]) / 2,
+        (selectedObject.startPoint![1] + selectedObject.endPoint![1]) / 2,
+        (selectedObject.startPoint![2] + selectedObject.endPoint![2]) / 2
+      ]
+    : [selectedObject.posX!, selectedObject.posY!, selectedObject.posZ!];
+
+  const originalCenterPosition: [number, number, number] | undefined = isTwoPoint
+    ? (selectedObject.originalStartPoint && selectedObject.originalEndPoint)
       ? [
           (selectedObject.originalStartPoint[0] + selectedObject.originalEndPoint[0]) / 2,
           (selectedObject.originalStartPoint[1] + selectedObject.originalEndPoint[1]) / 2,
           (selectedObject.originalStartPoint[2] + selectedObject.originalEndPoint[2]) / 2
         ]
+      : undefined
+    : (selectedObject.originalPosX !== undefined && selectedObject.originalPosY !== undefined && selectedObject.originalPosZ !== undefined)
+      ? [selectedObject.originalPosX, selectedObject.originalPosY, selectedObject.originalPosZ]
       : undefined;
 
   // Calculate rotation angle based on alignment from startPoint to endPoint
@@ -86,28 +97,35 @@ export function ObjectInfoPanel({
     return baseAngle + (additionalRotation * 180 / Math.PI);
   };
 
-  const currentRotation = calculateRotationAngle(
-    selectedObject.startPoint,
-    selectedObject.endPoint,
-    selectedObject.rotation || 0
-  );
+  // For single-point elements, use rotationZ (vertical axis); for two-point elements, calculate from start/end points
+  const currentRotation = isSinglePoint
+    ? (selectedObject.rotationZ || 0)
+    : calculateRotationAngle(
+        selectedObject.startPoint!,
+        selectedObject.endPoint!,
+        selectedObject.rotation || 0
+      );
 
-  const originalRotation = (selectedObject.wasRotated || selectedObject.wasMoved)
-    ? (() => {
-        const origStart = selectedObject.originalStartPoint || selectedObject.startPoint;
-        const origEnd = selectedObject.originalEndPoint || selectedObject.endPoint;
-        const origRot = selectedObject.originalRotation || 0;
-        return calculateRotationAngle(origStart, origEnd, origRot);
-      })()
-    : currentRotation;
+  const originalRotation = isSinglePoint
+    ? (selectedObject.originalRotationZ || selectedObject.rotationZ || 0)
+    : (selectedObject.wasRotated || selectedObject.wasMoved)
+      ? (() => {
+          const origStart = selectedObject.originalStartPoint || selectedObject.startPoint!;
+          const origEnd = selectedObject.originalEndPoint || selectedObject.endPoint!;
+          const origRot = selectedObject.originalRotation || 0;
+          return calculateRotationAngle(origStart, origEnd, origRot);
+        })()
+      : currentRotation;
 
   const hasHeightChanged = selectedObject.wasHeightChanged;
   const hasMoved = selectedObject.wasMoved;
   const hasRotated = selectedObject.wasRotated;
 
   const handleHeightEdit = () => {
-    setIsEditingHeight(true);
-    setHeightValue(selectedObject.height.toString());
+    if (selectedObject.height !== undefined) {
+      setIsEditingHeight(true);
+      setHeightValue(selectedObject.height.toString());
+    }
   };
 
   const handleHeightSave = () => {
@@ -140,15 +158,15 @@ export function ObjectInfoPanel({
 
   const handleLengthSave = () => {
     const newLength = parseFloat(lengthValue);
-    if (!isNaN(newLength) && newLength > 0 && onPositionChange) {
+    if (!isNaN(newLength) && newLength > 0 && onPositionChange && isTwoPoint) {
       // Calculate center point
-      const centerX = (selectedObject.startPoint[0] + selectedObject.endPoint[0]) / 2;
-      const centerY = (selectedObject.startPoint[1] + selectedObject.endPoint[1]) / 2;
-      const centerZ = (selectedObject.startPoint[2] + selectedObject.endPoint[2]) / 2;
+      const centerX = (selectedObject.startPoint![0] + selectedObject.endPoint![0]) / 2;
+      const centerY = (selectedObject.startPoint![1] + selectedObject.endPoint![1]) / 2;
+      const centerZ = (selectedObject.startPoint![2] + selectedObject.endPoint![2]) / 2;
 
       // Get current rotation angle (including additional rotation)
-      const dx = selectedObject.endPoint[0] - selectedObject.startPoint[0];
-      const dz = selectedObject.endPoint[2] - selectedObject.startPoint[2];
+      const dx = selectedObject.endPoint![0] - selectedObject.startPoint![0];
+      const dz = selectedObject.endPoint![2] - selectedObject.startPoint![2];
       const currentAngle = Math.atan2(-dz, dx) + (selectedObject.rotation || 0);
 
       // Calculate new start and end points with the new length
@@ -198,25 +216,31 @@ export function ObjectInfoPanel({
     const newCenterY = parseFloat(centerPositionValues.y);
     const newCenterZ = parseFloat(centerPositionValues.z);
 
-    if (!isNaN(newCenterX) && !isNaN(newCenterY) && !isNaN(newCenterZ) && onPositionChange) {
-      // Calculate offset from current center to new center
-      const offsetX = newCenterX - centerPosition[0];
-      const offsetY = newCenterY - centerPosition[1];
-      const offsetZ = newCenterZ - centerPosition[2];
+    if (!isNaN(newCenterX) && !isNaN(newCenterY) && !isNaN(newCenterZ)) {
+      if (isTwoPoint && onPositionChange) {
+        // For two-point elements: Calculate offset from current center to new center
+        const offsetX = newCenterX - centerPosition[0];
+        const offsetY = newCenterY - centerPosition[1];
+        const offsetZ = newCenterZ - centerPosition[2];
 
-      // Apply offset to both start and end points
-      const newStartPoint: [number, number, number] = [
-        selectedObject.startPoint[0] + offsetX,
-        selectedObject.startPoint[1] + offsetY,
-        selectedObject.startPoint[2] + offsetZ
-      ];
-      const newEndPoint: [number, number, number] = [
-        selectedObject.endPoint[0] + offsetX,
-        selectedObject.endPoint[1] + offsetY,
-        selectedObject.endPoint[2] + offsetZ
-      ];
+        // Apply offset to both start and end points
+        const newStartPoint: [number, number, number] = [
+          selectedObject.startPoint![0] + offsetX,
+          selectedObject.startPoint![1] + offsetY,
+          selectedObject.startPoint![2] + offsetZ
+        ];
+        const newEndPoint: [number, number, number] = [
+          selectedObject.endPoint![0] + offsetX,
+          selectedObject.endPoint![1] + offsetY,
+          selectedObject.endPoint![2] + offsetZ
+        ];
 
-      onPositionChange(selectedObject, newStartPoint, newEndPoint);
+        onPositionChange(selectedObject, newStartPoint, newEndPoint);
+      } else if (isSinglePoint && onSinglePointPositionChange) {
+        // For single-point elements: Update posX, posY, posZ directly
+        // Note: The input values are in the UI coordinate system (X, Y=depth, Z=height)
+        onSinglePointPositionChange(selectedObject, newCenterX, newCenterY, newCenterZ);
+      }
     }
     setIsEditingCenterPosition(false);
     setCenterPositionValues({ x: '', y: '', z: '' });
@@ -307,44 +331,65 @@ export function ObjectInfoPanel({
       </div>
 
       <div className="space-y-1 text-xs">
-        <div><span className="font-medium">Block:</span> {selectedObject.type === 'glazing' ? 'Glass' : 'Partition'}</div>
-        <div><span className="font-medium">Type:</span> {selectedObject.variant || (selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' : 'Partition (115mm Box)')}</div>
-
-        {/* Length */}
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="font-medium">Length:</span> {length.toFixed(3)}m
-          </div>
-          {editMode && (
-            <button
-              onClick={handleLengthEdit}
-              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
-              title="Edit length"
-            >
-              <Pencil className="h-3 w-3" />
-            </button>
-          )}
+        <div>
+          <span className="font-medium">Block:</span>{' '}
+          {selectedObject.type === 'glazing' ? 'Glass' :
+           selectedObject.type === 'partition' ? 'Partition' :
+           selectedObject.type === 'entrance_door' ? 'Entrance Door' :
+           selectedObject.type === 'exit_door' ? 'Exit Door' :
+           selectedObject.type}
+        </div>
+        <div>
+          <span className="font-medium">Type:</span>{' '}
+          {selectedObject.variant ||
+           (selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' :
+            selectedObject.type === 'partition' ? 'Partition (115mm Box)' :
+            selectedObject.type === 'entrance_door' ? 'Entrance (1.5m)' :
+            selectedObject.type === 'exit_door' ? 'Exit (1.0m)' :
+            'Custom')}
         </div>
 
-        {/* Height */}
-        <div className="flex items-center justify-between">
-          <div style={{ color: hasHeightChanged ? '#ef4444' : 'inherit' }}>
-            <span className="font-medium">Height:</span> {hasHeightChanged ? (selectedObject.originalHeight || selectedObject.height).toFixed(3) : selectedObject.height.toFixed(3)}m
+        {/* Length - only show for two-point elements */}
+        {isTwoPoint && (
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-medium">Length:</span> {length.toFixed(3)}m
+            </div>
+            {editMode && (
+              <button
+                onClick={handleLengthEdit}
+                className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                title="Edit length"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
           </div>
-          {editMode && (
-            <button
-              onClick={handleHeightEdit}
-              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
-              title="Edit height"
-            >
-              <Pencil className="h-3 w-3" />
-            </button>
-          )}
-        </div>
-        {hasHeightChanged && (
-          <div style={{ color: '#22c55e' }}>
-            <span className="font-medium">New Height:</span> {selectedObject.height.toFixed(3)}m
-          </div>
+        )}
+
+        {/* Height - hide for doors */}
+        {selectedObject.height !== undefined && selectedObject.type !== 'entrance_door' && selectedObject.type !== 'exit_door' && (
+          <>
+            <div className="flex items-center justify-between">
+              <div style={{ color: hasHeightChanged ? '#ef4444' : 'inherit' }}>
+                <span className="font-medium">Height:</span> {hasHeightChanged ? (selectedObject.originalHeight || selectedObject.height).toFixed(3) : selectedObject.height.toFixed(3)}m
+              </div>
+              {editMode && (
+                <button
+                  onClick={handleHeightEdit}
+                  className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+                  title="Edit height"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {hasHeightChanged && (
+              <div style={{ color: '#22c55e' }}>
+                <span className="font-medium">New Height:</span> {selectedObject.height.toFixed(3)}m
+              </div>
+            )}
+          </>
         )}
 
         {/* Position (Center Point) */}
