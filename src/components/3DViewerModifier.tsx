@@ -1629,12 +1629,12 @@ const isFloorPlatesCsv = (name: string) => {
 };
 
 // Generate store config JSON with floor data and fixture mappings from API
+// NOTE: Architectural objects are now stored in a separate arch-objects.json file
 const createStoreConfigJSON = useCallback(async (
   workingLocationData: LocationData[],
   workingExtractedFiles: ExtractedFile[],
   currentSpawnPoints: Map<number, [number, number, number]>,
-  currentFloorNames: Map<number, string>,
-  currentArchitecturalObjects: ArchitecturalObject[]
+  currentFloorNames: Map<number, string>
 ): Promise<string> => {
   log('Generating store config JSON...');
 
@@ -1646,7 +1646,6 @@ const createStoreConfigJSON = useCallback(async (
   let existingFloorData: Record<number, { name: string; spawn_point: number[] }> = {};
   let existingBlockFixtureTypes: Record<string, string> = {};
   let existingFixtureTypeUrls: Record<string, string> = {};
-  let existingArchitecturalElements: ArchitecturalObject[] = [];
 
   if (existingConfigFile) {
     try {
@@ -1676,12 +1675,6 @@ const createStoreConfigJSON = useCallback(async (
       if (existingConfig.fixture_type_glb_urls && typeof existingConfig.fixture_type_glb_urls === 'object') {
         existingFixtureTypeUrls = { ...existingConfig.fixture_type_glb_urls };
         log('Preserved fixture_type_glb_urls from existing config:', existingFixtureTypeUrls);
-      }
-
-      // Preserve architectural elements (will be overwritten by currentArchitecturalObjects)
-      if (existingConfig.architectural_elements && Array.isArray(existingConfig.architectural_elements)) {
-        existingArchitecturalElements = existingConfig.architectural_elements;
-        log('Found architectural elements in existing config:', existingArchitecturalElements.length);
       }
     } catch (error) {
       console.warn('Failed to parse existing store-config.json, using defaults:', error);
@@ -1812,16 +1805,15 @@ const createStoreConfigJSON = useCallback(async (
     // Continue without direct render types
   }
 
-  // 7. Build the config object
+  // 7. Build the config object (architectural elements now stored in separate file)
   const config = {
     floor: floors,
     block_fixture_types: blockFixtureTypes,
     fixture_type_glb_urls: fixtureTypeGlbUrls,
-    additional_block_fixture_type: directRenderTypes,
-    architectural_elements: currentArchitecturalObjects // Store architectural elements in config
+    additional_block_fixture_type: directRenderTypes
   };
 
-  log('Store config generated with', floors.length, 'floors and', currentArchitecturalObjects.length, 'architectural elements');
+  log('Store config generated with', floors.length, 'floors');
   return JSON.stringify(config, null, 2);
 }, []);
 
@@ -1853,17 +1845,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
     log('Extracted files:', workingExtractedFiles.map(f => f.name));
 
-    // Add all original files except the CSVs that need to be modified and store-config.json
-    // NOTE: Architectural elements are stored in store-config.json (not CSV or GLB)
+    // Add all original files except the CSVs that need to be modified, store-config.json, and arch-objects.json
+    // NOTE: Architectural elements are stored in arch-objects.json (not CSV or GLB)
     for (const file of workingExtractedFiles) {
       if (isLocationCsv(file.name) || isFloorPlatesCsv(file.name)) {
         log('Skipping original CSV in bundle:', file.name);
         continue;
       }
 
-      // Skip existing store-config.json since we'll regenerate it
+      // Skip existing store-config.json and arch-objects.json since we'll regenerate them
       if (file.name.toLowerCase() === 'store-config.json') {
         log('Skipping original store-config.json (will regenerate):', file.name);
+        continue;
+      }
+
+      if (file.name.toLowerCase() === 'arch-objects.json') {
+        log('Skipping original arch-objects.json (will regenerate):', file.name);
         continue;
       }
 
@@ -1885,15 +1882,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       }
     }
 
-    // NOTE: Architectural elements are saved in store-config.json (see below)
+    // NOTE: Architectural elements are saved in arch-objects.json (see below)
     // They are NOT baked into GLB files, allowing them to remain editable
 
-    // Generate and add store config JSON (includes architectural elements)
+    // Generate and add store config JSON (without architectural elements)
     try {
       log('Creating store config JSON...');
-      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames, architecturalObjects);
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames);
       zip.file('store-config.json', configJson);
-      log('Added store-config.json to ZIP with', architecturalObjects.length, 'architectural elements');
+      log('Added store-config.json to ZIP');
     } catch (error) {
       console.error('Failed to create store config JSON:', error);
       // If spawn point is missing, throw error to prevent saving
@@ -1901,6 +1898,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         throw error;
       }
       // Continue with export for other errors
+    }
+
+    // Generate and add arch objects JSON (separate file for architectural elements)
+    try {
+      log('Creating arch objects JSON...');
+      const archObjectsJson = JSON.stringify(architecturalObjects, null, 2);
+      zip.file('arch-objects.json', archObjectsJson);
+      log('Added arch-objects.json to ZIP with', architecturalObjects.length, 'architectural elements');
+    } catch (error) {
+      console.error('Failed to create arch objects JSON:', error);
+      // Continue with export even if arch objects fail
     }
 
     log('Modified ZIP built.');
@@ -3148,12 +3156,26 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   }
                 });
               }
+            } catch (error) {
+              console.warn('Failed to parse store-config.json for floor names and spawn points:', error);
+            }
+          }
 
-              // Load architectural elements from config
-              if (config.architectural_elements && Array.isArray(config.architectural_elements)) {
-                console.log(`[3DViewerModifier] Loading ${config.architectural_elements.length} architectural elements from store-config.json`);
+          // Load architectural elements from arch-objects.json
+          const archObjectsFile = extractedFiles.find(file =>
+            file.name.toLowerCase() === 'arch-objects.json'
+          );
 
-                let elements = config.architectural_elements as ArchitecturalObject[];
+          if (archObjectsFile) {
+            // Load from arch-objects.json (new format)
+            try {
+              const response = await fetch(archObjectsFile.url);
+              const archObjects = await response.json();
+
+              if (Array.isArray(archObjects)) {
+                console.log(`[3DViewerModifier] Loading ${archObjects.length} architectural elements from arch-objects.json`);
+
+                let elements = archObjects as ArchitecturalObject[];
 
                 // First, assign default variants to doors that don't have them
                 elements = elements.map(obj => {
@@ -3226,7 +3248,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 }
               }
             } catch (error) {
-              console.warn('Failed to parse store-config.json for floor names and spawn points:', error);
+              console.warn('Failed to parse arch-objects.json:', error);
             }
           }
 

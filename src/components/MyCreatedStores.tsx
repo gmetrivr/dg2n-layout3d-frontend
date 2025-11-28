@@ -127,6 +127,7 @@ async function migrateBrandsInZip(zipBlob: Blob, pipelineVersion: string = '02')
 }
 
 // Helper to ensure store-config.json exists in ZIP, adding it if missing
+// NOTE: Architectural elements are stored in a separate arch-objects.json file
 async function ensureStoreConfigInZip(zipBlob: Blob): Promise<Blob> {
   const zip = await JSZip.loadAsync(zipBlob);
 
