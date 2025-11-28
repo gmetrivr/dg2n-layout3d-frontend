@@ -58,7 +58,12 @@ interface LeftControlPanelProps {
   isMeasuring?: boolean;
   measurementPoints?: [number, number, number][];
 
+  // Camera controls
+  cameraMode?: 'perspective' | 'orthographic';
+
   // Event handlers
+  onCameraModeChange?: (mode: 'perspective' | 'orthographic') => void;
+  onSwitchToTopView?: () => void;
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
   onFixtureTypeChange: (type: string) => void;
@@ -111,6 +116,9 @@ export function LeftControlPanel({
   spawnPoints,
   isMeasuring,
   measurementPoints,
+  cameraMode,
+  onCameraModeChange,
+  onSwitchToTopView,
   onFloorFileChange,
   onShowSpheresChange,
   onFixtureTypeChange,
@@ -250,7 +258,7 @@ export function LeftControlPanel({
         </div>
         
         {/* Collapsible Content */}
-        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
+        <div className={`overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out ${
           isCollapsed ? 'max-h-0' : 'max-h-[800px]'
         }`}>
           <div className="flex flex-col gap-4 p-4 pt-0">
@@ -680,6 +688,40 @@ export function LeftControlPanel({
               })()}
             </div>
           )}
+        </div>
+
+        {/* Camera View Controls */}
+        <div className="border-t border-border pt-2 space-y-2">
+          <div className="text-sm font-semibold mb-1">Camera View</div>
+
+          {/* Camera Mode Toggle */}
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">View Mode:</label>
+            <select
+              value={cameraMode || 'perspective'}
+              onChange={(e) => {
+                if (onCameraModeChange) {
+                  onCameraModeChange(e.target.value as 'perspective' | 'orthographic');
+                }
+              }}
+              className="text-xs bg-background border border-border rounded px-2 py-1"
+            >
+              <option value="perspective">Perspective</option>
+              <option value="orthographic">Orthographic</option>
+            </select>
+          </div>
+
+          {/* Top View Button */}
+          <button
+            onClick={() => {
+              if (onSwitchToTopView) {
+                onSwitchToTopView();
+              }
+            }}
+            className="text-sm px-3 py-1.5 rounded w-full bg-primary text-primary-foreground hover:opacity-90"
+          >
+            Switch to Top View
+          </button>
         </div>
 
         {/* Job Info */}

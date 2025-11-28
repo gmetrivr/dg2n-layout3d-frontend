@@ -344,6 +344,8 @@ export function ThreeDViewerModifier() {
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
   const [currentOrbitTarget, setCurrentOrbitTarget] = useState<[number, number, number]>([0, 0, 0]); // Separate state for add fixture position
+  const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>('perspective');
+  const [orthoZoom] = useState<number>(50); // Orthographic zoom level
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
   const [editMode, setEditMode] = useState(false);
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
@@ -568,6 +570,19 @@ export function ThreeDViewerModifier() {
       return center;
     });
   }, []);
+
+  // Camera mode and view functions
+  const handleCameraModeChange = (mode: 'perspective' | 'orthographic') => {
+    setCameraMode(mode);
+  };
+
+  const handleSwitchToTopView = () => {
+    // Position camera directly above the orbit target
+    const targetY = orbitTarget[1];
+    const height = 30; // Default height above the target
+    const newCameraPos: [number, number, number] = [orbitTarget[0], targetY + height, orbitTarget[2]];
+    setCameraPosition(newCameraPos);
+  };
 
   const handleGLBError = (blockName: string, url: string) => {
     setFailedGLBs(prev => {
@@ -4066,6 +4081,9 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           spawnPoints={spawnPoints}
           isMeasuring={isMeasuring}
           measurementPoints={measurementPoints}
+          cameraMode={cameraMode}
+          onCameraModeChange={handleCameraModeChange}
+          onSwitchToTopView={handleSwitchToTopView}
           onMeasuringChange={setIsMeasuring}
           onClearMeasurement={handleClearMeasurement}
           onFloorFileChange={handleFloorFileChange}
@@ -4092,6 +4110,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         <Canvas3D
           cameraPosition={cameraPosition}
           orbitTarget={orbitTarget}
+          cameraMode={cameraMode}
+          orthoZoom={orthoZoom}
           selectedFile={selectedFile}
           selectedFloorFile={selectedFloorFile}
           locationData={locationData}

@@ -6,6 +6,62 @@ import type { ExtractedFile } from '../utils/zipUtils';
 import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
 
+// Camera controller to handle dynamic camera mode switching
+interface CameraControllerProps {
+  mode: 'perspective' | 'orthographic';
+  position: [number, number, number];
+  zoom: number;
+}
+
+function CameraController({ mode, position, zoom }: CameraControllerProps) {
+  const { camera, set, size } = useThree();
+  const prevModeRef = useRef(mode);
+
+  useEffect(() => {
+    // If mode changed, we need to replace the camera
+    if (prevModeRef.current !== mode) {
+      const newCamera = mode === 'orthographic'
+        ? new THREE.OrthographicCamera(
+            -size.width / zoom,
+            size.width / zoom,
+            size.height / zoom,
+            -size.height / zoom,
+            0.1,
+            1000
+          )
+        : new THREE.PerspectiveCamera(50, size.width / size.height, 0.1, 1000);
+
+      // Copy position from current camera
+      newCamera.position.copy(camera.position);
+      newCamera.rotation.copy(camera.rotation);
+      newCamera.updateProjectionMatrix();
+
+      // Use React Three Fiber's set to replace the camera
+      set({ camera: newCamera });
+
+      prevModeRef.current = mode;
+    }
+  }, [mode, camera, set, size, zoom]);
+
+  // Update camera position when it changes
+  useEffect(() => {
+    camera.position.set(...position);
+  }, [camera, position]);
+
+  // Update orthographic camera frustum on window resize or zoom change
+  useEffect(() => {
+    if (mode === 'orthographic' && camera instanceof THREE.OrthographicCamera) {
+      camera.left = -size.width / zoom;
+      camera.right = size.width / zoom;
+      camera.top = size.height / zoom;
+      camera.bottom = -size.height / zoom;
+      camera.updateProjectionMatrix();
+    }
+  }, [camera, mode, size, zoom]);
+
+  return null;
+}
+
 // Common bounding box component for all fixtures and architectural objects
 interface BoundingBoxProps {
   size: [number, number, number] | THREE.Vector3;
@@ -1177,6 +1233,8 @@ function FloorClickHandler({ isAddingObject, onFloorClick }: FloorClickHandlerPr
 interface Canvas3DProps {
   cameraPosition: [number, number, number];
   orbitTarget: [number, number, number];
+  cameraMode?: 'perspective' | 'orthographic';
+  orthoZoom?: number;
   selectedFile: ExtractedFile | null;
   selectedFloorFile: ExtractedFile | null;
   locationData: LocationData[];
@@ -1227,6 +1285,8 @@ interface Canvas3DProps {
 export function Canvas3D({
   cameraPosition,
   orbitTarget,
+  cameraMode = 'perspective',
+  orthoZoom = 50,
   selectedFile,
   selectedFloorFile,
   locationData,
@@ -1271,6 +1331,7 @@ export function Canvas3D({
 }: Canvas3DProps) {
   const orbitControlsRef = useRef<any>(null);
   const lastTargetRef = useRef<[number, number, number]>(orbitTarget);
+
   return (
     <Canvas
       camera={{ position: cameraPosition, fov: 50 }}
@@ -1278,6 +1339,9 @@ export function Canvas3D({
       className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
       onPointerMissed={onPointerMissed}
     >
+      {/* Camera controller for dynamic mode switching */}
+      <CameraController mode={cameraMode} position={cameraPosition} zoom={orthoZoom} />
+
       <axesHelper args={[2]} />
       <ambientLight intensity={0.4} />
       <directionalLight
