@@ -199,13 +199,69 @@ export function useFixtureModifications(
     }));
   }, [selectedLocations]);
 
-  const handleResetPosition = useCallback((location: LocationData) => {
+  const handleMultiPositionChange = useCallback((delta: [number, number, number]) => {
+    // Apply position delta to all selected fixtures
+    // This is called when dragging multiple fixtures together
+
+    // Update LocationData for all selected fixtures
+    setLocationData(prev => prev.map(loc => {
+      const isSelected = selectedLocations.some(selectedLoc =>
+        generateFixtureUID(selectedLoc) === generateFixtureUID(loc)
+      );
+
+      if (isSelected) {
+        return {
+          ...loc,
+          posX: loc.posX + delta[0],
+          posY: loc.posY + delta[1],
+          posZ: loc.posZ + delta[2],
+          wasMoved: true,
+          // Preserve original position for reset functionality
+          originalPosX: loc.originalPosX ?? loc.posX,
+          originalPosY: loc.originalPosY ?? loc.posY,
+          originalPosZ: loc.originalPosZ ?? loc.posZ,
+        };
+      }
+      return loc;
+    }));
+
+    // Update selectedLocations
+    setSelectedLocations(prev => prev.map(loc => ({
+      ...loc,
+      posX: loc.posX + delta[0],
+      posY: loc.posY + delta[1],
+      posZ: loc.posZ + delta[2],
+      wasMoved: true,
+      originalPosX: loc.originalPosX ?? loc.posX,
+      originalPosY: loc.originalPosY ?? loc.posY,
+      originalPosZ: loc.originalPosZ ?? loc.posZ,
+    })));
+
+    // If single selection is also set, update it
+    setSelectedLocation(prev => {
+      if (prev && selectedLocations.some(loc => generateFixtureUID(loc) === generateFixtureUID(prev))) {
+        return {
+          ...prev,
+          posX: prev.posX + delta[0],
+          posY: prev.posY + delta[1],
+          posZ: prev.posZ + delta[2],
+          wasMoved: true,
+          originalPosX: prev.originalPosX ?? prev.posX,
+          originalPosY: prev.originalPosY ?? prev.posY,
+          originalPosZ: prev.originalPosZ ?? prev.posZ,
+        };
+      }
+      return prev;
+    });
+  }, [selectedLocations, setLocationData, setSelectedLocations, setSelectedLocation]);
+
+  const handleResetPosition = useCallback((location: LocationData, clearSelection = false) => {
     // Reset fixture to original values using embedded data
     const resetLocation: LocationData = {
       ...location,
       // Reset position
       posX: location.originalPosX ?? location.posX,
-      posY: location.originalPosY ?? location.posY, 
+      posY: location.originalPosY ?? location.posY,
       posZ: location.originalPosZ ?? location.posZ,
       // Reset rotation
       rotationX: location.originalRotationX ?? location.rotationX,
@@ -224,15 +280,71 @@ export function useFixtureModifications(
       wasCountChanged: false,
       wasHierarchyChanged: false,
     };
-    
+
+    const locationKey = generateFixtureUID(location);
+
     // Update location data
-    setLocationData(prev => prev.map(loc => 
-      generateFixtureUID(loc) === generateFixtureUID(location) ? resetLocation : loc
+    setLocationData(prev => prev.map(loc =>
+      generateFixtureUID(loc) === locationKey ? resetLocation : loc
     ));
-    
+
+    // Clear selections if requested (used when resetting from multi-selection)
+    if (clearSelection) {
+      setSelectedLocations([]);
+      setSelectedLocation(null);
+    } else {
+      // Update selectedLocations array if this fixture is part of multi-selection
+      setSelectedLocations(prev =>
+        prev.map(loc =>
+          generateFixtureUID(loc) === locationKey ? resetLocation : loc
+        )
+      );
+
+      // Update single selection
+      setSelectedLocation(null);
+      setTimeout(() => setSelectedLocation(resetLocation), 10);
+    }
+  }, [setSelectedLocation, setSelectedLocations, setLocationData]);
+
+  const handleResetMultiplePositions = useCallback((locations: LocationData[]) => {
+    // Create a Set of keys for all locations to reset
+    const keysToReset = new Set(locations.map(loc => generateFixtureUID(loc)));
+
+    // Update location data - reset all matching fixtures
+    setLocationData(prev => prev.map(loc => {
+      const locKey = generateFixtureUID(loc);
+      if (keysToReset.has(locKey)) {
+        return {
+          ...loc,
+          // Reset position
+          posX: loc.originalPosX ?? loc.posX,
+          posY: loc.originalPosY ?? loc.posY,
+          posZ: loc.originalPosZ ?? loc.posZ,
+          // Reset rotation
+          rotationX: loc.originalRotationX ?? loc.rotationX,
+          rotationY: loc.originalRotationY ?? loc.rotationY,
+          rotationZ: loc.originalRotationZ ?? loc.rotationZ,
+          // Reset other properties
+          blockName: loc.originalBlockName ?? loc.blockName,
+          brand: loc.originalBrand ?? loc.brand,
+          count: loc.originalCount ?? loc.count,
+          hierarchy: loc.originalHierarchy ?? loc.hierarchy,
+          // Clear modification flags
+          wasMoved: false,
+          wasRotated: false,
+          wasTypeChanged: false,
+          wasBrandChanged: false,
+          wasCountChanged: false,
+          wasHierarchyChanged: false,
+        };
+      }
+      return loc;
+    }));
+
+    // Clear multi-selection after resetting
+    setSelectedLocations([]);
     setSelectedLocation(null);
-    setTimeout(() => setSelectedLocation(resetLocation), 10);
-  }, [setSelectedLocation, setLocationData]);
+  }, [setSelectedLocation, setSelectedLocations, setLocationData]);
 
   const handleBrandChange = useCallback((newBrand: string) => {
     if (!selectedFloorPlate) return;
@@ -838,7 +950,9 @@ export function useFixtureModifications(
     handlePositionChange,
     handleRotateFixture,
     handleMultiRotateFixture,
+    handleMultiPositionChange,
     handleResetPosition,
+    handleResetMultiplePositions,
     handleBrandChange,
     handleFixtureBrandChange,
     handleFixtureCountChange,

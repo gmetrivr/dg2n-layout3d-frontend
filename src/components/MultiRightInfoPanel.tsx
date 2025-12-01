@@ -52,6 +52,7 @@ interface MultiRightInfoPanelProps {
   onOpenBrandModal?: () => void;
   onRotateFixture?: (angle: number) => void;
   onResetLocation?: (location: LocationData) => void;
+  onResetMultiple?: (locations: LocationData[]) => void;
   onDeleteFixtures?: (locations: LocationData[]) => void;
   onMergeFixtures?: (locations: LocationData[]) => void;
   canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
@@ -87,6 +88,7 @@ export function MultiRightInfoPanel({
   onOpenBrandModal,
   onRotateFixture,
   onResetLocation,
+  onResetMultiple,
   onDeleteFixtures,
   onMergeFixtures,
   canMergeFixtures,
@@ -628,10 +630,16 @@ export function MultiRightInfoPanel({
       
       {hasAnyChanges && (
         <div className={`${editMode ? '' : 'mt-3 pt-2 border-t border-border'}`}>
-          <Button 
-            size="sm" 
-            variant="outline" 
-            onClick={() => selectedLocations.forEach(location => onResetLocation?.(location))}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (onResetMultiple) {
+                onResetMultiple(selectedLocations);
+              } else {
+                selectedLocations.forEach(location => onResetLocation?.(location));
+              }
+            }}
             className="w-full text-xs"
           >
             Reset All

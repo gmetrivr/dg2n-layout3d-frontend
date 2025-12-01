@@ -151,9 +151,10 @@ interface LocationGLBProps {
   onTransformEnd?: () => void;
   isTransforming?: boolean;
   showFixtureLabels?: boolean;
+  pendingMultiDelta?: [number, number, number] | null;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -193,7 +194,17 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
   // Memoize expensive calculations and lookups
   const memoizedData = useMemo(() => {
     // Use embedded data directly from location object
-    const currentPosition = [location.posX, location.posZ, -location.posY];
+    let currentPosition: [number, number, number] = [location.posX, location.posZ, -location.posY];
+
+    // Apply pending multi-delta if this fixture is part of a multi-selection being dragged
+    // (Only apply when selected but NOT in single selection mode)
+    if (isSelected && !isSingleSelection && pendingMultiDelta) {
+      currentPosition = [
+        currentPosition[0] + pendingMultiDelta[0],
+        currentPosition[1] + pendingMultiDelta[2],
+        currentPosition[2] - pendingMultiDelta[1]
+      ];
+    }
 
     const rotationX = (location.rotationX * Math.PI) / 180;
     const rotationY = (location.rotationY * Math.PI) / 180;
@@ -205,7 +216,7 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
       rotationY,
       rotationZ
     };
-  }, [location]);
+  }, [location, isSelected, isSingleSelection, pendingMultiDelta]);
 
   const { currentPosition, rotationX, rotationY, rotationZ } = memoizedData;
 
@@ -407,7 +418,138 @@ ${location.hierarchy}`}
     prevProps.isSingleSelection === nextProps.isSingleSelection &&
     prevProps.isTransforming === nextProps.isTransforming &&
     prevProps.transformSpace === nextProps.transformSpace &&
-    prevProps.showFixtureLabels === nextProps.showFixtureLabels
+    prevProps.showFixtureLabels === nextProps.showFixtureLabels &&
+    // Compare pendingMultiDelta (deep comparison for arrays)
+    (prevProps.pendingMultiDelta === nextProps.pendingMultiDelta || (
+      prevProps.pendingMultiDelta?.[0] === nextProps.pendingMultiDelta?.[0] &&
+      prevProps.pendingMultiDelta?.[1] === nextProps.pendingMultiDelta?.[1] &&
+      prevProps.pendingMultiDelta?.[2] === nextProps.pendingMultiDelta?.[2]
+    ))
+  );
+});
+
+// Multi-fixture transform group - allows moving multiple fixtures together
+interface MultiFixtureTransformGroupProps {
+  selectedLocations: LocationData[];
+  editMode: boolean;
+  transformSpace: 'world' | 'local';
+  onMultiPositionChange: (delta: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
+  setPendingDelta: (delta: [number, number, number] | null) => void;
+}
+
+const MultiFixtureTransformGroup = memo(function MultiFixtureTransformGroup({
+  selectedLocations,
+  editMode,
+  transformSpace,
+  onMultiPositionChange,
+  onTransformStart,
+  onTransformEnd,
+  setPendingDelta
+}: MultiFixtureTransformGroupProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [initialPosition, setInitialPosition] = useState<[number, number, number] | null>(null);
+
+  // Calculate center point of all selected fixtures
+  const centerPosition = useMemo((): [number, number, number] => {
+    if (selectedLocations.length === 0) return [0, 0, 0];
+
+    const sum = selectedLocations.reduce(
+      (acc, loc) => {
+        return [
+          acc[0] + loc.posX,
+          acc[1] + loc.posZ,
+          acc[2] + -loc.posY
+        ];
+      },
+      [0, 0, 0]
+    );
+
+    const count = selectedLocations.length;
+    return [sum[0] / count, sum[1] / count, sum[2] / count];
+  }, [selectedLocations]);
+
+  // Reset group position when centerPosition changes (after fixtures move)
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(centerPosition[0], centerPosition[1], centerPosition[2]);
+    }
+    setInitialPosition(centerPosition);
+    setPendingDelta(null);
+  }, [centerPosition]);
+
+  const handleTransformStart = () => {
+    // Capture the position at the START of the drag
+    if (groupRef.current) {
+      const pos = groupRef.current.position;
+      setInitialPosition([pos.x, pos.y, pos.z]);
+    }
+    onTransformStart?.();
+  };
+
+  const handleTransformChange = () => {
+    if (groupRef.current && initialPosition) {
+      const currentPos = groupRef.current.position;
+      const delta: [number, number, number] = [
+        currentPos.x - initialPosition[0],
+        -(currentPos.z - initialPosition[2]),
+        currentPos.y - initialPosition[1]
+      ];
+      setPendingDelta(delta);
+    }
+  };
+
+  const handleTransformEnd = () => {
+    // Get the current delta before clearing
+    if (groupRef.current && initialPosition) {
+      const currentPos = groupRef.current.position;
+      const finalDelta: [number, number, number] = [
+        currentPos.x - initialPosition[0],
+        -(currentPos.z - initialPosition[2]),
+        currentPos.y - initialPosition[1]
+      ];
+
+      if (onMultiPositionChange) {
+        onMultiPositionChange(finalDelta);
+      }
+
+      // Reset group position to where it should be after the state updates
+      // We'll let the useEffect handle this when the state propagates
+    }
+
+    // Clear pending delta - useEffect will reset initialPosition when centerPosition recalculates
+    setPendingDelta(null);
+
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
+  };
+
+  if (selectedLocations.length <= 1 || !editMode) return null;
+
+  return (
+    <>
+      <group ref={groupRef} position={centerPosition}>
+        {/* Visual indicator - a small sphere at the center */}
+        <mesh>
+          <sphereGeometry args={[0.3, 16, 16]} />
+          <meshBasicMaterial color="orange" opacity={0.5} transparent />
+        </mesh>
+      </group>
+
+      {editMode && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode="translate"
+          space={transformSpace}
+          showY={false}
+          onObjectChange={handleTransformChange}
+          onMouseDown={handleTransformStart}
+          onMouseUp={handleTransformEnd}
+        />
+      )}
+    </>
   );
 });
 
@@ -1276,6 +1418,7 @@ interface Canvas3DProps {
   onFixtureClick: (location: LocationData, event?: any) => void;
   isLocationSelected: (location: LocationData) => boolean;
   onPositionChange: (location: LocationData, newPosition: [number, number, number]) => void;
+  onMultiPositionChange?: (delta: [number, number, number]) => void;
   onFloorPlateClick: (plateData: any) => void;
   onPointerMissed: () => void;
   setIsTransforming: (transforming: boolean) => void;
@@ -1324,6 +1467,7 @@ export function Canvas3D({
   onFixtureClick,
   isLocationSelected,
   onPositionChange,
+  onMultiPositionChange,
   onFloorPlateClick,
   onPointerMissed,
   setIsTransforming,
@@ -1331,6 +1475,9 @@ export function Canvas3D({
 }: Canvas3DProps) {
   const orbitControlsRef = useRef<any>(null);
   const lastTargetRef = useRef<[number, number, number]>(orbitTarget);
+
+  // State for multi-fixture drag - stores pending position delta during transform
+  const [pendingMultiDelta, setPendingMultiDelta] = useState<[number, number, number] | null>(null);
 
   return (
     <Canvas
@@ -1448,6 +1595,7 @@ export function Canvas3D({
                 isTransforming={isTransforming}
                 showFixtureLabels={showFixtureLabels}
                 onPositionChange={editMode ? onPositionChange : undefined}
+                pendingMultiDelta={pendingMultiDelta}
                 {...(editMode && {
                   onTransformStart: () => {
                     setIsTransforming(true);
@@ -1468,6 +1616,19 @@ export function Canvas3D({
             )
           ));
       })()}
+
+      {/* Multi-fixture transform control for moving multiple fixtures together */}
+      {editMode && onMultiPositionChange && selectedLocations.length > 1 && (
+        <MultiFixtureTransformGroup
+          selectedLocations={selectedLocations}
+          editMode={editMode}
+          transformSpace={transformSpace}
+          onMultiPositionChange={onMultiPositionChange}
+          onTransformStart={() => setIsTransforming(true)}
+          onTransformEnd={() => setIsTransforming(false)}
+          setPendingDelta={setPendingMultiDelta}
+        />
+      )}
 
       {/* Render architectural objects */}
       {architecturalObjects.map(obj => {

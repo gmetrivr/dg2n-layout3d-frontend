@@ -429,7 +429,9 @@ export function ThreeDViewerModifier() {
     handlePositionChange,
     handleRotateFixture,
     handleMultiRotateFixture,
+    handleMultiPositionChange,
     handleResetPosition,
+    handleResetMultiplePositions,
     handleBrandChange,
     handleFixtureBrandChange,
     handleFixtureCountChange,
@@ -4150,6 +4152,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFixtureClick={handleFixtureClickWithObjectClear}
           isLocationSelected={isLocationSelected}
           onPositionChange={handlePositionChange}
+          onMultiPositionChange={handleMultiPositionChange}
           onFloorPlateClick={handleFloorPlateClick}
           onPointerMissed={handlePointerMissed}
           setIsTransforming={handleSetIsTransforming}
@@ -4167,6 +4170,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onOpenBrandModal={() => setBrandModalOpen(true)}
             onRotateFixture={handleMultiRotateFixture}
             onResetLocation={handleResetPosition}
+            onResetMultiple={handleResetMultiplePositions}
             onDeleteFixtures={handleDeleteFixtures}
             onMergeFixtures={handleMergeFixtures}
             canMergeFixtures={canMergeFixtures}
