@@ -443,6 +443,7 @@ export function ThreeDViewerModifier() {
     handleSplitFixture,
     canMergeFixtures,
     handleMergeFixtures,
+    handleAlignFixtures,
   } = useFixtureModifications(
     selectedLocation,
     selectedLocations,
@@ -4161,6 +4162,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             selectedLocations={selectedLocations}
             editMode={editMode}
             fixtureTypeMap={fixtureTypeMap.current}
+            transformSpace={transformSpace}
             onClose={clearSelections}
             onOpenBrandModal={() => setBrandModalOpen(true)}
             onRotateFixture={handleMultiRotateFixture}
@@ -4173,6 +4175,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
+            onAlignFixtures={handleAlignFixtures}
             onFloorChange={(locations, newFloorIndex, keepSamePosition = false) => {
               // Update floor index, origin values, and position for all selected locations
               const keys = locations.map(loc => generateFixtureUID(loc));

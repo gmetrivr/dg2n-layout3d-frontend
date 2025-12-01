@@ -639,6 +639,97 @@ export function useFixtureModifications(
     return (gapAB < tolerance || gapBA < tolerance) && perpGap < tolerance;
   }, []);
 
+  const handleAlignFixtures = useCallback((
+    fixtures: LocationData[],
+    alignment: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom',
+    _transformSpace: 'world' | 'local' // Unused for now, both modes use world axes
+  ) => {
+    if (fixtures.length < 2) return;
+
+    // Calculate new positions for each fixture
+    const newPositions = new Map<string, [number, number, number]>();
+
+    // Both world and local modes use world axes alignment for now
+    // Note: Horizontal (left-right) is X-axis, vertical (top-bottom) is Y-axis
+    let targetValue: number;
+
+    if (alignment === 'left') {
+      // Horizontal left = minimum X (leftmost)
+      targetValue = Math.min(...fixtures.map(f => f.posX));
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
+      });
+    } else if (alignment === 'center-h') {
+      // Horizontal center = average X
+      targetValue = fixtures.reduce((sum, f) => sum + f.posX, 0) / fixtures.length;
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
+      });
+    } else if (alignment === 'right') {
+      // Horizontal right = maximum X (rightmost)
+      targetValue = Math.max(...fixtures.map(f => f.posX));
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
+      });
+    } else if (alignment === 'top') {
+      // Vertical top = maximum Y (top)
+      targetValue = Math.max(...fixtures.map(f => f.posY));
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
+      });
+    } else if (alignment === 'center-v') {
+      // Vertical center = average Y
+      targetValue = fixtures.reduce((sum, f) => sum + f.posY, 0) / fixtures.length;
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
+      });
+    } else if (alignment === 'bottom') {
+      // Vertical bottom = minimum Y (bottom)
+      targetValue = Math.min(...fixtures.map(f => f.posY));
+      fixtures.forEach(fixture => {
+        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
+      });
+    }
+
+    // Batch update all fixtures at once
+    setLocationData(prev => prev.map(loc => {
+      const key = generateFixtureUID(loc);
+      if (newPositions.has(key)) {
+        const [newX, newY, newZ] = newPositions.get(key)!;
+        return {
+          ...loc,
+          posX: newX,
+          posY: newY,
+          posZ: newZ,
+          wasMoved: true,
+          originalPosX: loc.originalPosX ?? loc.posX,
+          originalPosY: loc.originalPosY ?? loc.posY,
+          originalPosZ: loc.originalPosZ ?? loc.posZ,
+        };
+      }
+      return loc;
+    }));
+
+    // Update selectedLocations
+    setSelectedLocations(prev => prev.map(loc => {
+      const key = generateFixtureUID(loc);
+      if (newPositions.has(key)) {
+        const [newX, newY, newZ] = newPositions.get(key)!;
+        return {
+          ...loc,
+          posX: newX,
+          posY: newY,
+          posZ: newZ,
+          wasMoved: true,
+          originalPosX: loc.originalPosX ?? loc.posX,
+          originalPosY: loc.originalPosY ?? loc.posY,
+          originalPosZ: loc.originalPosZ ?? loc.posZ,
+        };
+      }
+      return loc;
+    }));
+  }, [setLocationData, setSelectedLocations]);
+
   const handleMergeFixtures = useCallback((fixtures: LocationData[]) => {
     if (fixtures.length !== 2) return;
 
@@ -732,17 +823,17 @@ export function useFixtureModifications(
   }, [setLocationData, setSelectedLocation, setSelectedLocations]);
 
   return {
-    // State  
+    // State
     modifiedFloorPlates,
     deletedFixtures,
     deletedFixturePositions,
     deleteConfirmationOpen,
     fixturesToDelete,
-    
+
     // Setters (for external use)
     setModifiedFloorPlates,
     setDeleteConfirmationOpen,
-    
+
     // Handlers
     handlePositionChange,
     handleRotateFixture,
@@ -761,5 +852,6 @@ export function useFixtureModifications(
     handleSplitFixture,
     canMergeFixtures,
     handleMergeFixtures,
+    handleAlignFixtures,
   };
 }

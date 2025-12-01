@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Check, Link } from 'lucide-react';
+import { Pencil, Trash2, Check, Link, AlignHorizontalDistributeStart, AlignHorizontalDistributeCenter, AlignHorizontalDistributeEnd, AlignVerticalDistributeStart, AlignVerticalDistributeCenter, AlignVerticalDistributeEnd } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import { useState } from 'react';
 
@@ -44,6 +44,7 @@ interface MultiRightInfoPanelProps {
   selectedLocations: LocationData[];
   editMode: boolean;
   fixtureTypeMap: Map<string, string>;
+  transformSpace?: 'world' | 'local';
   availableFloorIndices?: number[];
   floorNames?: Map<number, string>;
   floorDisplayOrder?: number[];
@@ -57,6 +58,7 @@ interface MultiRightInfoPanelProps {
   onCountChange?: (locations: LocationData[], newCount: number) => void;
   onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
   onFloorChange?: (locations: LocationData[], newFloorIndex: number, keepSamePosition?: boolean) => void;
+  onAlignFixtures?: (locations: LocationData[], alignment: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom', transformSpace: 'world' | 'local') => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -77,6 +79,7 @@ export function MultiRightInfoPanel({
   selectedLocations,
   editMode,
   fixtureTypeMap,
+  transformSpace = 'world',
   availableFloorIndices = [],
   floorNames = new Map(),
   floorDisplayOrder = [],
@@ -90,6 +93,7 @@ export function MultiRightInfoPanel({
   onCountChange,
   onHierarchyChange,
   onFloorChange,
+  onAlignFixtures,
 }: MultiRightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
@@ -530,6 +534,73 @@ export function MultiRightInfoPanel({
               </div>
             )}
           </div>
+
+          {onAlignFixtures && selectedLocations.length > 1 && (
+            <div className="mt-3 pt-2 border-t border-border">
+              <div className="space-y-2">
+                <div className="text-sm font-semibold">Align</div>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'left', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Left"
+                  >
+                    <AlignHorizontalDistributeStart className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'center-h', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Center Horizontal"
+                  >
+                    <AlignHorizontalDistributeCenter className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'right', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Right"
+                  >
+                    <AlignHorizontalDistributeEnd className="h-3 w-3" />
+                  </Button>
+                </div>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'top', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Top"
+                  >
+                    <AlignVerticalDistributeStart className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'center-v', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Center Vertical"
+                  >
+                    <AlignVerticalDistributeCenter className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onAlignFixtures(selectedLocations, 'bottom', transformSpace)}
+                    className="text-xs flex items-center justify-center flex-1 px-1"
+                    title="Align Bottom"
+                  >
+                    <AlignVerticalDistributeEnd className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {canMergeFixtures && onMergeFixtures && canMergeFixtures(selectedLocations, fixtureTypeMap) && (
             <Button
               size="sm"
