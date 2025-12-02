@@ -2882,6 +2882,15 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       let matchingLocation = currentByOriginalKey.get(originalKey);
 
       if (!matchingLocation) {
+        // Check if this CSV row is a door that was migrated to architectural objects
+        const doorCheck = isDoorBlockName(blockName);
+        if (doorCheck.isDoor) {
+          // This is a door that was migrated out - skip it in the CSV
+          deletedCount++;
+          console.log(`[CSV Export] Skipping migrated door: ${blockName} at floor ${floorIndex}`);
+          continue;
+        }
+
         // Check if this CSV row matches a forDelete fixture (split or type-changed original)
         // These fixtures should be removed from the CSV
         const forDeleteMatch = workingLocationData.find(loc => {
@@ -3531,6 +3540,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 console.log(`[3DViewerModifier] Loading ${archObjects.length} architectural elements from arch-objects.json`);
 
                 let elements = archObjects as ArchitecturalObject[];
+
+                // Reset modification flags - loaded state is now the "default" state
+                // This ensures purple bounding boxes don't appear on load
+                elements = elements.map(obj => ({
+                  ...obj,
+                  wasMoved: false,
+                  wasRotated: false,
+                  // Update original values to match current values
+                  originalPosX: obj.posX,
+                  originalPosY: obj.posY,
+                  originalPosZ: obj.posZ,
+                  originalRotationX: obj.rotationX,
+                  originalRotationY: obj.rotationY,
+                  originalRotationZ: obj.rotationZ,
+                  originalWidth: obj.width,
+                  originalHeight: obj.height,
+                  originalDepth: obj.depth
+                }));
 
                 // First, assign default variants to doors that don't have them
                 elements = elements.map(obj => {
