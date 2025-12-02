@@ -6,6 +6,9 @@ import type { ExtractedFile } from '../utils/zipUtils';
 import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
 
+// Fixture area extension constant (480mm)
+const FIXTURE_AREA_EXTENSION = 0.48;
+
 // Camera controller to handle dynamic camera mode switching
 interface CameraControllerProps {
   mode: 'perspective' | 'orthographic';
@@ -81,6 +84,71 @@ function BoundingBox({ size, position, color, renderOrder = 999 }: BoundingBoxPr
   );
 }
 
+// Fixture area rectangle component
+interface FixtureAreaRectangleProps {
+  boundingBox: { size: number[], center: number[] };
+  fixtureType?: string;
+  rotation?: [number, number, number];
+}
+
+function FixtureAreaRectangle({ boundingBox, fixtureType, rotation = [0, 0, 0] }: FixtureAreaRectangleProps) {
+  // Blue for WALL-BAY fixtures, green for all others
+  const color = fixtureType === 'WALL-BAY' ? '#2196F3' : '#4CAF50';
+
+  let width: number;
+  let depth: number;
+  let position: [number, number, number];
+  let meshRotation: [number, number, number];
+
+  if (fixtureType === 'WALL-BAY') {
+    // WALL-BAY: Only extend 480mm in front (no sides or back)
+    // Width stays the same (no extension on sides)
+    width = boundingBox.size[0] || 1;
+    // Depth: fixture depth + extension in front only
+    depth = (boundingBox.size[2] || 1) + FIXTURE_AREA_EXTENSION;
+
+    // Calculate forward offset (half of the extension distance)
+    const forwardOffset = FIXTURE_AREA_EXTENSION / 2;
+    const rotationY = rotation[1]; // Y rotation for horizontal orientation
+
+    // Offset position forward based on rotation
+    const offsetX = Math.sin(rotationY) * forwardOffset;
+    const offsetZ = Math.cos(rotationY) * forwardOffset;
+
+    position = [
+      (boundingBox.center[0] || 0) + offsetX,
+      0.005,
+      (boundingBox.center[2] || 0) + offsetZ
+    ];
+
+    // Apply the fixture's rotation to the area rectangle
+    meshRotation = [-Math.PI / 2, rotationY, 0];
+  } else {
+    // Other fixtures: Extend 480mm on all sides
+    width = (boundingBox.size[0] || 1) + (2 * FIXTURE_AREA_EXTENSION);
+    depth = (boundingBox.size[2] || 1) + (2 * FIXTURE_AREA_EXTENSION);
+    position = [
+      boundingBox.center[0] || 0,
+      0.005,
+      boundingBox.center[2] || 0
+    ];
+    meshRotation = [-Math.PI / 2, 0, 0];
+  }
+
+  return (
+    <mesh position={position} rotation={meshRotation}>
+      <planeGeometry args={[width, depth]} />
+      <meshBasicMaterial
+        color={color}
+        transparent
+        opacity={0.3}
+        side={THREE.DoubleSide}
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+
 interface BillboardProps {
   children: React.ReactNode;
   position: [number, number, number];
@@ -152,9 +220,11 @@ interface LocationGLBProps {
   isTransforming?: boolean;
   showFixtureLabels?: boolean;
   pendingMultiDelta?: [number, number, number] | null;
+  showFixtureArea?: boolean;
+  fixtureType?: string;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -363,6 +433,15 @@ ${location.hierarchy}`}
             </Text>
           </Billboard>
         )}
+
+        {/* Fixture area rectangle */}
+        {showFixtureArea && (
+          <FixtureAreaRectangle
+            boundingBox={stackBoundingBox}
+            fixtureType={fixtureType}
+            rotation={[rotationX, rotationY, rotationZ]}
+          />
+        )}
       </group>
 
       {/* Transform controls for editing mode - only show for single selection */}
@@ -419,6 +498,8 @@ ${location.hierarchy}`}
     prevProps.isTransforming === nextProps.isTransforming &&
     prevProps.transformSpace === nextProps.transformSpace &&
     prevProps.showFixtureLabels === nextProps.showFixtureLabels &&
+    prevProps.showFixtureArea === nextProps.showFixtureArea &&
+    prevProps.fixtureType === nextProps.fixtureType &&
     // Compare pendingMultiDelta (deep comparison for arrays)
     (prevProps.pendingMultiDelta === nextProps.pendingMultiDelta || (
       prevProps.pendingMultiDelta?.[0] === nextProps.pendingMultiDelta?.[0] &&
@@ -1394,6 +1475,7 @@ interface Canvas3DProps {
   showWireframe: boolean;
   showFixtureLabels: boolean;
   showWalls: boolean;
+  showFixtureArea: boolean;
   selectedLocations: LocationData[];
   // Architectural objects props
   architecturalObjects?: ArchitecturalObject[];
@@ -1447,6 +1529,7 @@ export function Canvas3D({
   showWireframe,
   showFixtureLabels,
   showWalls,
+  showFixtureArea,
   selectedLocations,
   architecturalObjects = [],
   isAddingObject = false,
@@ -1594,6 +1677,8 @@ export function Canvas3D({
                 transformSpace={transformSpace}
                 isTransforming={isTransforming}
                 showFixtureLabels={showFixtureLabels}
+                showFixtureArea={showFixtureArea}
+                fixtureType={fixtureTypeMap.get(location.blockName)}
                 onPositionChange={editMode ? onPositionChange : undefined}
                 pendingMultiDelta={pendingMultiDelta}
                 {...(editMode && {

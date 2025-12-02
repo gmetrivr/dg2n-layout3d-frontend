@@ -17,6 +17,7 @@ interface LeftControlPanelProps {
   showWireframe: boolean;
   showFixtureLabels: boolean;
   showWalls: boolean;
+  showFixtureArea: boolean;
   editMode: boolean;
   editFloorplatesMode: boolean;
   setSpawnPointMode: boolean;
@@ -71,6 +72,7 @@ interface LeftControlPanelProps {
   onShowWireframeChange: (show: boolean) => void;
   onShowFixtureLabelsChange: (show: boolean) => void;
   onShowWallsChange: (show: boolean) => void;
+  onShowFixtureAreaChange: (show: boolean) => void;
   onEditModeChange: (enabled: boolean) => void;
   onSetSpawnPointModeChange: (enabled: boolean) => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
@@ -94,6 +96,7 @@ export function LeftControlPanel({
   showWireframe,
   showFixtureLabels,
   showWalls,
+  showFixtureArea,
   editMode,
   editFloorplatesMode,
   setSpawnPointMode,
@@ -126,6 +129,7 @@ export function LeftControlPanel({
   onShowWireframeChange,
   onShowFixtureLabelsChange,
   onShowWallsChange,
+  onShowFixtureAreaChange,
   onEditModeChange,
   onSetSpawnPointModeChange,
   onTransformSpaceChange,
@@ -344,7 +348,19 @@ export function LeftControlPanel({
           />
           <label htmlFor="showFixtureLabels" className="text-sm font-medium">Show Fixture Labels</label>
         </div>
-        
+
+        {/* Fixture Area Checkbox */}
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="showFixtureArea"
+            checked={showFixtureArea}
+            onChange={(e) => onShowFixtureAreaChange(e.target.checked)}
+            className="w-4 h-4"
+          />
+          <label htmlFor="showFixtureArea" className="text-sm font-medium">Fixture Area</label>
+        </div>
+
         {/* Fixture Type Filter */}
         {fixtureTypes.length > 0 && (
           <div className="flex flex-col gap-2">

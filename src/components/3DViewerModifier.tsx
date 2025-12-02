@@ -359,6 +359,7 @@ export function ThreeDViewerModifier() {
 
   const [showFixtureLabels, setShowFixtureLabels] = useState(false);
   const [showWalls, setShowWalls] = useState(true);
+  const [showFixtureArea, setShowFixtureArea] = useState(false);
   const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('local');
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
@@ -4089,6 +4090,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           showWireframe={showWireframe}
           showFixtureLabels={showFixtureLabels}
           showWalls={showWalls}
+          showFixtureArea={showFixtureArea}
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
           setSpawnPointMode={setSpawnPointMode}
@@ -4123,6 +4125,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onShowWireframeChange={setShowWireframe}
           onShowFixtureLabelsChange={setShowFixtureLabels}
           onShowWallsChange={setShowWalls}
+          onShowFixtureAreaChange={setShowFixtureArea}
           onEditModeChange={handleEditModeChange}
           onSetSpawnPointModeChange={setSetSpawnPointMode}
           onTransformSpaceChange={setTransformSpace}
@@ -4159,6 +4162,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           showWireframe={showWireframe}
           showFixtureLabels={showFixtureLabels}
           showWalls={showWalls}
+          showFixtureArea={showFixtureArea}
           selectedLocations={selectedLocations}
           architecturalObjects={architecturalObjects}
           isAddingObject={isAddingObject}
