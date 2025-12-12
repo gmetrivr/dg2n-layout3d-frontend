@@ -88,6 +88,28 @@ export interface DirectRenderTypesResponse {
   count: number;
 }
 
+export interface FixtureTypesWithVariantsResponse {
+  pipeline_version: string;
+  fixture_types_with_variants: string[];
+  count: number;
+}
+
+export interface FixtureVariant {
+  id: string;              // Variant ID (e.g., "stair_straight")
+  name: string;            // Display name (e.g., "Straight Staircase")
+  description?: string;    // Variant description
+  url: string;             // GLB file URL
+  // Deprecated fields (for backwards compatibility):
+  block_name?: string;     // Deprecated: use 'name' instead
+  glb_url?: string;        // Deprecated: use 'url' instead
+}
+
+export interface FixtureTypeVariantsResponse {
+  fixture_type: string;
+  variants: FixtureVariant[];
+  count: number;
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -334,6 +356,28 @@ export const apiService = {
 
     if (!response.ok) {
       throw new Error(`Failed to get direct render types: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // Get all fixture types that support multiple variants
+  async getFixtureTypesWithVariants(pipelineVersion: string = '02'): Promise<FixtureTypesWithVariantsResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/variants?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get fixture types with variants: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // Get all variants for a specific fixture type
+  async getFixtureTypeVariants(fixtureType: string, pipelineVersion: string = '02'): Promise<FixtureTypeVariantsResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/variants?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get variants for fixture type ${fixtureType}: ${response.statusText}`);
     }
 
     return response.json();

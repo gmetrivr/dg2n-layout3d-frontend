@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Button } from './button';
 
@@ -28,9 +29,13 @@ interface DialogDescriptionProps {
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div 
+  // Check if dark mode is active
+  const isDark = document.documentElement.classList.contains('dark') ||
+                 window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  const dialogContent = (
+    <div className={`fixed inset-0 z-[9999] flex items-center justify-center ${isDark ? 'dark' : ''}`}>
+      <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
@@ -39,6 +44,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       </div>
     </div>
   );
+
+  return createPortal(dialogContent, document.body);
 }
 
 export function DialogContent({ children, className = "" }: DialogContentProps) {
@@ -87,7 +94,7 @@ export function DialogClose({ onClick }: DialogCloseProps) {
       variant="outline"
       size="sm"
       onClick={onClick}
-      className="h-6 w-6 p-0"
+      className="h-6 w-6 p-0 text-foreground hover:text-foreground hover:bg-accent"
     >
       <X className="h-4 w-4" />
     </Button>

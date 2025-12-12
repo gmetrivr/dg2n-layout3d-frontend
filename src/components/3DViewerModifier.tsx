@@ -7,7 +7,7 @@ import { GLTFExporter, GLTFLoader, DRACOLoader } from 'three-stdlib';
 import type { GLTF } from 'three-stdlib';
 import { Button } from "@/shadcn/components/ui/button";
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import { apiService, type JobStatus, type BrandCategoriesResponse } from '../services/api';
+import { apiService, type JobStatus, type BrandCategoriesResponse, type FixtureVariant } from '../services/api';
 import { extractZipFiles, isFloorFile, isShatteredFloorPlateFile, type ExtractedFile } from '../utils/zipUtils';
 import JSZip from 'jszip';
 import { BrandSelectionModal } from './BrandSelectionModal';
@@ -26,6 +26,7 @@ import { supabase } from '../lib/supabaseClient';
 import { loadStoreMasterData, getUniqueStoreCodes, type StoreData } from '../utils/csvUtils';
 import { generateSpaceTrackerData, spaceTrackerToCSV, downloadSpaceTrackerCSV } from '../utils/spaceTrackerUtils';
 import { AddObjectModal } from './AddObjectModal';
+import { VariantSelectionModal } from './VariantSelectionModal';
 import { ObjectInfoPanel } from './ObjectInfoPanel';
 
 // Fixture type mapping
@@ -264,9 +265,15 @@ export type ArchitecturalObjectType =
   | 'partition'
   | 'entrance_door'
   | 'exit_door'
+  | 'door'
   | 'window'
   | 'column'
-  | 'wall';
+  | 'wall'
+  | 'staircase'
+  | 'toilet'
+  | 'trial_room'
+  | 'boh'
+  | 'cash_till';
 
 export interface ArchitecturalObject {
   id: string;
@@ -396,12 +403,18 @@ export function ThreeDViewerModifier() {
   const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
 
+  // Variant selection for architectural objects
+  const [archObjectVariantModalOpen, setArchObjectVariantModalOpen] = useState(false);
+  const [pendingArchObjectType, setPendingArchObjectType] = useState<ArchitecturalObjectType | null>(null);
+  const [pendingArchObjectPoint, setPendingArchObjectPoint] = useState<[number, number, number] | null>(null);
+
   // Measurement tool state
   const [isMeasuring, setIsMeasuring] = useState(false);
   const [measurementPoints, setMeasurementPoints] = useState<[number, number, number][]>([]);
   const justCreatedObjectRef = useRef<boolean>(false); // Track if we just created an object
   const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
+  const selectedVariantRef = useRef<{ block_name: string; glb_url: string } | null>(null); // Store selected variant for arch objects
   const [isDragging, setIsDragging] = useState(false); // Track drag state for file upload
   const floorNamesInitializedRef = useRef<boolean>(false); // Track if floor names have been extracted
   const isUnmountingRef = useRef(false); // Track unmounting state to prevent operations during unmount
@@ -790,13 +803,76 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
 
+  // Mapping from architectural object types to fixture types for API calls
+  // These must match the fixture types defined in the backend config.py
+  const getFixtureTypeForArchObject = (objectType: ArchitecturalObjectType): string => {
+    const mapping: Record<ArchitecturalObjectType, string> = {
+      'entrance_door': 'ENTRANCE',        // Backend uses 'ENTRANCE'
+      'exit_door': 'FIRE-EXIT',          // Backend uses 'FIRE-EXIT'
+      'door': 'DOOR',                    // Backend uses 'DOOR' (interior doors)
+      'staircase': 'STAIRCASE',          // Backend uses 'STAIRCASE'
+      'toilet': 'TOILET',                // Backend uses 'TOILET'
+      'trial_room': 'TRIAL-ROOM',        // Backend uses 'TRIAL-ROOM' (with hyphen)
+      'boh': 'BOH',                      // Backend uses 'BOH'
+      'cash_till': 'CASH-TILL',          // Backend uses 'CASH-TILL' (with hyphen)
+      'glazing': 'GLAZING',
+      'partition': 'PARTITION'
+    };
+    return mapping[objectType] || objectType.toUpperCase();
+  };
+
   // Handler for object type selection from modal
   const handleObjectTypeSelect = useCallback((objectType: ArchitecturalObjectType) => {
-    setCurrentObjectType(objectType);
-    setIsAddingObject(true);
-    setObjectPlacementPoint(null); // Reset placement point
-    // Cursor will change in Canvas3D when isAddingObject is true
+    // Check if this is a single-point element that needs variant selection
+    const isSinglePoint = objectType === 'entrance_door' ||
+                         objectType === 'exit_door' ||
+                         objectType === 'door' ||
+                         objectType === 'staircase' ||
+                         objectType === 'toilet' ||
+                         objectType === 'trial_room' ||
+                         objectType === 'boh' ||
+                         objectType === 'cash_till';
+
+    if (isSinglePoint) {
+      // Show variant selection modal for single-point elements
+      setPendingArchObjectType(objectType);
+      setArchObjectVariantModalOpen(true);
+    } else {
+      // For two-point elements (glazing, partition), start placement immediately
+      setCurrentObjectType(objectType);
+      setIsAddingObject(true);
+      setObjectPlacementPoint(null);
+    }
   }, []);
+
+  // Handler for variant selection for architectural objects
+  const handleArchObjectVariantSelect = useCallback((variant: { id: string; name: string; url: string; description?: string }) => {
+    if (!pendingArchObjectType) return;
+
+    console.log('[3DViewerModifier] Variant selected for arch object:', {
+      type: pendingArchObjectType,
+      variantId: variant.id,
+      variantName: variant.name,
+      glbUrl: variant.url
+    });
+
+    // Start placement mode with the selected variant info stored
+    setCurrentObjectType(pendingArchObjectType);
+    setIsAddingObject(true);
+    setObjectPlacementPoint(null);
+
+    // Store the variant info so it can be used when creating the object
+    // We'll use a ref to avoid re-renders during placement
+    // Convert to the format expected by the object creation code
+    selectedVariantRef.current = {
+      block_name: variant.name,  // Use variant name as block name
+      glb_url: variant.url       // Use variant URL as GLB URL
+    };
+
+    // Clear pending state
+    setPendingArchObjectType(null);
+    setPendingArchObjectPoint(null);
+  }, [pendingArchObjectType]);
 
   // Handler for floor click during object placement
   const handleFloorClickForObjectPlacement = useCallback((point: [number, number, number]) => {
@@ -809,19 +885,44 @@ export function ThreeDViewerModifier() {
     // Force placement at ground level (y = 0)
     const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
 
-    // Check if this is a single-point element (doors)
-    const isSinglePoint = currentObjectType === 'entrance_door' || currentObjectType === 'exit_door';
+    // Check if this is a single-point element (doors and other single-point architectural objects)
+    const isSinglePoint = currentObjectType === 'entrance_door' ||
+                         currentObjectType === 'exit_door' ||
+                         currentObjectType === 'door' ||
+                         currentObjectType === 'staircase' ||
+                         currentObjectType === 'toilet' ||
+                         currentObjectType === 'trial_room' ||
+                         currentObjectType === 'boh' ||
+                         currentObjectType === 'cash_till';
 
     if (isSinglePoint) {
       // Single-point placement - create immediately on first click
-      const defaultDimensions = currentObjectType === 'entrance_door'
-        ? { width: 1.5, height: 3.0, depth: 0.1 }
-        : { width: 1.0, height: 2.5, depth: 0.1 };
+      // Default dimensions for each object type
+      let defaultDimensions = { width: 1.5, height: 3.0, depth: 0.1 };
+      if (currentObjectType === 'entrance_door') defaultDimensions = { width: 1.5, height: 3.0, depth: 0.1 };
+      else if (currentObjectType === 'exit_door') defaultDimensions = { width: 1.0, height: 2.5, depth: 0.1 };
+      else if (currentObjectType === 'door') defaultDimensions = { width: 0.9, height: 2.1, depth: 0.1 };
+      else if (currentObjectType === 'staircase') defaultDimensions = { width: 2.0, height: 3.0, depth: 1.5 };
+      else if (currentObjectType === 'toilet') defaultDimensions = { width: 1.5, height: 2.5, depth: 1.5 };
+      else if (currentObjectType === 'trial_room') defaultDimensions = { width: 1.5, height: 2.5, depth: 1.5 };
+      else if (currentObjectType === 'boh') defaultDimensions = { width: 2.0, height: 2.5, depth: 2.0 };
+      else if (currentObjectType === 'cash_till') defaultDimensions = { width: 1.0, height: 1.2, depth: 0.6 };
 
-      // Default block names for doors
-      const defaultBlockName = currentObjectType === 'entrance_door'
-        ? '1500 DOUBLE GLAZING 2'  // Default entrance door block name
-        : 'FIRE EXIT';  // Default exit door block name
+      // Default block names for each object type (to be configured in backend)
+      let defaultBlockName = 'PLACEHOLDER';
+      if (currentObjectType === 'entrance_door') defaultBlockName = '1500 DOUBLE GLAZING 2';
+      else if (currentObjectType === 'exit_door') defaultBlockName = 'FIRE EXIT';
+      else if (currentObjectType === 'door') defaultBlockName = 'DOOR';
+      else if (currentObjectType === 'staircase') defaultBlockName = 'STAIRCASE';
+      else if (currentObjectType === 'toilet') defaultBlockName = 'TOILET';
+      else if (currentObjectType === 'trial_room') defaultBlockName = 'TRIAL ROOM';
+      else if (currentObjectType === 'boh') defaultBlockName = 'BOH';
+      else if (currentObjectType === 'cash_till') defaultBlockName = 'CASH TILL';
+
+      // Get variant info from the selected variant (from modal)
+      const variantInfo = selectedVariantRef.current;
+      const variantBlockName = variantInfo?.block_name || defaultBlockName;
+      const variantGlbUrl = variantInfo?.glb_url;
 
       // Coordinate mapping: groundLevelPoint is [x, y, z] in Three.js world (y=0 is ground)
       // DoorGLB renders with position [posX, posZ, -posY], so we need to reverse this:
@@ -831,7 +932,7 @@ export function ThreeDViewerModifier() {
       const newObject: ArchitecturalObject = {
         id: `${currentObjectType}_${currentFloor}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: currentObjectType,
-        variant: defaultBlockName,  // Set default variant/block name
+        variant: variantBlockName,
         floorIndex: currentFloor,
         posX: groundLevelPoint[0],      // X stays same
         posY: -groundLevelPoint[2],     // 3D Z -> CSV Y (negated)
@@ -856,67 +957,39 @@ export function ThreeDViewerModifier() {
         wasRotated: false,
         wasResized: false,
         customProperties: {
-          doorType: currentObjectType === 'entrance_door' ? 'entrance' : 'exit'
+          objectCategory: 'single_point_element',
+          glbUrl: variantGlbUrl  // Use GLB URL from selected variant
         }
       };
 
-      // Fetch GLB URL for the default block name and add the object
-      loadFixtureGLBs([defaultBlockName]).then(glbUrlMap => {
-        const glbUrl = glbUrlMap.get(defaultBlockName);
-
-        const objectWithGlb: ArchitecturalObject = {
-          ...newObject,
-          customProperties: {
-            ...newObject.customProperties,
-            glbUrl: glbUrl
-          }
-        };
-
-        console.log(`[3DViewerModifier] Creating new door with GLB URL:`, {
-          type: currentObjectType,
-          variant: defaultBlockName,
-          hasGlbUrl: !!glbUrl
-        });
-
-        setArchitecturalObjects(prev => [...prev, objectWithGlb]);
-
-        // Set flag to prevent onPointerMissed from clearing selection
-        justCreatedObjectRef.current = true;
-
-        // Select the newly created object
-        setTimeout(() => {
-          console.log('Selecting newly created door:', objectWithGlb.id, objectWithGlb.type);
-          setSelectedObject(objectWithGlb);
-          setSelectedLocation(null);
-          setSelectedLocations([]);
-          setSelectedFloorPlate(null);
-
-          setTimeout(() => {
-            justCreatedObjectRef.current = false;
-          }, 100);
-        }, 0);
-      }).catch(err => {
-        console.error(`[3DViewerModifier] Failed to fetch GLB URL for ${defaultBlockName}:`, err);
-
-        // Add object without GLB as fallback
-        setArchitecturalObjects(prev => [...prev, newObject]);
-
-        // Set flag to prevent onPointerMissed from clearing selection
-        justCreatedObjectRef.current = true;
-
-        // Select the newly created object
-        setTimeout(() => {
-          console.log('Selecting newly created door:', newObject.id, newObject.type);
-          setSelectedObject(newObject);
-          setSelectedLocation(null);
-          setSelectedLocations([]);
-          setSelectedFloorPlate(null);
-
-          setTimeout(() => {
-            justCreatedObjectRef.current = false;
-          }, 100);
-        }, 0);
+      console.log(`[3DViewerModifier] Creating new architectural object with GLB URL:`, {
+        type: currentObjectType,
+        variant: variantBlockName,
+        glbUrl: variantGlbUrl,
+        hasGlbUrl: !!variantGlbUrl
       });
+
+      // Add the object directly with the GLB URL from the variant
+      setArchitecturalObjects(prev => [...prev, newObject]);
+
+      // Clear the selected variant ref for next use
+      selectedVariantRef.current = null;
+
+      // Set flag to prevent onPointerMissed from clearing selection
+      justCreatedObjectRef.current = true;
+
+      // Select the newly created object
+      setTimeout(() => {
+        console.log('Selecting newly created architectural object:', newObject.id, newObject.type);
+        setSelectedObject(newObject);
+        setSelectedLocation(null);
+        setSelectedLocations([]);
+        setSelectedFloorPlate(null);
+
+        setTimeout(() => {
+          justCreatedObjectRef.current = false;
+        }, 100);
+      }, 0);
 
       // Reset placement state immediately for single-point elements
       setIsAddingObject(false);
@@ -1377,6 +1450,42 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedObject]);
 
+  // Handler for object variant change
+  const handleObjectVariantChange = useCallback((object: ArchitecturalObject, variant: FixtureVariant) => {
+    console.log(`[3DViewerModifier] Changing variant for ${object.type} ${object.id} to:`, variant);
+
+    // Use new field names (name, url) with fallback to deprecated ones (block_name, glb_url)
+    const variantName = variant.name || variant.block_name || 'Unknown';
+    const variantUrl = variant.url || variant.glb_url;
+
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (obj.id === object.id) {
+        return {
+          ...obj,
+          variant: variantName,
+          customProperties: {
+            ...obj.customProperties,
+            glbUrl: variantUrl
+          }
+        };
+      }
+      return obj;
+    }));
+
+    // Update selected object as well
+    setSelectedObject(prev => {
+      if (!prev || prev.id !== object.id) return prev;
+      return {
+        ...prev,
+        variant: variantName,
+        customProperties: {
+          ...prev.customProperties,
+          glbUrl: variantUrl
+        }
+      };
+    });
+  }, []);
+
   // Helper function to get floor index mapping if floors have been reordered or deleted
   const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
     if (!floorDisplayOrder || floorDisplayOrder.length === 0) {
@@ -1683,17 +1792,25 @@ export function ThreeDViewerModifier() {
       const floorModel = floorGLTF.scene.clone();
       exportScene.add(floorModel);
 
-      // Add architectural objects (glazing, partitions, and doors) for this floor
+      // Add architectural objects (glazing, partitions, and single-point elements) for this floor
       const currentFloorObjects = workingArchObjects.filter(obj => obj.floorIndex === floorIndex);
 
       for (const obj of currentFloorObjects) {
-        // Handle door objects (entrance_door, exit_door) - single point with rotation
-        if (obj.type === 'entrance_door' || obj.type === 'exit_door') {
+        // Handle single-point elements (doors, staircase, toilet, etc.) - single point with rotation
+        const isSinglePointElement = obj.type === 'entrance_door' ||
+                                     obj.type === 'exit_door' ||
+                                     obj.type === 'staircase' ||
+                                     obj.type === 'toilet' ||
+                                     obj.type === 'trial_room' ||
+                                     obj.type === 'boh' ||
+                                     obj.type === 'cash_till';
+
+        if (isSinglePointElement) {
           const { posX, posY, posZ, rotationX, rotationY, rotationZ, width, height, depth } = obj;
 
           // Skip if missing required properties
           if (posX === undefined || posY === undefined || posZ === undefined) {
-            console.warn(`Skipping door ${obj.id}: missing required position properties`);
+            console.warn(`Skipping ${obj.type} ${obj.id}: missing required position properties`);
             continue;
           }
 
@@ -1706,100 +1823,111 @@ export function ThreeDViewerModifier() {
             -(posY || 0)    // Z is negated CSV posY
           ];
 
-          // Create door group at the correct position (matching DoorGLB component)
-          const doorGroup = new THREE.Group();
-          doorGroup.position.set(threePosition[0], threePosition[1], threePosition[2]);
+          // Create element group at the correct position (matching DoorGLB component)
+          const elementGroup = new THREE.Group();
+          elementGroup.position.set(threePosition[0], threePosition[1], threePosition[2]);
 
           // Apply rotation - convert from degrees to radians (matching DoorGLB component)
           // Canvas3D.tsx:778 uses rotation order: [rotationX, rotationZ, rotationY]
           const rotX = ((rotationX || 0) * Math.PI) / 180;
           const rotY = ((rotationY || 0) * Math.PI) / 180;
           const rotZ = ((rotationZ || 0) * Math.PI) / 180;
-          doorGroup.rotation.set(rotX, rotZ, rotY); // Note: Y and Z are swapped!
+          elementGroup.rotation.set(rotX, rotZ, rotY); // Note: Y and Z are swapped!
 
-          // Check if door has a GLB URL (actual door model)
+          // Check if element has a GLB URL (actual 3D model)
           const glbUrl = obj.customProperties?.glbUrl;
 
           if (glbUrl) {
-            // Load the actual door GLB model
+            // Load the actual GLB model
             try {
-              const doorGLTF = await new Promise<GLTF>((resolve, reject) => {
+              const elementGLTF = await new Promise<GLTF>((resolve, reject) => {
                 loader.load(glbUrl, resolve, undefined, reject);
               });
 
-              // Clone the door model and add to group
-              const doorModel = doorGLTF.scene.clone();
-              doorGroup.add(doorModel);
-              console.log(`[Baking] Loaded door GLB model from ${glbUrl}`);
+              // Clone the model and add to group
+              const elementModel = elementGLTF.scene.clone();
+              elementGroup.add(elementModel);
+              console.log(`[Baking] Loaded ${obj.type} GLB model from ${glbUrl}`);
             } catch (error) {
-              console.error(`[Baking] Failed to load door GLB from ${glbUrl}, using fallback geometry:`, error);
+              console.error(`[Baking] Failed to load ${obj.type} GLB from ${glbUrl}, using fallback geometry:`, error);
               // Fall through to create fallback geometry
             }
           }
 
           // If no GLB URL or loading failed, create fallback geometry
-          if (!glbUrl || doorGroup.children.length === 0) {
-            console.log(`[Baking] Using fallback box geometry for door ${obj.id}`);
+          if (!glbUrl || elementGroup.children.length === 0) {
+            console.log(`[Baking] Using fallback box geometry for ${obj.type} ${obj.id}`);
             const fallbackWidth = width || 1.5;
             const fallbackHeight = height || 3.0;
             const fallbackDepth = depth || 0.1;
 
-            // Create door frame (darker material)
+            // Get color based on element type
+            let frameColor = 0x333333;
+            let panelColor = 0x8B4513;
+            if (obj.type === 'entrance_door') { frameColor = 0x333333; panelColor = 0x8B4513; }
+            else if (obj.type === 'exit_door') { frameColor = 0xCC0000; panelColor = 0xFF6666; }
+            else if (obj.type === 'staircase') { frameColor = 0x2C4B6B; panelColor = 0x4682B4; }
+            else if (obj.type === 'toilet') { frameColor = 0x1A8A8A; panelColor = 0x20B2AA; }
+            else if (obj.type === 'trial_room') { frameColor = 0x9B6BAD; panelColor = 0xDDA0DD; }
+            else if (obj.type === 'boh') { frameColor = 0x8B6330; panelColor = 0xCD853F; }
+            else if (obj.type === 'cash_till') { frameColor = 0xB8960F; panelColor = 0xFFD700; }
+
+            // Create frame (darker material)
             const frameMaterial = new THREE.MeshStandardMaterial({
-              color: obj.type === 'entrance_door' ? 0x333333 : 0xCC0000,
+              color: frameColor,
               metalness: 0.5,
               roughness: 0.5
             });
 
-            // Door panel (slightly inset from frame)
-            const doorMaterial = new THREE.MeshStandardMaterial({
-              color: obj.type === 'entrance_door' ? 0x8B4513 : 0xFF6666,
+            // Panel (slightly inset from frame)
+            const panelMaterial = new THREE.MeshStandardMaterial({
+              color: panelColor,
               metalness: 0.1,
               roughness: 0.8
             });
 
-            // Main door panel - centered at group origin
-            const doorPanel = new THREE.Mesh(
+            // Main panel - centered at group origin
+            const mainPanel = new THREE.Mesh(
               new THREE.BoxGeometry(fallbackWidth * 0.9, fallbackHeight * 0.9, fallbackDepth * 0.5),
-              doorMaterial
+              panelMaterial
             );
-            doorPanel.position.set(0, 0, 0);
-            doorGroup.add(doorPanel);
+            mainPanel.position.set(0, 0, 0);
+            elementGroup.add(mainPanel);
 
-            // Door frame - top
+            // Frame - top
             const topFrame = new THREE.Mesh(
               new THREE.BoxGeometry(fallbackWidth, fallbackHeight * 0.05, fallbackDepth),
               frameMaterial
             );
             topFrame.position.set(0, fallbackHeight / 2 - (fallbackHeight * 0.025), 0);
-            doorGroup.add(topFrame);
+            elementGroup.add(topFrame);
 
-            // Door frame - bottom
+            // Frame - bottom
             const bottomFrame = new THREE.Mesh(
               new THREE.BoxGeometry(fallbackWidth, fallbackHeight * 0.05, fallbackDepth),
               frameMaterial
             );
             bottomFrame.position.set(0, -fallbackHeight / 2 + (fallbackHeight * 0.025), 0);
-            doorGroup.add(bottomFrame);
+            elementGroup.add(bottomFrame);
 
-            // Door frame - left
+            // Frame - left
             const leftFrame = new THREE.Mesh(
               new THREE.BoxGeometry(fallbackWidth * 0.05, fallbackHeight * 0.9, fallbackDepth),
               frameMaterial
             );
             leftFrame.position.set(-fallbackWidth / 2 + (fallbackWidth * 0.025), 0, 0);
-            doorGroup.add(leftFrame);
+            elementGroup.add(leftFrame);
 
-            // Door frame - right
+            // Frame - right
             const rightFrame = new THREE.Mesh(
               new THREE.BoxGeometry(fallbackWidth * 0.05, fallbackHeight * 0.9, fallbackDepth),
               frameMaterial
             );
             rightFrame.position.set(fallbackWidth / 2 - (fallbackWidth * 0.025), 0, 0);
-            doorGroup.add(rightFrame);
+            elementGroup.add(rightFrame);
           }
 
-          exportScene.add(doorGroup);
+          exportScene.add(elementGroup);
           continue; // Skip to next object
         }
 
@@ -3428,11 +3556,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       if (isUnmountingRef.current) return; // Skip if unmounting
       try {
         const allTypes = await apiService.getAllFixtureTypes();
-        setFixtureTypes(allTypes);
+        // Filter out architectural object types
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL'];
+        const fixtureOnlyTypes = allTypes.filter(type => !architecturalTypes.includes(type));
+        setFixtureTypes(fixtureOnlyTypes);
       } catch (error) {
         console.warn('Failed to load fixture types from API:', error);
         // Fallback to hardcoded types from mapping
-        setFixtureTypes(Object.values(FIXTURE_TYPE_MAPPING));
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL'];
+        const fixtureOnlyTypes = Object.values(FIXTURE_TYPE_MAPPING).filter(type => !architecturalTypes.includes(type));
+        setFixtureTypes(fixtureOnlyTypes);
       }
     };
 
@@ -3560,12 +3693,26 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   originalDepth: obj.depth
                 }));
 
-                // First, assign default variants to doors that don't have them
+                // First, assign default variants to single-point elements that don't have them
                 elements = elements.map(obj => {
-                  if ((obj.type === 'entrance_door' || obj.type === 'exit_door') && !obj.variant) {
-                    const defaultBlockName = obj.type === 'entrance_door'
-                      ? '1500 DOUBLE GLAZING 2'
-                      : 'FIRE EXIT';
+                  const isSinglePointElement = obj.type === 'entrance_door' ||
+                                              obj.type === 'exit_door' ||
+                                              obj.type === 'staircase' ||
+                                              obj.type === 'toilet' ||
+                                              obj.type === 'trial_room' ||
+                                              obj.type === 'boh' ||
+                                              obj.type === 'cash_till';
+
+                  if (isSinglePointElement && !obj.variant) {
+                    let defaultBlockName = 'PLACEHOLDER';
+                    if (obj.type === 'entrance_door') defaultBlockName = '1500 DOUBLE GLAZING 2';
+                    else if (obj.type === 'exit_door') defaultBlockName = 'FIRE EXIT';
+                    else if (obj.type === 'staircase') defaultBlockName = 'STAIRCASE';
+                    else if (obj.type === 'toilet') defaultBlockName = 'TOILET';
+                    else if (obj.type === 'trial_room') defaultBlockName = 'TRIAL ROOM';
+                    else if (obj.type === 'boh') defaultBlockName = 'BOH';
+                    else if (obj.type === 'cash_till') defaultBlockName = 'CASH TILL';
+
                     console.log(`[3DViewerModifier] Assigning default variant to ${obj.type}: ${defaultBlockName}`);
                     return {
                       ...obj,
@@ -3575,31 +3722,42 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   return obj;
                 });
 
-                // Check if any doors are missing GLB URLs
-                const doorsNeedingGlb = elements.filter(obj =>
-                  (obj.type === 'entrance_door' || obj.type === 'exit_door') &&
-                  !obj.customProperties?.glbUrl &&
-                  obj.variant // Now all doors should have variants
-                );
+                // Check if any single-point elements are missing GLB URLs
+                const elementsNeedingGlb = elements.filter(obj => {
+                  const isSinglePointElement = obj.type === 'entrance_door' ||
+                                              obj.type === 'exit_door' ||
+                                              obj.type === 'staircase' ||
+                                              obj.type === 'toilet' ||
+                                              obj.type === 'trial_room' ||
+                                              obj.type === 'boh' ||
+                                              obj.type === 'cash_till';
+                  return isSinglePointElement && !obj.customProperties?.glbUrl && obj.variant;
+                });
 
-                if (doorsNeedingGlb.length > 0) {
-                  console.log(`[3DViewerModifier] ${doorsNeedingGlb.length} doors missing GLB URLs, fetching from backend...`);
+                if (elementsNeedingGlb.length > 0) {
+                  console.log(`[3DViewerModifier] ${elementsNeedingGlb.length} single-point elements missing GLB URLs, fetching from backend...`);
 
-                  // Get unique block names from doors
-                  const blockNames = [...new Set(doorsNeedingGlb.map(obj => obj.variant!))];
+                  // Get unique block names from single-point elements
+                  const blockNames = [...new Set(elementsNeedingGlb.map(obj => obj.variant!))];
 
                   // Fetch GLB URLs
                   loadFixtureGLBs(blockNames).then(glbUrlMap => {
                     console.log(`[3DViewerModifier] Received GLB URLs for block names:`, Array.from(glbUrlMap.keys()));
 
-                    // Update doors with GLB URLs
+                    // Update single-point elements with GLB URLs
                     const updatedElements = elements.map(obj => {
-                      if ((obj.type === 'entrance_door' || obj.type === 'exit_door') &&
-                          obj.variant &&
-                          !obj.customProperties?.glbUrl) {
+                      const isSinglePointElement = obj.type === 'entrance_door' ||
+                                                  obj.type === 'exit_door' ||
+                                                  obj.type === 'staircase' ||
+                                                  obj.type === 'toilet' ||
+                                                  obj.type === 'trial_room' ||
+                                                  obj.type === 'boh' ||
+                                                  obj.type === 'cash_till';
+
+                      if (isSinglePointElement && obj.variant && !obj.customProperties?.glbUrl) {
                         const glbUrl = glbUrlMap.get(obj.variant);
                         if (glbUrl) {
-                          console.log(`[3DViewerModifier] Adding GLB URL for door ${obj.id} (${obj.variant}): ${glbUrl}`);
+                          console.log(`[3DViewerModifier] Adding GLB URL for ${obj.type} ${obj.id} (${obj.variant}): ${glbUrl}`);
                           return {
                             ...obj,
                             customProperties: {
@@ -3608,7 +3766,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                             }
                           };
                         } else {
-                          console.warn(`[3DViewerModifier] No GLB URL found for door variant: ${obj.variant}`);
+                          console.warn(`[3DViewerModifier] No GLB URL found for ${obj.type} variant: ${obj.variant}`);
                         }
                       }
                       return obj;
@@ -4285,6 +4443,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onHeightChange={handleObjectHeightChange}
             onPositionChange={handleObjectPointsChange}
             onSinglePointPositionChange={handleSinglePointPositionChange}
+            onVariantChange={handleObjectVariantChange}
             onDelete={handleObjectDelete}
             onReset={handleObjectReset}
           />
@@ -4474,6 +4633,25 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onOpenChange={setAddObjectModalOpen}
         onObjectSelect={handleObjectTypeSelect}
       />
+
+      {/* Variant Selection Modal for Architectural Objects */}
+      {pendingArchObjectType && (
+        <VariantSelectionModal
+          open={archObjectVariantModalOpen}
+          onOpenChange={setArchObjectVariantModalOpen}
+          fixtureType={getFixtureTypeForArchObject(pendingArchObjectType)}
+          currentVariant=""
+          onVariantSelect={handleArchObjectVariantSelect}
+          pipelineVersion="02"
+          onBack={() => {
+            // Close variant modal and go back to object selection
+            setArchObjectVariantModalOpen(false);
+            setPendingArchObjectType(null);
+            setPendingArchObjectPoint(null);
+            setAddObjectModalOpen(true);
+          }}
+        />
+      )}
 
       {/* Save Store Dialog */}
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>

@@ -1755,12 +1755,21 @@ export function Canvas3D({
               onTransformEnd={() => setIsTransforming(false)}
             />
           );
-        } else if (obj.type === 'entrance_door' || obj.type === 'exit_door') {
-          // Check if door has GLB URL
+        } else if (
+          obj.type === 'entrance_door' ||
+          obj.type === 'exit_door' ||
+          obj.type === 'door' ||
+          obj.type === 'staircase' ||
+          obj.type === 'toilet' ||
+          obj.type === 'trial_room' ||
+          obj.type === 'boh' ||
+          obj.type === 'cash_till'
+        ) {
+          // Check if single-point element has GLB URL
           const glbUrl = obj.customProperties?.glbUrl;
 
           if (glbUrl) {
-            // Render door using GLB file
+            // Render single-point element using GLB file
             return (
               <DoorGLB
                 key={obj.id}
@@ -1777,17 +1786,41 @@ export function Canvas3D({
             );
           } else {
             // Fallback: render as simple box if no GLB
-            console.warn(`[Canvas3D] Door ${obj.id} (${obj.variant || 'unknown'}) has no GLB URL, using fallback box rendering`);
+            console.warn(`[Canvas3D] Single-point element ${obj.type} ${obj.id} (${obj.variant || 'unknown'}) has no GLB URL, using fallback box rendering`);
             const width = obj.width || 1.5;
             const height = obj.height || 3.0;
             const depth = obj.depth || 0.1;
-            const doorColor = obj.type === 'entrance_door' ? '#8B4513' : '#DC143C';
+
+            // Different colors for different types
+            let elementColor = '#8B4513'; // Default brown
+            if (obj.type === 'entrance_door') elementColor = '#8B4513'; // Brown
+            else if (obj.type === 'exit_door') elementColor = '#DC143C'; // Crimson
+            else if (obj.type === 'door') elementColor = '#A0522D'; // Sienna
+            else if (obj.type === 'staircase') elementColor = '#4682B4'; // Steel Blue
+            else if (obj.type === 'toilet') elementColor = '#20B2AA'; // Light Sea Green
+            else if (obj.type === 'trial_room') elementColor = '#DDA0DD'; // Plum
+            else if (obj.type === 'boh') elementColor = '#CD853F'; // Peru
+            else if (obj.type === 'cash_till') elementColor = '#FFD700'; // Gold
+
+            // Use same coordinate transformation as DoorGLB component
+            // DoorGLB uses: [posX, posZ, -posY] for position
+            // Box is centered, so we need to offset by height/2 in the Y direction (which is posZ in Three.js)
+            const fallbackPosition: [number, number, number] = [
+              obj.posX || 0,
+              (obj.posZ || 0) + height / 2,  // Y in Three.js is posZ in CSV, add height offset for centered box
+              -(obj.posY || 0)
+            ];
+
+            // Convert rotations from degrees to radians and apply same order as DoorGLB
+            const rotX = ((obj.rotationX || 0) * Math.PI) / 180;
+            const rotY = ((obj.rotationY || 0) * Math.PI) / 180;
+            const rotZ = ((obj.rotationZ || 0) * Math.PI) / 180;
 
             return (
               <group
                 key={obj.id}
-                position={[obj.posX || 0, (obj.posY || 0) + height / 2, obj.posZ || 0]}
-                rotation={[obj.rotationX || 0, obj.rotationY || 0, obj.rotationZ || 0]}
+                position={fallbackPosition}
+                rotation={[rotX, rotZ, rotY]}  // Same rotation order as DoorGLB
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onObjectClick) {
@@ -1797,7 +1830,7 @@ export function Canvas3D({
               >
                 <mesh>
                   <boxGeometry args={[width, height, depth]} />
-                  <meshStandardMaterial color={doorColor} roughness={0.7} metalness={0.1} />
+                  <meshStandardMaterial color={elementColor} roughness={0.7} metalness={0.1} />
                 </mesh>
                 <mesh position={[width * 0.35, 0, depth / 2 + 0.05]}>
                   <cylinderGeometry args={[0.02, 0.02, 0.15, 8]} />

@@ -56,16 +56,16 @@ export function FixtureTypeSelectionModal({
         onClick={() => setSelectedType(fixtureType)}
         className={`
           flex items-center justify-between p-3 rounded-lg border text-left transition-colors text-sm
-          ${isSelected 
-            ? 'border-primary bg-primary/10 text-primary' 
-            : 'border-border hover:border-primary/50 hover:bg-accent'
+          ${isSelected
+            ? 'border-accent-foreground bg-accent text-accent-foreground'
+            : 'border-border hover:border-muted-foreground hover:bg-accent/50 text-foreground'
           }
           ${isCurrent && !isSelected ? 'border-muted-foreground/30 bg-muted/50' : ''}
         `}
       >
         <span className="font-medium truncate">{fixtureType}</span>
         {isSelected && (
-          <Check className="h-4 w-4 text-primary flex-shrink-0 ml-2" />
+          <Check className="h-4 w-4 text-accent-foreground flex-shrink-0 ml-2" />
         )}
       </button>
     );
@@ -77,7 +77,7 @@ export function FixtureTypeSelectionModal({
         <DialogHeader>
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-2">
-              <Box className="h-5 w-5 text-primary" />
+              <Box className="h-5 w-5 text-muted-foreground" />
               <DialogTitle>{isAddMode ? 'Add New Fixture' : 'Select Fixture Type'}</DialogTitle>
             </div>
             <DialogClose onClick={() => onOpenChange(false)} />
@@ -96,7 +96,7 @@ export function FixtureTypeSelectionModal({
         <div className="px-6 pb-6 space-y-4">
           {!isAddMode && (
             <div className="text-sm font-medium text-foreground">
-              Current Type: <span className="text-primary">{currentType}</span>
+              Current Type: <span className="text-accent-foreground">{currentType}</span>
             </div>
           )}
           
@@ -116,6 +116,7 @@ export function FixtureTypeSelectionModal({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
                 disabled={loading}
+                className="text-foreground hover:text-foreground hover:bg-accent"
               >
                 Cancel
               </Button>

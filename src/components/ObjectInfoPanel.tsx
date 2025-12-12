@@ -1,7 +1,29 @@
-import { Trash2, RotateCw, RotateCcw, Pencil, Check } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Pencil, Check, RefreshCw } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
-import type { ArchitecturalObject } from './3DViewerModifier';
+import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
 import { useState, useEffect } from 'react';
+import { VariantSelectionModal } from './VariantSelectionModal';
+import type { FixtureVariant } from '../services/api';
+
+// Helper function to map object type to backend fixture type
+const getFixtureTypeForArchObject = (objectType: ArchitecturalObjectType): string => {
+  const mapping: Record<ArchitecturalObjectType, string> = {
+    'entrance_door': 'ENTRANCE',
+    'exit_door': 'FIRE-EXIT',
+    'door': 'DOOR',
+    'staircase': 'STAIRCASE',
+    'toilet': 'TOILET',
+    'trial_room': 'TRIAL-ROOM',
+    'boh': 'BOH',
+    'cash_till': 'CASH-TILL',
+    'glazing': 'GLAZING',
+    'partition': 'PARTITION',
+    'window': 'WINDOW',
+    'column': 'COLUMN',
+    'wall': 'WALL'
+  };
+  return mapping[objectType] || objectType.toUpperCase();
+};
 
 interface ObjectInfoPanelProps {
   selectedObject: ArchitecturalObject | null;
@@ -11,6 +33,7 @@ interface ObjectInfoPanelProps {
   onHeightChange: (object: ArchitecturalObject, height: number) => void;
   onPositionChange?: (object: ArchitecturalObject, startPoint: [number, number, number], endPoint: [number, number, number]) => void;
   onSinglePointPositionChange?: (object: ArchitecturalObject, posX: number, posY: number, posZ: number) => void;
+  onVariantChange?: (object: ArchitecturalObject, variant: FixtureVariant) => void;
   onDelete: (object: ArchitecturalObject) => void;
   onReset: (object: ArchitecturalObject) => void;
 }
@@ -23,6 +46,7 @@ export function ObjectInfoPanel({
   onHeightChange,
   onPositionChange,
   onSinglePointPositionChange,
+  onVariantChange,
   onDelete,
   onReset
 }: ObjectInfoPanelProps) {
@@ -36,6 +60,7 @@ export function ObjectInfoPanel({
   const [customRotationValue, setCustomRotationValue] = useState('');
   const [isEditingRotation, setIsEditingRotation] = useState(false);
   const [rotationEditValue, setRotationEditValue] = useState('');
+  const [showVariantModal, setShowVariantModal] = useState(false);
 
   // Reset editing states when selectedObject changes
   useEffect(() => {
@@ -337,16 +362,40 @@ export function ObjectInfoPanel({
            selectedObject.type === 'partition' ? 'Partition' :
            selectedObject.type === 'entrance_door' ? 'Entrance Door' :
            selectedObject.type === 'exit_door' ? 'Exit Door' :
+           selectedObject.type === 'door' ? 'Door' :
+           selectedObject.type === 'staircase' ? 'Staircase' :
+           selectedObject.type === 'toilet' ? 'Toilet' :
+           selectedObject.type === 'trial_room' ? 'Trial Room' :
+           selectedObject.type === 'boh' ? 'BOH' :
+           selectedObject.type === 'cash_till' ? 'Cash Till' :
            selectedObject.type}
         </div>
-        <div>
-          <span className="font-medium">Type:</span>{' '}
-          {selectedObject.variant ||
-           (selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' :
-            selectedObject.type === 'partition' ? 'Partition (115mm Box)' :
-            selectedObject.type === 'entrance_door' ? 'Entrance (1.5m)' :
-            selectedObject.type === 'exit_door' ? 'Exit (1.0m)' :
-            'Custom')}
+        <div className="flex items-center justify-between">
+          <div>
+            <span className="font-medium">Type:</span>{' '}
+            {selectedObject.variant ||
+             (selectedObject.type === 'glazing' ? 'Glazing (Single Plane)' :
+              selectedObject.type === 'partition' ? 'Partition (115mm Box)' :
+              selectedObject.type === 'entrance_door' ? 'Entrance Door' :
+              selectedObject.type === 'exit_door' ? 'Exit Door' :
+              selectedObject.type === 'door' ? 'Interior Door' :
+              selectedObject.type === 'staircase' ? 'Staircase' :
+              selectedObject.type === 'toilet' ? 'Toilet' :
+              selectedObject.type === 'trial_room' ? 'Trial Room' :
+              selectedObject.type === 'boh' ? 'Back of House' :
+              selectedObject.type === 'cash_till' ? 'Cash Till' :
+              'Custom')}
+          </div>
+          {/* Change Variant button - only for single-point elements in edit mode */}
+          {editMode && isSinglePoint && onVariantChange && (
+            <button
+              onClick={() => setShowVariantModal(true)}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Change variant"
+            >
+              <RefreshCw className="h-3 w-3" />
+            </button>
+          )}
         </div>
 
         {/* Length - only show for two-point elements */}
@@ -367,8 +416,16 @@ export function ObjectInfoPanel({
           </div>
         )}
 
-        {/* Height - hide for doors */}
-        {selectedObject.height !== undefined && selectedObject.type !== 'entrance_door' && selectedObject.type !== 'exit_door' && (
+        {/* Height - hide for single-point elements with fixed GLB models */}
+        {selectedObject.height !== undefined &&
+         selectedObject.type !== 'entrance_door' &&
+         selectedObject.type !== 'exit_door' &&
+         selectedObject.type !== 'door' &&
+         selectedObject.type !== 'staircase' &&
+         selectedObject.type !== 'toilet' &&
+         selectedObject.type !== 'trial_room' &&
+         selectedObject.type !== 'boh' &&
+         selectedObject.type !== 'cash_till' && (
           <>
             <div className="flex items-center justify-between">
               <div style={{ color: hasHeightChanged ? '#ef4444' : 'inherit' }}>
@@ -653,6 +710,21 @@ export function ObjectInfoPanel({
             Reset
           </Button>
         </div>
+      )}
+
+      {/* Variant Selection Modal */}
+      {isSinglePoint && selectedObject.type && (
+        <VariantSelectionModal
+          open={showVariantModal}
+          onOpenChange={setShowVariantModal}
+          fixtureType={getFixtureTypeForArchObject(selectedObject.type)}
+          currentVariant={selectedObject.variant || ''}
+          onVariantSelect={(variant) => {
+            if (onVariantChange) {
+              onVariantChange(selectedObject, variant);
+            }
+          }}
+        />
       )}
     </div>
   );
