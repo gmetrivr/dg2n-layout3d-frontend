@@ -1763,7 +1763,8 @@ export function Canvas3D({
           obj.type === 'toilet' ||
           obj.type === 'trial_room' ||
           obj.type === 'boh' ||
-          obj.type === 'cash_till'
+          obj.type === 'cash_till' ||
+          obj.type === 'window_display'
         ) {
           // Check if single-point element has GLB URL
           const glbUrl = obj.customProperties?.glbUrl;
@@ -1801,6 +1802,7 @@ export function Canvas3D({
             else if (obj.type === 'trial_room') elementColor = '#DDA0DD'; // Plum
             else if (obj.type === 'boh') elementColor = '#CD853F'; // Peru
             else if (obj.type === 'cash_till') elementColor = '#FFD700'; // Gold
+            else if (obj.type === 'window_display') elementColor = '#87CEEB'; // Sky Blue
 
             // Use same coordinate transformation as DoorGLB component
             // DoorGLB uses: [posX, posZ, -posY] for position

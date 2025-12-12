@@ -99,6 +99,7 @@ export interface FixtureVariant {
   name: string;            // Display name (e.g., "Straight Staircase")
   description?: string;    // Variant description
   url: string;             // GLB file URL
+  thumbnail?: string;      // Thumbnail image URL for preview
   // Deprecated fields (for backwards compatibility):
   block_name?: string;     // Deprecated: use 'name' instead
   glb_url?: string;        // Deprecated: use 'url' instead

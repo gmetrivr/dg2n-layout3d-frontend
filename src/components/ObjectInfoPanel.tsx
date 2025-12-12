@@ -20,7 +20,8 @@ const getFixtureTypeForArchObject = (objectType: ArchitecturalObjectType): strin
     'partition': 'PARTITION',
     'window': 'WINDOW',
     'column': 'COLUMN',
-    'wall': 'WALL'
+    'wall': 'WALL',
+    'window_display': 'WINDOW-DISPLAY'
   };
   return mapping[objectType] || objectType.toUpperCase();
 };

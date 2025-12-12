@@ -6,12 +6,12 @@ import {
   DialogDescription,
   DialogClose
 } from "@/shadcn/components/ui/dialog";
-import { Box, Square, DoorOpen, DoorClosed, MoveVertical, Bath, ShoppingBag, Package, Calculator } from 'lucide-react';
+import { Box, Square, DoorOpen, DoorClosed, MoveVertical, Bath, ShoppingBag, Package, Calculator, Store } from 'lucide-react';
 
 interface AddObjectModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onObjectSelect: (objectType: 'glazing' | 'partition' | 'entrance_door' | 'exit_door' | 'door' | 'staircase' | 'toilet' | 'trial_room' | 'boh' | 'cash_till') => void;
+  onObjectSelect: (objectType: 'glazing' | 'partition' | 'entrance_door' | 'exit_door' | 'door' | 'staircase' | 'toilet' | 'trial_room' | 'boh' | 'cash_till' | 'window_display') => void;
 }
 
 export function AddObjectModal({
@@ -20,7 +20,7 @@ export function AddObjectModal({
   onObjectSelect
 }: AddObjectModalProps) {
 
-  const handleObjectSelect = (objectType: 'glazing' | 'partition' | 'entrance_door' | 'exit_door' | 'door' | 'staircase' | 'toilet' | 'trial_room' | 'boh' | 'cash_till') => {
+  const handleObjectSelect = (objectType: 'glazing' | 'partition' | 'entrance_door' | 'exit_door' | 'door' | 'staircase' | 'toilet' | 'trial_room' | 'boh' | 'cash_till' | 'window_display') => {
     onObjectSelect(objectType);
     onOpenChange(false);
   };
@@ -153,6 +153,16 @@ export function AddObjectModal({
                 <MoveVertical className="h-10 w-10 text-muted-foreground mb-2" />
                 <span className="font-semibold text-sm text-foreground">Stairs</span>
                 <span className="text-xs text-muted-foreground mt-1">Staircase</span>
+              </button>
+
+              {/* Window Display Option */}
+              <button
+                onClick={() => handleObjectSelect('window_display')}
+                className="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-border hover:border-muted-foreground hover:bg-accent/50 transition-colors"
+              >
+                <Store className="h-10 w-10 text-muted-foreground mb-2" />
+                <span className="font-semibold text-sm text-foreground">Window Display</span>
+                <span className="text-xs text-muted-foreground mt-1">Display window</span>
               </button>
             </div>
           </div>

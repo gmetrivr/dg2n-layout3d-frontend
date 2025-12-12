@@ -108,9 +108,28 @@ export function VariantSelectionModal({
                     }
                   `}
                 >
-                  {/* Placeholder for GLB thumbnail - can be enhanced later with actual 3D preview */}
-                  <div className="w-full h-24 bg-muted rounded-md mb-3 flex items-center justify-center">
-                    <span className="text-xs text-muted-foreground">Preview</span>
+                  {/* Thumbnail preview */}
+                  <div className="w-full h-24 bg-muted rounded-md mb-3 flex items-center justify-center overflow-hidden">
+                    {variant.thumbnail ? (
+                      <img
+                        src={variant.thumbnail}
+                        alt={variant.name || variant.block_name || 'Variant preview'}
+                        className="w-full h-full object-contain"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          // Fallback to placeholder if image fails to load (403, 404, CORS, etc.)
+                          console.warn(`[VariantSelectionModal] Failed to load thumbnail: ${variant.thumbnail}`, e);
+                          e.currentTarget.style.display = 'none';
+                          const parent = e.currentTarget.parentElement;
+                          if (parent) {
+                            parent.innerHTML = '<span class="text-xs text-muted-foreground">Preview unavailable</span>';
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Preview</span>
+                    )}
                   </div>
 
                   <span className="font-medium text-sm text-center text-foreground">

@@ -273,7 +273,8 @@ export type ArchitecturalObjectType =
   | 'toilet'
   | 'trial_room'
   | 'boh'
-  | 'cash_till';
+  | 'cash_till'
+  | 'window_display';
 
 export interface ArchitecturalObject {
   id: string;
@@ -407,6 +408,10 @@ export function ThreeDViewerModifier() {
   const [archObjectVariantModalOpen, setArchObjectVariantModalOpen] = useState(false);
   const [pendingArchObjectType, setPendingArchObjectType] = useState<ArchitecturalObjectType | null>(null);
   const [pendingArchObjectPoint, setPendingArchObjectPoint] = useState<[number, number, number] | null>(null);
+
+  // Variant selection for regular fixtures
+  const [fixtureVariantModalOpen, setFixtureVariantModalOpen] = useState(false);
+  const [pendingFixtureType, setPendingFixtureType] = useState<string | null>(null);
 
   // Measurement tool state
   const [isMeasuring, setIsMeasuring] = useState(false);
@@ -691,7 +696,20 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedLocation]);
 
+  // Helper function to check if a fixture type requires variant selection
+  const fixtureTypeRequiresVariantSelection = (fixtureType: string): boolean => {
+    const variantRequiredTypes = ['PODIUM-DISPLAY'];
+    return variantRequiredTypes.includes(fixtureType);
+  };
+
   const handleAddFixture = useCallback(async (fixtureType: string) => {
+    // Check if this fixture type requires variant selection
+    if (fixtureTypeRequiresVariantSelection(fixtureType)) {
+      setPendingFixtureType(fixtureType);
+      setFixtureVariantModalOpen(true);
+      return;
+    }
+
     try {
       // Get the current floor index from the selected floor file
       const fileForFloorExtraction = selectedFloorFile || selectedFile;
@@ -803,6 +821,125 @@ export function ThreeDViewerModifier() {
     }
   }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
 
+  // Handler for variant selection for regular fixtures
+  const handleFixtureVariantSelect = useCallback(async (variant: { id: string; name: string; url: string; description?: string }) => {
+    if (!pendingFixtureType) return;
+
+    try {
+      // Get the current floor index from the selected floor file
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+      // Use the variant's GLB URL
+      const glbUrl = variant.url;
+
+      // Get the proper block name from the backend API
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(pendingFixtureType);
+
+      // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
+      if (!mappedBlockName) {
+        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+          blockName => FIXTURE_TYPE_MAPPING[blockName] === pendingFixtureType
+        ) || pendingFixtureType; // fallback to fixtureType if not found in mapping
+      }
+
+      // Preload the GLB
+      useGLTF.preload(glbUrl);
+
+      // Update the fixture cache with new GLB URL
+      fixtureCache.current.set(mappedBlockName, glbUrl);
+
+      // Update the fixture type map
+      fixtureTypeMap.current.set(mappedBlockName, pendingFixtureType);
+
+      // Calculate position at screen center (currentOrbitTarget) with y=0
+      const posX = currentOrbitTarget[0];
+      const posY = -currentOrbitTarget[2]; // World Z maps to -posY
+      const posZ = 0; // Always 0 (floor level)
+
+      // Calculate hierarchy as max+1 from current floor fixtures
+      const currentFloorFixtures = locationData.filter(loc => loc.floorIndex === currentFloor);
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const newHierarchy = maxHierarchy + 1;
+
+      // Get origin values from current floor
+      const floorOriginFixture = currentFloorFixtures[0];
+      const originX = floorOriginFixture?.originX ?? 0;
+      const originY = floorOriginFixture?.originY ?? 0;
+
+      // Default brand is "unassigned"
+      const defaultBrand = "unassigned";
+
+      // Default count is 1
+      const defaultCount = 1;
+
+      // Create new fixture location data
+      const newFixture: LocationData = {
+        blockName: mappedBlockName,
+        floorIndex: currentFloor,
+        originX: originX,
+        originY: originY,
+        posX: posX,
+        posY: posY,
+        posZ: posZ,
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
+        brand: defaultBrand,
+        count: defaultCount,
+        hierarchy: newHierarchy,
+        glbUrl: glbUrl,
+        variant: variant.name, // Store the variant name
+
+        // Set original values (same as current for new fixtures)
+        originalBlockName: mappedBlockName,
+        originalPosX: posX,
+        originalPosY: posY,
+        originalPosZ: posZ,
+        originalRotationX: 0,
+        originalRotationY: 0,
+        originalRotationZ: 0,
+        originalBrand: defaultBrand,
+        originalCount: defaultCount,
+        originalHierarchy: newHierarchy,
+        originalGlbUrl: glbUrl,
+
+        // Mark as new fixture
+        wasDuplicated: true, // Reuse this flag to indicate it's a newly added fixture
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+
+        // Generate unique timestamps
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000,
+      };
+
+      // Add to location data
+      setLocationData(prev => [...prev, newFixture]);
+
+      // Select the newly added fixture
+      setSelectedLocation(newFixture);
+      setSelectedLocations([newFixture]);
+
+      // Clear pending state
+      setPendingFixtureType(null);
+      setFixtureVariantModalOpen(false);
+      setAddFixtureModalOpen(false);
+      setFixtureTypeModalOpen(false);
+
+    } catch (error) {
+      console.error('Failed to add fixture with variant:', error);
+      alert('Failed to add fixture. Please try again.');
+    }
+  }, [pendingFixtureType, selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
+
   // Mapping from architectural object types to fixture types for API calls
   // These must match the fixture types defined in the backend config.py
   const getFixtureTypeForArchObject = (objectType: ArchitecturalObjectType): string => {
@@ -816,7 +953,11 @@ export function ThreeDViewerModifier() {
       'boh': 'BOH',                      // Backend uses 'BOH'
       'cash_till': 'CASH-TILL',          // Backend uses 'CASH-TILL' (with hyphen)
       'glazing': 'GLAZING',
-      'partition': 'PARTITION'
+      'partition': 'PARTITION',
+      'window': 'WINDOW',
+      'column': 'COLUMN',
+      'wall': 'WALL',
+      'window_display': 'WINDOW-DISPLAY'
     };
     return mapping[objectType] || objectType.toUpperCase();
   };
@@ -831,7 +972,8 @@ export function ThreeDViewerModifier() {
                          objectType === 'toilet' ||
                          objectType === 'trial_room' ||
                          objectType === 'boh' ||
-                         objectType === 'cash_till';
+                         objectType === 'cash_till' ||
+                         objectType === 'window_display';
 
     if (isSinglePoint) {
       // Show variant selection modal for single-point elements
@@ -869,9 +1011,10 @@ export function ThreeDViewerModifier() {
       glb_url: variant.url       // Use variant URL as GLB URL
     };
 
-    // Clear pending state
+    // Clear pending state and close modal
     setPendingArchObjectType(null);
     setPendingArchObjectPoint(null);
+    setArchObjectVariantModalOpen(false);
   }, [pendingArchObjectType]);
 
   // Handler for floor click during object placement
@@ -893,7 +1036,8 @@ export function ThreeDViewerModifier() {
                          currentObjectType === 'toilet' ||
                          currentObjectType === 'trial_room' ||
                          currentObjectType === 'boh' ||
-                         currentObjectType === 'cash_till';
+                         currentObjectType === 'cash_till' ||
+                         currentObjectType === 'window_display';
 
     if (isSinglePoint) {
       // Single-point placement - create immediately on first click
@@ -907,6 +1051,7 @@ export function ThreeDViewerModifier() {
       else if (currentObjectType === 'trial_room') defaultDimensions = { width: 1.5, height: 2.5, depth: 1.5 };
       else if (currentObjectType === 'boh') defaultDimensions = { width: 2.0, height: 2.5, depth: 2.0 };
       else if (currentObjectType === 'cash_till') defaultDimensions = { width: 1.0, height: 1.2, depth: 0.6 };
+      else if (currentObjectType === 'window_display') defaultDimensions = { width: 2.0, height: 2.5, depth: 0.5 };
 
       // Default block names for each object type (to be configured in backend)
       let defaultBlockName = 'PLACEHOLDER';
@@ -918,6 +1063,7 @@ export function ThreeDViewerModifier() {
       else if (currentObjectType === 'trial_room') defaultBlockName = 'TRIAL ROOM';
       else if (currentObjectType === 'boh') defaultBlockName = 'BOH';
       else if (currentObjectType === 'cash_till') defaultBlockName = 'CASH TILL';
+      else if (currentObjectType === 'window_display') defaultBlockName = 'WINDOW DISPLAY';
 
       // Get variant info from the selected variant (from modal)
       const variantInfo = selectedVariantRef.current;
@@ -3557,13 +3703,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       try {
         const allTypes = await apiService.getAllFixtureTypes();
         // Filter out architectural object types
-        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL'];
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY'];
         const fixtureOnlyTypes = allTypes.filter(type => !architecturalTypes.includes(type));
         setFixtureTypes(fixtureOnlyTypes);
       } catch (error) {
         console.warn('Failed to load fixture types from API:', error);
         // Fallback to hardcoded types from mapping
-        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL'];
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY'];
         const fixtureOnlyTypes = Object.values(FIXTURE_TYPE_MAPPING).filter(type => !architecturalTypes.includes(type));
         setFixtureTypes(fixtureOnlyTypes);
       }
@@ -4649,6 +4795,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             setPendingArchObjectType(null);
             setPendingArchObjectPoint(null);
             setAddObjectModalOpen(true);
+          }}
+        />
+      )}
+
+      {/* Variant Selection Modal for Regular Fixtures */}
+      {pendingFixtureType && (
+        <VariantSelectionModal
+          open={fixtureVariantModalOpen}
+          onOpenChange={setFixtureVariantModalOpen}
+          fixtureType={pendingFixtureType}
+          currentVariant=""
+          onVariantSelect={handleFixtureVariantSelect}
+          pipelineVersion="02"
+          onBack={() => {
+            // Close variant modal and go back to fixture type selection
+            setFixtureVariantModalOpen(false);
+            setPendingFixtureType(null);
+            setAddFixtureModalOpen(true);
           }}
         />
       )}
