@@ -407,7 +407,6 @@ export function ThreeDViewerModifier() {
   // Variant selection for architectural objects
   const [archObjectVariantModalOpen, setArchObjectVariantModalOpen] = useState(false);
   const [pendingArchObjectType, setPendingArchObjectType] = useState<ArchitecturalObjectType | null>(null);
-  const [pendingArchObjectPoint, setPendingArchObjectPoint] = useState<[number, number, number] | null>(null);
 
   // Variant selection for regular fixtures
   const [fixtureVariantModalOpen, setFixtureVariantModalOpen] = useState(false);
@@ -1013,7 +1012,6 @@ export function ThreeDViewerModifier() {
 
     // Clear pending state and close modal
     setPendingArchObjectType(null);
-    setPendingArchObjectPoint(null);
     setArchObjectVariantModalOpen(false);
   }, [pendingArchObjectType]);
 
@@ -4793,7 +4791,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             // Close variant modal and go back to object selection
             setArchObjectVariantModalOpen(false);
             setPendingArchObjectType(null);
-            setPendingArchObjectPoint(null);
             setAddObjectModalOpen(true);
           }}
         />

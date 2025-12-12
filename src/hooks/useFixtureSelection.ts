@@ -16,6 +16,7 @@ export interface LocationData {
   count: number;
   hierarchy: number;
   glbUrl?: string;
+  variant?: string; // Variant name for fixtures with variants (e.g., podium display)
   fixtureId?: string; // Assigned during Make Live process
 
   // Original state (from CSV ingestion, for reset and export logic)

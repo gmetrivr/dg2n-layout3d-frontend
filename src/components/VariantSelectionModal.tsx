@@ -66,9 +66,11 @@ export function VariantSelectionModal({
           <div className="flex items-center justify-between w-full">
             <div>
               <DialogTitle>Select Variant</DialogTitle>
-              <DialogDescription className="mt-2">
-                Choose a variant for {fixtureType}
-              </DialogDescription>
+              <div className="mt-2">
+                <DialogDescription>
+                  Choose a variant for {fixtureType}
+                </DialogDescription>
+              </div>
             </div>
             <DialogClose onClick={() => onOpenChange(false)} />
           </div>
