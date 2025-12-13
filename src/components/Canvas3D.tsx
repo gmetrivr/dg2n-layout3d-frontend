@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import type { ExtractedFile } from '../utils/zipUtils';
 import { type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
+import { getBrandCategoryColor } from '../utils/brandColorUtils';
+import { apiService } from '../services/api';
 
 // Fixture area extension constant (480mm)
 const FIXTURE_AREA_EXTENSION = 0.48;
@@ -89,11 +91,25 @@ interface FixtureAreaRectangleProps {
   boundingBox: { size: number[], center: number[] };
   fixtureType?: string;
   rotation?: [number, number, number];
+  brand?: string;
+  brandCategoryMapping?: Record<string, string>;
 }
 
-function FixtureAreaRectangle({ boundingBox, fixtureType, rotation = [0, 0, 0] }: FixtureAreaRectangleProps) {
-  // Blue for WALL-BAY fixtures, green for all others
-  const color = fixtureType === 'WALL-BAY' ? '#2196F3' : '#4CAF50';
+function FixtureAreaRectangle({
+  boundingBox,
+  fixtureType,
+  rotation = [0, 0, 0],
+  brand,
+  brandCategoryMapping = {}
+}: FixtureAreaRectangleProps) {
+  // Get color based on brand category
+  const color = brand
+    ? getBrandCategoryColor(brandCategoryMapping, brand)
+    : '#4CAF50';
+
+  // Check if brand has a category mapping (not using fallback green)
+  const hasCategoryMapping = brand && brandCategoryMapping[brand] !== undefined;
+  const opacity = hasCategoryMapping ? 0.6 : 0.3;
 
   let width: number;
   let depth: number;
@@ -141,7 +157,7 @@ function FixtureAreaRectangle({ boundingBox, fixtureType, rotation = [0, 0, 0] }
       <meshBasicMaterial
         color={color}
         transparent
-        opacity={0.3}
+        opacity={opacity}
         side={THREE.DoubleSide}
         depthWrite={false}
       />
@@ -222,9 +238,10 @@ interface LocationGLBProps {
   pendingMultiDelta?: [number, number, number] | null;
   showFixtureArea?: boolean;
   fixtureType?: string;
+  brandCategoryMapping?: Record<string, string>;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType, brandCategoryMapping = {} }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -440,6 +457,8 @@ ${location.hierarchy}`}
             boundingBox={stackBoundingBox}
             fixtureType={fixtureType}
             rotation={[rotationX, rotationY, rotationZ]}
+            brand={location.brand}
+            brandCategoryMapping={brandCategoryMapping}
           />
         )}
       </group>
@@ -1562,6 +1581,24 @@ export function Canvas3D({
   // State for multi-fixture drag - stores pending position delta during transform
   const [pendingMultiDelta, setPendingMultiDelta] = useState<[number, number, number] | null>(null);
 
+  // State for brand category mapping
+  const [brandCategoryMapping, setBrandCategoryMapping] = useState<Record<string, string>>({});
+
+  // Fetch brand category mapping on mount
+  useEffect(() => {
+    const fetchBrandCategoryMapping = async () => {
+      try {
+        const response = await apiService.getBrandCategoryMapping();
+        setBrandCategoryMapping(response.brand_category_mapping);
+      } catch (error) {
+        console.error('Failed to fetch brand category mapping:', error);
+        // Continue with empty mapping if fetch fails
+      }
+    };
+
+    fetchBrandCategoryMapping();
+  }, []);
+
   return (
     <Canvas
       camera={{ position: cameraPosition, fov: 50 }}
@@ -1679,6 +1716,7 @@ export function Canvas3D({
                 showFixtureLabels={showFixtureLabels}
                 showFixtureArea={showFixtureArea}
                 fixtureType={fixtureTypeMap.get(location.blockName)}
+                brandCategoryMapping={brandCategoryMapping}
                 onPositionChange={editMode ? onPositionChange : undefined}
                 pendingMultiDelta={pendingMultiDelta}
                 {...(editMode && {

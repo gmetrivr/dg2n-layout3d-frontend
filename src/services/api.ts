@@ -111,6 +111,14 @@ export interface FixtureTypeVariantsResponse {
   count: number;
 }
 
+export interface BrandCategoryMappingResponse {
+  brand_category_mapping: Record<string, string>;
+  categories_grouped: Record<string, string[]>;
+  unique_categories: string[];
+  total_brands: number;
+  total_categories: number;
+}
+
 export const apiService = {
   async uploadDwgFile(
     file: File, 
@@ -379,6 +387,17 @@ export const apiService = {
 
     if (!response.ok) {
       throw new Error(`Failed to get variants for fixture type ${fixtureType}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  // Get brand category mapping
+  async getBrandCategoryMapping(pipelineVersion: string = '02'): Promise<BrandCategoryMappingResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/brands/category-mapping?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to get brand category mapping: ${response.statusText}`);
     }
 
     return response.json();
