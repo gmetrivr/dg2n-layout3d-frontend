@@ -1,8 +1,17 @@
 import type { ToleranceOverrides } from '../types/tolerance';
 
-const API_BASE_URL = import.meta.env.MODE === "production"
+// Rhino server - Job management only (upload, jobs, downloads)
+const RHINO_API_BASE_URL = import.meta.env.MODE === "production"
   ? 'https://ec2-prod-rhino.dg2n.com'
   : ""; // Empty string uses relative URLs (goes through Vite proxy)
+
+// Fastify backend - Config, brands, fixtures
+const FASTIFY_API_BASE_URL =
+  import.meta.env.MODE === "production"
+    ? 'https://dg2n-layout3d-backend.dg2n.com'
+    : import.meta.env.MODE === "rc" || import.meta.env.MODE === "staging"
+      ? 'https://dg2n-layout3d-backend.rc.dg2n.com'
+      : ""; // Empty string uses relative URLs (goes through Vite proxy)
 
 export interface JobStatus {
   job_id: string;
@@ -134,7 +143,7 @@ export const apiService = {
       formData.append('tolerance_overrides', JSON.stringify(toleranceOverrides));
     }
 
-    const response = await fetch(`${API_BASE_URL}/upload`, {
+    const response = await fetch(`${RHINO_API_BASE_URL}/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -152,7 +161,7 @@ export const apiService = {
     const timeoutId = setTimeout(() => controller.abort(), 600000);
     
     try {
-      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}`, {
         signal: controller.signal
       });
       
@@ -167,7 +176,7 @@ export const apiService = {
   },
 
   async getAllJobs(): Promise<JobStatus[]> {
-    const response = await fetch(`${API_BASE_URL}/jobs`);
+    const response = await fetch(`${RHINO_API_BASE_URL}/jobs`);
     
     if (!response.ok) {
       throw new Error(`Failed to get jobs: ${response.statusText}`);
@@ -181,7 +190,7 @@ export const apiService = {
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
     
     try {
-      const response = await fetch(`${API_BASE_URL}/download/${jobId}/${fileName}`, {
+      const response = await fetch(`${RHINO_API_BASE_URL}/download/${jobId}/${fileName}`, {
         signal: controller.signal
       });
       
@@ -208,10 +217,10 @@ export const apiService = {
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
     
     try {
-      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`, {
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}/download-zip`, {
         signal: controller.signal
       });
-      
+
       if (!response.ok) {
         throw new Error(`Failed to download ZIP: ${response.statusText}`);
       }
@@ -233,9 +242,9 @@ export const apiService = {
   async fetchJobFilesAsZip(jobId: string): Promise<Blob> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
-    
+
     try {
-      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/download-zip`, {
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}/download-zip`, {
         signal: controller.signal
       });
       
@@ -250,7 +259,7 @@ export const apiService = {
   },
 
   async getToleranceDefaults(pipelineVersion: string): Promise<{ pipeline_version: string; default_tolerances: Record<string, number> }> {
-    const response = await fetch(`${API_BASE_URL}/config/tolerances/${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/config/tolerances/${pipelineVersion}`);
     
     if (!response.ok) {
       throw new Error(`Failed to get tolerance defaults: ${response.statusText}`);
@@ -259,19 +268,19 @@ export const apiService = {
     return response.json();
   },
 
-  async getBrands(): Promise<string[]> {
-    const response = await fetch(`${API_BASE_URL}/api/brands`);
-    
+  async getBrands(pipelineVersion: string = '02'): Promise<string[]> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands?pipeline_version=${pipelineVersion}`);
+
     if (!response.ok) {
       throw new Error(`Failed to get brands: ${response.statusText}`);
     }
 
     const data = await response.json();
-    return data.brands || [];
+    return data.brands;
   },
 
-  async getBrandCategories(): Promise<BrandCategoriesResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/brands`);
+  async getBrandCategories(pipelineVersion: string = '02'): Promise<BrandCategoriesResponse> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands?pipeline_version=${pipelineVersion}`);
     
     if (!response.ok) {
       throw new Error(`Failed to get brand categories: ${response.statusText}`);
@@ -281,15 +290,15 @@ export const apiService = {
   },
 
   // Fixture API endpoints
-  async getFixtureBlocks(blockNames: string[]): Promise<FixtureBlock[]> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/blocks`, {
+  async getFixtureBlocks(blockNames: string[], pipelineVersion: string = '02'): Promise<FixtureBlock[]> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/blocks?pipeline_version=${pipelineVersion}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(blockNames),
+      body: JSON.stringify({ block_names: blockNames }),
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to get fixture blocks: ${response.statusText}`);
     }
@@ -297,9 +306,9 @@ export const apiService = {
     return response.json();
   },
 
-  async getFixtureTypeUrl(fixtureType: string): Promise<FixtureTypeInfo> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/url`);
-    
+  async getFixtureTypeUrl(fixtureType: string, pipelineVersion: string = '02'): Promise<FixtureTypeInfo> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/url?pipeline_version=${pipelineVersion}`);
+
     if (!response.ok) {
       throw new Error(`Failed to get fixture type URL: ${response.statusText}`);
     }
@@ -308,7 +317,7 @@ export const apiService = {
   },
 
   async getAllFixtureTypes(): Promise<string[]> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/types`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/types?pipeline_version=02`);
 
     if (!response.ok) {
       throw new Error(`Failed to get all fixture types: ${response.status} ${response.statusText}`);
@@ -318,8 +327,8 @@ export const apiService = {
     return data.fixture_types;
   },
 
-  async getBlockNameForFixtureType(fixtureType: string): Promise<string | null> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/block-name`);
+  async getBlockNameForFixtureType(fixtureType: string, pipelineVersion: string = '02'): Promise<string | null> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/block-name?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       // If endpoint doesn't exist or returns error, return null
@@ -334,7 +343,7 @@ export const apiService = {
 
   // Brand migration endpoints
   async getBrandMigrations(pipelineVersion: string = '02'): Promise<BrandMigrationsResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/brands/migrations?pipeline_version=${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands/migrations?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get brand migrations: ${response.statusText}`);
@@ -344,7 +353,7 @@ export const apiService = {
   },
 
   async migrateBrandNames(brandNames: string[], pipelineVersion: string = '02'): Promise<MigrateBrandsResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/brands/migrate?pipeline_version=${pipelineVersion}`, {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands/migrate?pipeline_version=${pipelineVersion}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -361,7 +370,7 @@ export const apiService = {
 
   // Direct render fixture types endpoint
   async getDirectRenderTypes(pipelineVersion: string = '02'): Promise<DirectRenderTypesResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/direct-render-types?pipeline_version=${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/direct-render-types?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get direct render types: ${response.statusText}`);
@@ -372,7 +381,7 @@ export const apiService = {
 
   // Get all fixture types that support multiple variants
   async getFixtureTypesWithVariants(pipelineVersion: string = '02'): Promise<FixtureTypesWithVariantsResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/variants?pipeline_version=${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/variants?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get fixture types with variants: ${response.statusText}`);
@@ -383,7 +392,7 @@ export const apiService = {
 
   // Get all variants for a specific fixture type
   async getFixtureTypeVariants(fixtureType: string, pipelineVersion: string = '02'): Promise<FixtureTypeVariantsResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/variants?pipeline_version=${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/type/${encodeURIComponent(fixtureType)}/variants?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get variants for fixture type ${fixtureType}: ${response.statusText}`);
@@ -394,7 +403,7 @@ export const apiService = {
 
   // Get brand category mapping
   async getBrandCategoryMapping(pipelineVersion: string = '02'): Promise<BrandCategoryMappingResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/brands/category-mapping?pipeline_version=${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands/category-mapping?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get brand category mapping: ${response.statusText}`);

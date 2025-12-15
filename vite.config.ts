@@ -20,8 +20,14 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
-      // Rhino backend - handles all other /api endpoints, DWG processing, jobs, downloads
-      '^/(api|upload|jobs|download|config)': {
+      // Fastify backend - handles config, brands, fixtures APIs
+      '^/(api|config)': {
+        target: 'http://localhost:4260',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Rhino backend - handles DWG upload, job processing, downloads only
+      '^/(upload|jobs|download)': {
         target: 'http://0.0.0.0:8081',
         changeOrigin: true,
         secure: false,
