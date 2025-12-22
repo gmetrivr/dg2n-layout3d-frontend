@@ -8,7 +8,7 @@ const RHINO_API_BASE_URL = import.meta.env.MODE === "production"
 // Fastify backend - Config, brands, fixtures
 const FASTIFY_API_BASE_URL =
   import.meta.env.MODE === "production"
-    ? 'https://dg2n-layout3d-backend.dg2n.com'
+    ? 'https://dg2n-layout3d-backend.rc.dg2n.com'
     : import.meta.env.MODE === "rc" || import.meta.env.MODE === "staging"
       ? 'https://dg2n-layout3d-backend.rc.dg2n.com'
       : ""; // Empty string uses relative URLs (goes through Vite proxy)
