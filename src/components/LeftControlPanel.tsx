@@ -322,7 +322,7 @@ export function LeftControlPanel({
             onChange={(e) => onShowWallsChange(e.target.checked)}
             className="w-4 h-4"
           />
-          <label htmlFor="showWalls" className="text-sm font-medium">Show Walls / Columns</label>
+          <label htmlFor="showWalls" className="text-sm font-medium">Show Arch Objects</label>
         </div>
         
         {/* Show Locations Checkbox */}

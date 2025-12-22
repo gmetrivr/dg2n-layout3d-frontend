@@ -669,26 +669,27 @@ function GLBModel({ file, onBoundsCalculated, showWalls = true }: GLBModelProps)
         if (child.isMesh) {
           child.userData.interactive = false;
           
-          // Hide wall and column meshes if showWalls is disabled
-          if (!showWalls && child.name) {
+          // Determine wall/column visibility based on toggle
+          if (child.name) {
             const meshName = child.name.toLowerCase();
             // Common patterns for wall and column mesh names
-            const isWallOrColumn = meshName.includes('wall') || 
-                                  meshName.includes('column') || 
-                                  meshName.includes('pillar') || 
+            const isWallOrColumn = meshName.includes('wall') ||
+                                  meshName.includes('column') ||
+                                  meshName.includes('pillar') ||
                                   meshName.includes('structural') ||
                                   meshName.includes('beam') ||
                                   meshName.includes('ceiling') ||
                                   meshName.includes('roof');
-            
-            // Hide the mesh by setting visible to false
+
             if (isWallOrColumn) {
-              child.visible = false;
+              // Wall/column meshes: visible when showWalls is true, hidden when false
+              child.visible = showWalls;
             } else {
-              child.visible = true; // Ensure other meshes are visible
+              // Non-wall meshes: always visible
+              child.visible = true;
             }
           } else {
-            // If showWalls is true, make sure all meshes are visible
+            // Meshes without names: always visible
             child.visible = true;
           }
         }
@@ -715,7 +716,7 @@ function GLBModel({ file, onBoundsCalculated, showWalls = true }: GLBModelProps)
     return null;
   }
 
-  return <primitive object={gltf.scene.clone()} />;
+  return <primitive object={gltf.scene} />;
 }
 
 // Generate consistent colors for brands
@@ -1761,6 +1762,9 @@ export function Canvas3D({
 
         // Only render objects for current floor
         if (obj.floorIndex !== currentFloor) return null;
+
+        // Hide architectural objects when showWalls is false (walls are hidden)
+        if (!showWalls) return null;
 
         const isSelected = selectedObject?.id === obj.id;
 
