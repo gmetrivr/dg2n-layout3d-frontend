@@ -2018,7 +2018,7 @@ export function Canvas3D({
                     anchorX="center"
                     anchorY="middle"
                   >
-                    {distance.toFixed(2)}m
+                    {(distance * 1000).toFixed(2)}mm
                   </Text>
                 </Billboard>
               </>
