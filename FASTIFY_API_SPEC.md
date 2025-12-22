@@ -100,14 +100,16 @@ This document describes the expected request/response formats for all API endpoi
 ```
 
 ### 4. Migrate Brand Names
-**Endpoint:** `POST /api/brands/migrate?pipeline_version={version}`
+**Endpoint:** `POST /api/brands/migrate`
 
 **Request:**
-- Query Parameter: `pipeline_version` (string, default: "02")
 - Headers: `Content-Type: application/json`
 - Body:
 ```json
-["brand_name_1", "brand_name_2", "old_brand_name"]
+{
+  "brand_names": ["brand_name_1", "brand_name_2", "old_brand_name"],
+  "pipeline_version": "02"
+}
 ```
 
 **Expected Response:**

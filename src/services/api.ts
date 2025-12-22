@@ -353,12 +353,15 @@ export const apiService = {
   },
 
   async migrateBrandNames(brandNames: string[], pipelineVersion: string = '02'): Promise<MigrateBrandsResponse> {
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands/migrate?pipeline_version=${pipelineVersion}`, {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/brands/migrate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(brandNames),
+      body: JSON.stringify({
+        brand_names: brandNames,
+        pipeline_version: pipelineVersion
+      }),
     });
 
     if (!response.ok) {
