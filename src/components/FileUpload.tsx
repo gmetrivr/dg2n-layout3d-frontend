@@ -24,9 +24,9 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
       return false;
     }
     // Check for special characters that cause backend errors
-    const specialCharsRegex = /[&,]/;
+    const specialCharsRegex = /[&,\s]/;
     if (specialCharsRegex.test(file.name)) {
-      setError('Filename cannot contain special characters like & or ,');
+      setError('Filename cannot contain special characters like &, comma, or spaces');
       return false;
     }
     if (file.size > 100 * 1024 * 1024) { // 100MB limit
