@@ -22,8 +22,8 @@ export default defineConfig({
       },
       // Fastify backend - handles config, brands, fixtures APIs
       '^/(api|config)': {
-        target: 'https://dg2n-layout3d-backend.rc.dg2n.com',
-        // target: 'http://localhost:4260',
+        // target: 'https://dg2n-layout3d-backend.rc.dg2n.com',
+        target: 'http://localhost:4260',
         changeOrigin: true,
         secure: false,
       },

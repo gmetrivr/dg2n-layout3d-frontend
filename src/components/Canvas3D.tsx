@@ -668,7 +668,7 @@ function GLBModel({ file, onBoundsCalculated, showWalls = true }: GLBModelProps)
       gltf.scene.traverse((child: any) => {
         if (child.isMesh) {
           child.userData.interactive = false;
-          
+
           // Determine wall/column visibility based on toggle
           if (child.name) {
             const meshName = child.name.toLowerCase();
@@ -681,12 +681,50 @@ function GLBModel({ file, onBoundsCalculated, showWalls = true }: GLBModelProps)
                                   meshName.includes('ceiling') ||
                                   meshName.includes('roof');
 
+            // Check if this is a walkway mesh
+            const isWalkway = meshName.includes('walkway') ||
+                            meshName.includes('aisle') ||
+                            meshName.includes('pathway') ||
+                            meshName.includes('circulation');
+
             if (isWallOrColumn) {
               // Wall/column meshes: visible when showWalls is true, hidden when false
               child.visible = showWalls;
             } else {
               // Non-wall meshes: always visible
               child.visible = true;
+            }
+
+            // Apply grey vertex colors to walkway meshes when no texture
+            if (isWalkway && child.material && child.geometry) {
+              const material = child.material;
+              const hasTexture = material.map !== null && material.map !== undefined;
+
+              if (!hasTexture) {
+                // Clone the material to avoid affecting other meshes
+                const clonedMaterial = material.clone();
+
+                // Apply grey vertex colors
+                const positionAttribute = child.geometry.attributes.position;
+                if (positionAttribute) {
+                  const vertexCount = positionAttribute.count;
+                  const colors = new Float32Array(vertexCount * 3);
+
+                  // Set all vertices to grey (0.5, 0.5, 0.5)
+                  for (let i = 0; i < vertexCount; i++) {
+                    colors[i * 3] = 0.5;     // R
+                    colors[i * 3 + 1] = 0.5; // G
+                    colors[i * 3 + 2] = 0.5; // B
+                  }
+
+                  child.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                  clonedMaterial.vertexColors = true;
+                  clonedMaterial.needsUpdate = true;
+
+                  // Assign cloned material to the mesh
+                  child.material = clonedMaterial;
+                }
+              }
             }
           } else {
             // Meshes without names: always visible
