@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Loader2, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
 import { Select } from "./ui/select";
+import { MultiSelect } from "./ui/multi-select";
 import { Button } from "@/shadcn/components/ui/button";
 import { getGlbTitle, isShatteredFloorPlateFile, isFloorFile } from '../utils/zipUtils';
 import type { ExtractedFile } from '../utils/zipUtils';
@@ -25,9 +26,9 @@ interface LeftControlPanelProps {
 
   // Fixture data
   fixtureTypes: string[];
-  selectedFixtureType: string;
+  selectedFixtureType: string[];
   brands: string[];
-  selectedBrand: string;
+  selectedBrand: string[];
 
   // Floor plates data
   floorPlatesData: Record<string, Record<string, any[]>>;
@@ -67,8 +68,8 @@ interface LeftControlPanelProps {
   onSwitchToTopView?: () => void;
   onFloorFileChange: (file: ExtractedFile | null) => void;
   onShowSpheresChange: (show: boolean) => void;
-  onFixtureTypeChange: (type: string) => void;
-  onBrandChange: (brand: string) => void;
+  onFixtureTypeChange: (types: string[]) => void;
+  onBrandChange: (brands: string[]) => void;
   onShowWireframeChange: (show: boolean) => void;
   onShowFixtureLabelsChange: (show: boolean) => void;
   onShowWallsChange: (show: boolean) => void;
@@ -365,18 +366,13 @@ export function LeftControlPanel({
         {fixtureTypes.length > 0 && (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium">Fixture Type:</label>
-            <Select 
-              value={selectedFixtureType} 
-              onChange={(e) => onFixtureTypeChange(e.target.value)}
+            <MultiSelect
+              value={selectedFixtureType}
+              onChange={onFixtureTypeChange}
+              options={fixtureTypes.map((type) => ({ value: type, label: type }))}
+              allOption={{ value: "all", label: "All Types" }}
               className="w-48"
-            >
-              <option value="all">All Types</option>
-              {fixtureTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </Select>
+            />
           </div>
         )}
 
@@ -384,18 +380,13 @@ export function LeftControlPanel({
         {brands.length > 0 && (
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium">Brand:</label>
-            <Select 
-              value={selectedBrand} 
-              onChange={(e) => onBrandChange(e.target.value)}
+            <MultiSelect
+              value={selectedBrand}
+              onChange={onBrandChange}
+              options={brands.map((brand) => ({ value: brand, label: brand }))}
+              allOption={{ value: "all", label: "All Brands" }}
               className="w-48"
-            >
-              <option value="all">All Brands</option>
-              {brands.map((brand, index) => (
-                <option key={`${brand}-${index}`} value={brand}>
-                  {brand}
-                </option>
-              ))}
-            </Select>
+            />
           </div>
         )}
         

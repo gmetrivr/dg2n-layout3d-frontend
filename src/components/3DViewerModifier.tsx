@@ -383,10 +383,10 @@ export function ThreeDViewerModifier() {
   const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const fixtureCache = useRef<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
-  const [selectedFixtureType, setSelectedFixtureType] = useState<string>('all');
+  const [selectedFixtureType, setSelectedFixtureType] = useState<string[]>(['all']);
   const fixtureTypeMap = useRef<Map<string, string>>(new Map());
   const [brands, setBrands] = useState<string[]>([]);
-  const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [selectedBrand, setSelectedBrand] = useState<string[]>(['all']);
   const [storeData, setStoreData] = useState<StoreData[]>([]);
   const [storeCodes, setStoreCodes] = useState<string[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(false);
