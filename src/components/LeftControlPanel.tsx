@@ -403,12 +403,14 @@ export function LeftControlPanel({
               onChange={(e) => onSetSpawnPointModeChange(e.target.checked)}
               className="sr-only"
             />
-            <div className={`w-11 h-6 rounded-full transition-colors ${
-              setSpawnPointMode ? 'bg-green-600' : 'bg-gray-300'
+            <div className={`w-11 h-6 rounded-full transition-colors border-2 flex items-center ${
+              setSpawnPointMode
+                ? 'bg-green-600 dark:bg-green-500 border-green-600 dark:border-green-500'
+                : 'bg-gray-200 dark:bg-muted border-gray-300 dark:border-gray-700'
             }`}>
-              <div className={`w-5 h-5 bg-white rounded-full transition-transform ${
+              <div className={`w-5 h-5 bg-white dark:bg-background rounded-full shadow-sm transition-transform ${
                 setSpawnPointMode ? 'translate-x-5' : 'translate-x-0.5'
-              } mt-0.5`} />
+              }`} />
             </div>
           </label>
         </div>
@@ -423,12 +425,14 @@ export function LeftControlPanel({
               onChange={(e) => onEditModeChange(e.target.checked)}
               className="sr-only"
             />
-            <div className={`w-11 h-6 rounded-full transition-colors ${
-              editMode ? 'bg-blue-600' : 'bg-gray-300'
+            <div className={`w-11 h-6 rounded-full transition-colors border-2 flex items-center ${
+              editMode
+                ? 'bg-primary border-primary'
+                : 'bg-gray-200 dark:bg-muted border-gray-300 dark:border-gray-700'
             }`}>
-              <div className={`w-5 h-5 bg-white rounded-full transition-transform ${
+              <div className={`w-5 h-5 bg-white dark:bg-background rounded-full shadow-sm transition-transform ${
                 editMode ? 'translate-x-5' : 'translate-x-0.5'
-              } mt-0.5`} />
+              }`} />
             </div>
           </label>
         </div>
@@ -655,7 +659,7 @@ export function LeftControlPanel({
             }}
             className={`text-sm px-3 py-1.5 rounded w-full ${
               isMeasuring
-                ? 'bg-blue-500 text-white hover:bg-blue-600'
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'bg-primary text-primary-foreground hover:opacity-90'
             }`}
           >

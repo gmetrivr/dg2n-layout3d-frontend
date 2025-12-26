@@ -80,10 +80,10 @@ export function SplitFixtureModal({
         </DialogHeader>
         
         <div className="space-y-4 p-6 pt-0">
-          <div className="text-sm text-gray-600">
+          <div className="text-sm text-muted-foreground">
             Splitting fixture <strong>{fixtureName}</strong> with count of <strong>{totalCount}</strong>
           </div>
-          
+
           <div className="space-y-2">
             <label htmlFor="leftCount" className="block text-sm font-medium">
               Number of fixtures to keep on the left:
@@ -97,15 +97,15 @@ export function SplitFixtureModal({
               onChange={handleLeftCountChange}
               onKeyDown={handleKeyPress}
               placeholder={`Enter 1-${totalCount - 1}`}
-              className={`w-full px-3 py-2 border rounded-md ${error ? 'border-red-500' : 'border-gray-300'} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className={`w-full px-3 py-2 border rounded-md ${error ? 'border-destructive' : 'border-input'} focus:outline-none focus:ring-2 focus:ring-primary`}
             />
             {error && (
-              <div className="text-sm text-red-500">{error}</div>
+              <div className="text-sm text-destructive">{error}</div>
             )}
           </div>
-          
+
           {leftCount && !error && (
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-muted-foreground">
               Left: <strong>{leftCount}</strong> → Right: <strong>{rightCount}</strong>
             </div>
           )}

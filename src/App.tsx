@@ -10,6 +10,7 @@ import { CadTo3D } from './components/CadTo3D';
 import { MyCreatedStores } from './components/MyCreatedStores';
 import { AuthProvider } from './contexts/AuthContext';
 import { StoreProvider } from './contexts/StoreContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // Lazy load the heavy 3D viewer component
 const ThreeDViewerModifier = lazy(() =>
@@ -33,11 +34,12 @@ function App() {
   return (
     <AuthProvider>
       <StoreProvider>
-        <Router>
-          <AuthGate>
-            <div className="dark bg-background min-h-screen text-foreground relative">
-              <Navbar />
-              <div className="pt-24" />
+        <ThemeProvider>
+          <Router>
+            <AuthGate>
+              <div className="bg-background min-h-screen text-foreground relative">
+                <Navbar />
+                <div className="pt-24" />
 
             <Suspense fallback={<LoadingFallback />}>
               <Routes>
@@ -59,9 +61,10 @@ function App() {
                 </div>
               </div>
             </footer>
-          </div>
-        </AuthGate>
-      </Router>
+            </div>
+          </AuthGate>
+        </Router>
+        </ThemeProvider>
       </StoreProvider>
     </AuthProvider>
   );

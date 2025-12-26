@@ -1,10 +1,11 @@
 ﻿import { useEffect, useState, useTransition } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Moon, Sun } from 'lucide-react';
 
 import { Button } from '@/shadcn/components/ui/button';
 import { useAuth } from '../contexts/AuthContext';
 import { useStore } from '../contexts/StoreContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 export function Navbar() {
   const location = useLocation();
@@ -15,6 +16,7 @@ export function Navbar() {
   const [isNavigating, setIsNavigating] = useState(false);
   const { logout, username } = useAuth();
   const { storeName } = useStore();
+  const { theme, toggleTheme } = useTheme();
 
   const handleNavigation = (path: string, event: React.MouseEvent) => {
     event.preventDefault();
@@ -51,7 +53,7 @@ export function Navbar() {
   }, [location.pathname]);
 
   const linkBase =
-    'text-sm font-medium transition-colors text-white visited:text-white hover:text-white/80 border-b border-transparent pb-1';
+    'text-sm font-medium transition-colors text-foreground visited:text-foreground hover:text-foreground/80 border-b border-transparent pb-1';
   const isActive = (path: string) => location.pathname === path;
 
   return (
@@ -64,27 +66,27 @@ export function Navbar() {
       >
         <nav className="relative flex items-center justify-between p-6 max-w-7xl mx-auto">
           <div className="hidden md:flex items-center gap-6">
-            <Link to="/" onClick={(e) => handleNavigation('/', e)} className={`${linkBase} ${isActive('/') ? 'border-white' : ''}`}>
+            <Link to="/" onClick={(e) => handleNavigation('/', e)} className={`${linkBase} ${isActive('/') ? 'border-foreground' : ''}`}>
               Home
             </Link>
             <Link
               to="/cad-to-3d"
               onClick={(e) => handleNavigation('/cad-to-3d', e)}
-              className={`${linkBase} ${isActive('/cad-to-3d') ? 'border-white' : ''}`}
+              className={`${linkBase} ${isActive('/cad-to-3d') ? 'border-foreground' : ''}`}
             >
               CAD to 3D
             </Link>
             <Link
               to="/3d-viewer-modifier"
               onClick={(e) => handleNavigation('/3d-viewer-modifier', e)}
-              className={`${linkBase} ${isActive('/3d-viewer-modifier') ? 'border-white' : ''}`}
+              className={`${linkBase} ${isActive('/3d-viewer-modifier') ? 'border-foreground' : ''}`}
             >
               3D Viewer Modifier
             </Link>
             <Link
               to="/my-stores"
               onClick={(e) => handleNavigation('/my-stores', e)}
-              className={`${linkBase} ${isActive('/my-stores') ? 'border-white' : ''}`}
+              className={`${linkBase} ${isActive('/my-stores') ? 'border-foreground' : ''}`}
             >
               My Created Stores
             </Link>
@@ -96,11 +98,14 @@ export function Navbar() {
 
           <div className="hidden md:flex items-center gap-4">
             {storeName && (
-              <span className="text-sm font-medium text-white border border-white/20 px-3 py-1 rounded-md bg-white/5">
+              <span className="text-sm font-medium text-foreground border border-border px-3 py-1 rounded-md bg-muted/20">
                 {storeName}
               </span>
             )}
             {username && <span className="text-sm text-muted-foreground">{username}</span>}
+            <Button size="sm" variant="ghost" onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
             <Button size="sm" variant="outline" onClick={() => void logout()}>
               Log out
             </Button>
@@ -151,27 +156,27 @@ export function Navbar() {
               </button>
             </div>
             <div className="flex flex-col gap-4">
-              <Link to="/" onClick={(e) => handleNavigation('/', e)} className={`${linkBase} ${isActive('/') ? 'border-white' : ''}`}>
+              <Link to="/" onClick={(e) => handleNavigation('/', e)} className={`${linkBase} ${isActive('/') ? 'border-foreground' : ''}`}>
                 Home
               </Link>
               <Link
                 to="/cad-to-3d"
                 onClick={(e) => handleNavigation('/cad-to-3d', e)}
-                className={`${linkBase} ${isActive('/cad-to-3d') ? 'border-white' : ''}`}
+                className={`${linkBase} ${isActive('/cad-to-3d') ? 'border-foreground' : ''}`}
               >
                 CAD to 3D
               </Link>
               <Link
                 to="/3d-viewer-modifier"
                 onClick={(e) => handleNavigation('/3d-viewer-modifier', e)}
-                className={`${linkBase} ${isActive('/3d-viewer-modifier') ? 'border-white' : ''}`}
+                className={`${linkBase} ${isActive('/3d-viewer-modifier') ? 'border-foreground' : ''}`}
               >
                 3D Viewer Modifier
               </Link>
               <Link
                 to="/my-stores"
                 onClick={(e) => handleNavigation('/my-stores', e)}
-                className={`${linkBase} ${isActive('/my-stores') ? 'border-white' : ''}`}
+                className={`${linkBase} ${isActive('/my-stores') ? 'border-foreground' : ''}`}
               >
                 My Created Stores
               </Link>
@@ -183,6 +188,19 @@ export function Navbar() {
                 </div>
               )}
               {username && <span className="text-sm text-muted-foreground">Signed in as {username}</span>}
+              <Button variant="outline" onClick={toggleTheme}>
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="h-4 w-4 mr-2" />
+                    Light Mode
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-4 w-4 mr-2" />
+                    Dark Mode
+                  </>
+                )}
+              </Button>
               <Button variant="outline" onClick={() => void logout()}>
                 Log out
               </Button>

@@ -100,10 +100,10 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
 
   const getStatusIcon = () => {
     if (loading) return <Loader2 className="h-5 w-5 animate-spin" />;
-    
+
     switch (job?.status) {
       case 'completed':
-        return <CheckCircle className="h-5 w-5 text-green-500" />;
+        return <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-500" />;
       case 'failed':
         return <AlertCircle className="h-5 w-5 text-destructive" />;
       case 'processing':
@@ -209,7 +209,7 @@ export function JobStatus({ jobId, onReset }: JobStatusProps) {
             {filesDownloaded ? (
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <CheckCircle className="h-6 w-6 text-green-500 mx-auto" />
+                  <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-500 mx-auto" />
                   <p className="text-sm text-foreground font-medium">
                     All files downloaded successfully!
                   </p>

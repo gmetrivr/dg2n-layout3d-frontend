@@ -168,7 +168,7 @@ export function FloorManagementModal({
                           variant="ghost"
                           size="sm"
                           onClick={() => saveRename(floorFile)}
-                          className="h-7 w-7 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                          className="h-7 w-7 p-0 text-green-600 dark:text-green-500 hover:text-green-700 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-950"
                           title="Save"
                         >
                           <Check className="h-4 w-4" />
@@ -177,7 +177,7 @@ export function FloorManagementModal({
                           variant="ghost"
                           size="sm"
                           onClick={cancelRenaming}
-                          className="h-7 w-7 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          className="h-7 w-7 p-0 text-red-600 dark:text-red-500 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950"
                           title="Cancel"
                         >
                           <X className="h-4 w-4" />
