@@ -11,6 +11,7 @@ import { isFloorFile, isShatteredFloorPlateFile } from '../utils/zipUtils';
 import { assignFixtureIdsNewStore, assignFixtureIdsUpdateStore, type CurrentFixture } from '../services/fixtureIdAssignment';
 import { fetchBlockTypeMapping } from '../services/fixtureTypeMapping';
 import { MakeLiveConfirmationDialog, type MakeLiveStats } from './MakeLiveConfirmationDialog';
+import LiveStatusTab from './LiveStatusTab';
 
 function formatBytes(bytes?: number | null) {
   if (bytes == null) return '-';
@@ -254,6 +255,7 @@ async function ensureStoreConfigInZip(zipBlob: Blob): Promise<Blob> {
 }
 
 export function MyCreatedStores() {
+  const [activeTab, setActiveTab] = useState<'archives' | 'live-status'>('archives');
   const [rows, setRows] = useState<StoreSaveRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -275,7 +277,8 @@ export function MyCreatedStores() {
     uploadStoreZip,
     makeStoreLive,
     getStoreFixtures,
-    insertFixtures
+    insertFixtures,
+    createDeployment
   } = useSupabaseService();
   // removeZipAndRow temporarily removed - used for delete functionality
 
@@ -837,7 +840,7 @@ export function MyCreatedStores() {
 
       // Make the store live using the API with the FILTERED live ZIP (baked models only)
       console.log('[MyCreatedStores] Making store live with filtered ZIP containing only baked models...');
-      await makeStoreLive(
+      const makeLiveResponse = await makeStoreLive(
         r.store_id,
         r.store_name,
         liveZipBlob, // Use filtered live ZIP instead of full ZIP
@@ -854,6 +857,34 @@ export function MyCreatedStores() {
         }
       );
 
+      // Create deployment tracking record
+      console.log('[MyCreatedStores] Creating deployment tracking record...');
+      try {
+        await createDeployment({
+          store_id: r.store_id,
+          store_name: r.store_name,
+          entity: (r.entity || 'trends').toLowerCase(),
+          status: 'deploying',
+          deployed_at: new Date().toISOString(),
+          version: new Date().toISOString(), // Use timestamp as version for now
+          metadata: {
+            nocName: storeInfo?.nocName,
+            sapName: storeInfo?.sapName,
+            zone: storeInfo?.zone,
+            state: storeInfo?.state,
+            city: storeInfo?.city,
+            format: storeInfo?.format,
+            formatType: storeInfo?.formatType,
+            totalFixtures: finalFixtures.length,
+          },
+          api_response: makeLiveResponse,
+        });
+        console.log('[MyCreatedStores] Deployment tracking record created successfully');
+      } catch (deploymentError) {
+        console.error('[MyCreatedStores] Failed to create deployment tracking record:', deploymentError);
+        // Don't fail the overall process if deployment tracking fails
+      }
+
       // Refresh the store list to get the latest record from backend
       await fetchRows(search);
 
@@ -866,6 +897,33 @@ export function MyCreatedStores() {
       alert(`Error: ${message}`);
       setError(message);
       console.error('Make Live Error:', error);
+
+      // Create a failed deployment record
+      if (r) {
+        try {
+          const storeInfo = storeData.find(store => store.storeCode === r.store_id);
+          await createDeployment({
+            store_id: r.store_id,
+            store_name: r.store_name,
+            entity: (r.entity || 'trends').toLowerCase(),
+            status: 'failed',
+            deployed_at: new Date().toISOString(),
+            error_message: message,
+            metadata: {
+              nocName: storeInfo?.nocName,
+              sapName: storeInfo?.sapName,
+              zone: storeInfo?.zone,
+              state: storeInfo?.state,
+              city: storeInfo?.city,
+              format: storeInfo?.format,
+              formatType: storeInfo?.formatType,
+            },
+          });
+          console.log('[MyCreatedStores] Failed deployment record created');
+        } catch (deploymentError) {
+          console.error('[MyCreatedStores] Failed to create failed deployment record:', deploymentError);
+        }
+      }
     } finally {
       setMakingLiveId(null);
       setPendingMakeLiveRow(null);
@@ -874,9 +932,40 @@ export function MyCreatedStores() {
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">My Created Stores</h1>
-        <div className="flex items-center gap-2">
+      <h1 className="text-2xl font-bold mb-6">My Created Stores</h1>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200 mb-6">
+        <nav className="flex gap-4">
+          <button
+            onClick={() => setActiveTab('archives')}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === 'archives'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Archived Stores
+          </button>
+          <button
+            onClick={() => setActiveTab('live-status')}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === 'live-status'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Live Status
+          </button>
+        </nav>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'archives' ? (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Archived Stores</h2>
+            <div className="flex items-center gap-2">
           <select
             value={selectedRegion}
             onChange={(e) => setSelectedRegion(e.target.value)}
@@ -1064,14 +1153,18 @@ export function MyCreatedStores() {
         </table>
       </div>
 
-      <MakeLiveConfirmationDialog
-        open={showConfirmDialog}
-        onOpenChange={setShowConfirmDialog}
-        onConfirm={handleConfirmMakeLive}
-        stats={confirmStats}
-        storeName={pendingMakeLiveRow?.store_name || ''}
-        isProcessing={makingLiveId !== null}
-      />
+          <MakeLiveConfirmationDialog
+            open={showConfirmDialog}
+            onOpenChange={setShowConfirmDialog}
+            onConfirm={handleConfirmMakeLive}
+            stats={confirmStats}
+            storeName={pendingMakeLiveRow?.store_name || ''}
+            isProcessing={makingLiveId !== null}
+          />
+        </>
+      ) : (
+        <LiveStatusTab />
+      )}
     </div>
   );
 }
