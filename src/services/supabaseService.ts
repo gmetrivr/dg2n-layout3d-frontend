@@ -11,6 +11,11 @@ export interface StoreSaveRecord {
   zip_size?: number;
   job_id?: string | null;
   entity?: string | null;
+  // Deployment tracking fields
+  deployed_at?: string | null;
+  live_at?: string | null;
+  status?: 'deploying' | 'in_process' | 'live' | 'failed' | null;
+  error_message?: string | null;
 }
 
 export interface StoreSaveRow extends StoreSaveRecord {
@@ -35,27 +40,6 @@ export interface StoreFixtureIdRow extends StoreFixtureId {
   updated_at: string; // When this specific entry was created
 }
 
-export interface StoreDeployment {
-  store_id: string;
-  store_name: string;
-  entity: string;
-  status: 'deploying' | 'in_process' | 'live' | 'failed';
-  deployed_at?: string;
-  live_at?: string | null;
-  version?: string | null;
-  deployment_url?: string | null;
-  metadata?: Record<string, any>;
-  api_response?: any;
-  error_message?: string | null;
-}
-
-export interface StoreDeploymentRow extends StoreDeployment {
-  id: string;
-  deployed_at: string; // Override to make required (always set by DB)
-  created_at: string;
-  updated_at: string;
-}
-
 type UploadOptions = {
   bucket?: string;
   contentType?: string;
@@ -68,7 +52,7 @@ export const useSupabaseService = () => {
         const trimmed = search?.trim();
         let query = supabase
           .from('store_saves')
-          .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size, entity');
+          .select('id, created_at, store_id, store_name, job_id, zip_path, zip_size, entity, deployed_at, live_at, status, error_message');
 
         if (trimmed) {
           query = query.ilike('store_id', `%${trimmed}%`);
@@ -93,6 +77,10 @@ export const useSupabaseService = () => {
             zip_size: record.zip_size ?? null,
             job_id: record.job_id ?? null,
             entity: record.entity ?? null,
+            deployed_at: record.deployed_at ?? null,
+            live_at: record.live_at ?? null,
+            status: record.status ?? null,
+            error_message: record.error_message ?? null,
           })
           .select()
           .single();
@@ -321,76 +309,11 @@ export const useSupabaseService = () => {
         }
       },
 
-      // Store Deployment tracking operations
-      async createDeployment(deployment: StoreDeployment) {
-        const { data, error } = await supabase
-          .from('store_deployments')
-          .insert({
-            store_id: deployment.store_id,
-            store_name: deployment.store_name,
-            entity: deployment.entity,
-            status: deployment.status,
-            deployed_at: deployment.deployed_at || new Date().toISOString(),
-            live_at: deployment.live_at || null,
-            version: deployment.version || null,
-            deployment_url: deployment.deployment_url || null,
-            metadata: deployment.metadata || {},
-            api_response: deployment.api_response || null,
-            error_message: deployment.error_message || null,
-          })
-          .select()
-          .single();
-
-        if (error) {
-          throw new Error(error.message || 'Failed to create deployment record');
-        }
-
-        return data as StoreDeploymentRow;
-      },
-
-      async listDeployments(storeId?: string, limit: number = 50) {
-        let query = supabase
-          .from('store_deployments')
-          .select('*')
-          .order('deployed_at', { ascending: false })
-          .limit(limit);
-
-        if (storeId) {
-          query = query.eq('store_id', storeId);
-        }
-
-        const { data, error } = await query;
-        if (error) {
-          throw new Error(error.message || 'Failed to list deployments');
-        }
-
-        return (data ?? []) as StoreDeploymentRow[];
-      },
-
-      async getLatestDeployment(storeId: string) {
-        const { data, error } = await supabase
-          .from('store_deployments')
-          .select('*')
-          .eq('store_id', storeId)
-          .order('deployed_at', { ascending: false })
-          .limit(1)
-          .single();
-
-        if (error) {
-          // Return null if no deployment found (not an error)
-          if (error.code === 'PGRST116') {
-            return null;
-          }
-          throw new Error(error.message || 'Failed to get latest deployment');
-        }
-
-        return data as StoreDeploymentRow;
-      },
-
-      async updateDeploymentStatus(
+      // Store Deployment tracking operations (now using store_saves table)
+      async updateStoreDeploymentStatus(
         id: string,
         status: 'deploying' | 'in_process' | 'live' | 'failed',
-        additionalFields?: Partial<StoreDeployment>
+        additionalFields?: Partial<StoreSaveRecord>
       ) {
         const updateData: any = {
           status,
@@ -403,7 +326,7 @@ export const useSupabaseService = () => {
         }
 
         const { data, error } = await supabase
-          .from('store_deployments')
+          .from('store_saves')
           .update(updateData)
           .eq('id', id)
           .select()
@@ -413,36 +336,48 @@ export const useSupabaseService = () => {
           throw new Error(error.message || 'Failed to update deployment status');
         }
 
-        return data as StoreDeploymentRow;
+        return data as StoreSaveRow;
       },
 
-      async getActiveDeployments() {
-        const { data, error } = await supabase
-          .from('store_deployments')
+      async listDeployedStores(storeId?: string, limit: number = 100) {
+        let query = supabase
+          .from('store_saves')
           .select('*')
-          .in('status', ['deploying', 'in_process'])
-          .order('deployed_at', { ascending: false });
-
-        if (error) {
-          throw new Error(error.message || 'Failed to get active deployments');
-        }
-
-        return (data ?? []) as StoreDeploymentRow[];
-      },
-
-      async getDeploymentHistory(storeId: string, limit: number = 10) {
-        const { data, error } = await supabase
-          .from('store_deployments')
-          .select('*')
-          .eq('store_id', storeId)
+          .not('deployed_at', 'is', null) // Only get records that have been deployed
           .order('deployed_at', { ascending: false })
           .limit(limit);
 
-        if (error) {
-          throw new Error(error.message || 'Failed to get deployment history');
+        if (storeId) {
+          query = query.eq('store_id', storeId);
         }
 
-        return (data ?? []) as StoreDeploymentRow[];
+        const { data, error } = await query;
+        if (error) {
+          throw new Error(error.message || 'Failed to list deployed stores');
+        }
+
+        return (data ?? []) as StoreSaveRow[];
+      },
+
+      async getLatestDeployment(storeId: string) {
+        const { data, error } = await supabase
+          .from('store_saves')
+          .select('*')
+          .eq('store_id', storeId)
+          .not('deployed_at', 'is', null)
+          .order('deployed_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (error) {
+          // Return null if no deployment found (not an error)
+          if (error.code === 'PGRST116') {
+            return null;
+          }
+          throw new Error(error.message || 'Failed to get latest deployment');
+        }
+
+        return data as StoreSaveRow;
       },
     }),
     []

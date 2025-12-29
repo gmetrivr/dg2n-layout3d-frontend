@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, ExternalLink, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
-import { useSupabaseService, type StoreDeploymentRow } from '../services/supabaseService';
+import { RefreshCw, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { useSupabaseService, type StoreSaveRow } from '../services/supabaseService';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 const POLL_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
 
 export default function LiveStatusTab() {
   const supabaseService = useSupabaseService();
-  const [deployments, setDeployments] = useState<StoreDeploymentRow[]>([]);
+  const [deployments, setDeployments] = useState<StoreSaveRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -17,19 +17,19 @@ export default function LiveStatusTab() {
       if (showLoading) setLoading(true);
       setError(null);
 
-      const data = await supabaseService.listDeployments(undefined, 100);
+      const data = await supabaseService.listDeployedStores(undefined, 100);
 
       // Filter to show only latest deployment per store_id
-      const latestByStore = new Map<string, StoreDeploymentRow>();
+      const latestByStore = new Map<string, StoreSaveRow>();
       for (const deployment of data) {
         const existing = latestByStore.get(deployment.store_id);
-        if (!existing || new Date(deployment.deployed_at) > new Date(existing.deployed_at)) {
+        if (!existing || new Date(deployment.deployed_at!) > new Date(existing.deployed_at!)) {
           latestByStore.set(deployment.store_id, deployment);
         }
       }
 
       const latestDeployments = Array.from(latestByStore.values()).sort(
-        (a, b) => new Date(b.deployed_at).getTime() - new Date(a.deployed_at).getTime()
+        (a, b) => new Date(b.deployed_at!).getTime() - new Date(a.deployed_at!).getTime()
       );
 
       setDeployments(latestDeployments);
@@ -45,25 +45,25 @@ export default function LiveStatusTab() {
     }
   };
 
-  const checkAndUpdateStatuses = async (currentDeployments: StoreDeploymentRow[]) => {
+  const checkAndUpdateStatuses = async (currentDeployments: StoreSaveRow[]) => {
     const now = new Date().getTime();
     const updates: Promise<any>[] = [];
 
     for (const deployment of currentDeployments) {
       // Only process deployments in 'deploying' or 'in_process' status
       if (deployment.status === 'deploying' || deployment.status === 'in_process') {
-        const deployedAt = new Date(deployment.deployed_at).getTime();
+        const deployedAt = new Date(deployment.deployed_at!).getTime();
         const elapsed = now - deployedAt;
 
         // If 10 minutes have passed, transition to 'live'
         if (elapsed >= TEN_MINUTES_MS) {
           updates.push(
-            supabaseService.updateDeploymentStatus(deployment.id, 'live')
+            supabaseService.updateStoreDeploymentStatus(deployment.id, 'live')
           );
         } else if (deployment.status === 'deploying') {
           // Transition from 'deploying' to 'in_process' immediately
           updates.push(
-            supabaseService.updateDeploymentStatus(deployment.id, 'in_process')
+            supabaseService.updateStoreDeploymentStatus(deployment.id, 'in_process')
           );
         }
       }
@@ -72,7 +72,7 @@ export default function LiveStatusTab() {
     if (updates.length > 0) {
       await Promise.all(updates);
       // Refresh the list after updates
-      const updatedData = await supabaseService.listDeployments(undefined, 100);
+      const updatedData = await supabaseService.listDeployedStores(undefined, 100);
       setDeployments(updatedData);
     }
   };
@@ -140,18 +140,6 @@ export default function LiveStatusTab() {
     const seconds = Math.floor((remaining % 60000) / 1000);
 
     return `${minutes}m ${seconds}s remaining`;
-  };
-
-  const getDeploymentUrl = (deployment: StoreDeploymentRow) => {
-    // Construct URL based on entity and store_id
-    // Adjust this based on your actual URL structure
-    if (deployment.deployment_url) {
-      return deployment.deployment_url;
-    }
-
-    // Fallback: construct from entity and store_id
-    const baseUrl = 'https://stockflow-core.dg2n.com'; // Adjust as needed
-    return `${baseUrl}/${deployment.entity}/${deployment.store_id}`;
   };
 
   const formatTimestamp = (timestamp: string) => {
@@ -255,16 +243,13 @@ export default function LiveStatusTab() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Status
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
               {deployments.map((deployment) => (
                 <tr key={deployment.id} className="hover:bg-muted/50">
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    {deployment.version || '-'}
+                    {formatTimestamp(deployment.created_at)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-foreground">
                     {deployment.store_id}
@@ -274,8 +259,8 @@ export default function LiveStatusTab() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
                     <div className="flex flex-col">
-                      <span>{formatTimestamp(deployment.deployed_at)}</span>
-                      <span className="text-xs text-muted-foreground">{getRelativeTime(deployment.deployed_at)}</span>
+                      <span>{formatTimestamp(deployment.deployed_at!)}</span>
+                      <span className="text-xs text-muted-foreground">{getRelativeTime(deployment.deployed_at!)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
@@ -290,8 +275,8 @@ export default function LiveStatusTab() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col gap-1">
-                      {getStatusBadge(deployment.status)}
-                      {deployment.status === 'in_process' && (
+                      {getStatusBadge(deployment.status || 'unknown')}
+                      {deployment.status === 'in_process' && deployment.deployed_at && (
                         <span className="text-xs text-yellow-700 dark:text-yellow-300">
                           {getTimeRemaining(deployment.deployed_at)}
                         </span>
@@ -302,19 +287,6 @@ export default function LiveStatusTab() {
                         </span>
                       )}
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {deployment.status === 'live' && (
-                      <a
-                        href={getDeploymentUrl(deployment)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-primary hover:text-primary/80"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        View
-                      </a>
-                    )}
                   </td>
                 </tr>
               ))}

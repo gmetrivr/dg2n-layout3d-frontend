@@ -278,7 +278,7 @@ export function MyCreatedStores() {
     makeStoreLive,
     getStoreFixtures,
     insertFixtures,
-    createDeployment
+    updateStoreDeploymentStatus
   } = useSupabaseService();
   // removeZipAndRow temporarily removed - used for delete functionality
 
@@ -840,7 +840,7 @@ export function MyCreatedStores() {
 
       // Make the store live using the API with the FILTERED live ZIP (baked models only)
       console.log('[MyCreatedStores] Making store live with filtered ZIP containing only baked models...');
-      const makeLiveResponse = await makeStoreLive(
+      await makeStoreLive(
         r.store_id,
         r.store_name,
         liveZipBlob, // Use filtered live ZIP instead of full ZIP
@@ -857,31 +857,15 @@ export function MyCreatedStores() {
         }
       );
 
-      // Create deployment tracking record
-      console.log('[MyCreatedStores] Creating deployment tracking record...');
+      // Update store record with deployment status
+      console.log('[MyCreatedStores] Updating store record with deployment status...');
       try {
-        await createDeployment({
-          store_id: r.store_id,
-          store_name: r.store_name,
-          entity: (r.entity || 'trends').toLowerCase(),
-          status: 'deploying',
+        await updateStoreDeploymentStatus(r.id, 'deploying', {
           deployed_at: new Date().toISOString(),
-          version: new Date().toISOString(), // Use timestamp as version for now
-          metadata: {
-            nocName: storeInfo?.nocName,
-            sapName: storeInfo?.sapName,
-            zone: storeInfo?.zone,
-            state: storeInfo?.state,
-            city: storeInfo?.city,
-            format: storeInfo?.format,
-            formatType: storeInfo?.formatType,
-            totalFixtures: finalFixtures.length,
-          },
-          api_response: makeLiveResponse,
         });
-        console.log('[MyCreatedStores] Deployment tracking record created successfully');
+        console.log('[MyCreatedStores] Store record updated with deployment status successfully');
       } catch (deploymentError) {
-        console.error('[MyCreatedStores] Failed to create deployment tracking record:', deploymentError);
+        console.error('[MyCreatedStores] Failed to update store record with deployment status:', deploymentError);
         // Don't fail the overall process if deployment tracking fails
       }
 
@@ -898,30 +882,16 @@ export function MyCreatedStores() {
       setError(message);
       console.error('Make Live Error:', error);
 
-      // Create a failed deployment record
+      // Update store record with failed deployment status
       if (r) {
         try {
-          const storeInfo = storeData.find(store => store.storeCode === r.store_id);
-          await createDeployment({
-            store_id: r.store_id,
-            store_name: r.store_name,
-            entity: (r.entity || 'trends').toLowerCase(),
-            status: 'failed',
+          await updateStoreDeploymentStatus(r.id, 'failed', {
             deployed_at: new Date().toISOString(),
             error_message: message,
-            metadata: {
-              nocName: storeInfo?.nocName,
-              sapName: storeInfo?.sapName,
-              zone: storeInfo?.zone,
-              state: storeInfo?.state,
-              city: storeInfo?.city,
-              format: storeInfo?.format,
-              formatType: storeInfo?.formatType,
-            },
           });
-          console.log('[MyCreatedStores] Failed deployment record created');
+          console.log('[MyCreatedStores] Store record updated with failed deployment status');
         } catch (deploymentError) {
-          console.error('[MyCreatedStores] Failed to create failed deployment record:', deploymentError);
+          console.error('[MyCreatedStores] Failed to update store record with failed deployment status:', deploymentError);
         }
       }
     } finally {
