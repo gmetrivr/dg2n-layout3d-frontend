@@ -359,6 +359,11 @@ export function ThreeDViewerModifier() {
   const [editFloorplatesMode, setEditFloorplatesMode] = useState(false);
   const [setSpawnPointMode, setSetSpawnPointMode] = useState(false);
   const [spawnPoints, setSpawnPoints] = useState<Map<number, [number, number, number]>>(new Map());
+
+  // Hierarchy definition mode state
+  const [hierarchyDefMode, setHierarchyDefMode] = useState(false);
+  const [hierarchySequence, setHierarchySequence] = useState<LocationData[]>([]);
+  const [hierarchyStartValue, setHierarchyStartValue] = useState<number>(1);
   const [isTransforming, setIsTransforming] = useState(false);
   const [floorPlatesData, setFloorPlatesData] = useState<Record<string, Record<string, any[]>>>({});
   const [selectedFloorFile, setSelectedFloorFile] = useState<ExtractedFile | null>(null); // The floor selected in dropdown
@@ -455,7 +460,6 @@ export function ThreeDViewerModifier() {
     handleFixtureCountChange,
     handleFixtureCountChangeMulti,
     handleFixtureHierarchyChange,
-    handleFixtureHierarchyChangeMulti,
     handleDuplicateFixture,
     handleDeleteFixture,
     handleDeleteFixtures,
@@ -474,6 +478,33 @@ export function ThreeDViewerModifier() {
     setSelectedFloorPlate
   );
 
+  // Click handler wrapper for hierarchy definition mode
+  const handleFixtureClickWrapper = useCallback((clickedLocation: LocationData, event?: any) => {
+    if (hierarchyDefMode) {
+      const clickedUID = generateFixtureUID(clickedLocation);
+      const existingIndex = hierarchySequence.findIndex(
+        loc => generateFixtureUID(loc) === clickedUID
+      );
+
+      if (existingIndex !== -1) {
+        // Re-clicking: remove and add to end
+        setHierarchySequence(prev => {
+          const newSeq = [...prev];
+          newSeq.splice(existingIndex, 1);
+          newSeq.push(clickedLocation);
+          return newSeq;
+        });
+      } else {
+        // First click: add to sequence
+        setHierarchySequence(prev => [...prev, clickedLocation]);
+      }
+      return;
+    }
+
+    // Normal selection logic
+    handleFixtureClick(clickedLocation, event);
+  }, [hierarchyDefMode, hierarchySequence, handleFixtureClick]);
+
   // Wrap handleFixtureClick to clear selected object when a fixture is clicked
   const handleFixtureClickWithObjectClear = useCallback((clickedLocation: LocationData, event?: any) => {
     // Don't process clicks if mouse was down on transform controls
@@ -483,8 +514,8 @@ export function ThreeDViewerModifier() {
     }
 
     setSelectedObject(null); // Clear selected architectural object
-    handleFixtureClick(clickedLocation, event);
-  }, [handleFixtureClick]);
+    handleFixtureClickWrapper(clickedLocation, event);
+  }, [handleFixtureClickWrapper]);
 
   // Wrap setIsTransforming to track when transforming starts/ends
   const handleSetIsTransforming = useCallback((transforming: boolean) => {
@@ -519,6 +550,16 @@ export function ThreeDViewerModifier() {
     });
     return Array.from(floorIndices).sort((a, b) => a - b);
   }, [glbFiles]);
+
+  // Map from fixture UID to sequence position (1-based) for hierarchy definition mode
+  const hierarchySequenceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    hierarchySequence.forEach((loc, index) => {
+      const uid = generateFixtureUID(loc);
+      map.set(uid, index + 1);
+    });
+    return map;
+  }, [hierarchySequence]);
 
   // Function to load fixture GLBs in batch from API
   const loadFixtureGLBs = useCallback(async (blockNames: string[]): Promise<Map<string, string>> => {
@@ -2968,10 +3009,99 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   }, [setSpawnPointMode]);
 
+  // Hierarchy definition mode toggle handler
+  const handleHierarchyDefModeChange = useCallback((enabled: boolean) => {
+    if (enabled) {
+      // Entering hierarchy definition mode
+
+      // Deactivate other modes
+      setEditMode(false);
+      setEditFloorplatesMode(false);
+      setSetSpawnPointMode(false);
+      setIsMeasuring(false);
+      clearSelections();
+
+      // Calculate max hierarchy for current floor
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) ||
+                         fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+      const currentFloorFixtures = locationData.filter(loc =>
+        loc.floorIndex === currentFloor && !loc.forDelete
+      );
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+
+      setHierarchyStartValue(maxHierarchy + 1);
+      setHierarchySequence([]);
+      setHierarchyDefMode(true);
+    } else {
+      // Exiting hierarchy definition mode - just clear without applying
+      setHierarchyDefMode(false);
+      setHierarchySequence([]);
+      clearSelections();
+    }
+  }, [selectedFloorFile, selectedFile, locationData, clearSelections]);
+
+  const handleAcceptHierarchySequence = useCallback(() => {
+    // Apply the hierarchy changes
+    if (hierarchySequence.length > 0) {
+      hierarchySequence.forEach((loc, index) => {
+        const newHierarchy = hierarchyStartValue + index;
+        handleFixtureHierarchyChange(loc, newHierarchy);
+      });
+    }
+
+    // Exit the mode and clear all related states
+    setHierarchyDefMode(false);
+    setHierarchySequence([]);
+    clearSelections();
+  }, [hierarchySequence, hierarchyStartValue, handleFixtureHierarchyChange, clearSelections]);
+
+  // Recalculate hierarchy start value on floor change
+  useEffect(() => {
+    if (hierarchyDefMode) {
+      const fileForFloorExtraction = selectedFloorFile || selectedFile;
+      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) ||
+                         fileForFloorExtraction?.name.match(/(\d+)/i);
+      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+      const currentFloorFixtures = locationData.filter(loc =>
+        loc.floorIndex === currentFloor && !loc.forDelete
+      );
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+
+      setHierarchyStartValue(maxHierarchy + 1);
+      setHierarchySequence([]); // Clear sequence on floor change
+    }
+  }, [selectedFloorFile, selectedFile, hierarchyDefMode, locationData]);
+
+  // Clear hierarchy sequence (called on right-click)
+  const handleClearHierarchySequence = useCallback(() => {
+    setHierarchySequence([]);
+  }, []);
+
+  // Cancel adding architectural object (called on right-click)
+  const handleCancelAddObject = useCallback(() => {
+    setIsAddingObject(false);
+    setCurrentObjectType(null);
+    setObjectPlacementPoint(null);
+  }, []);
+
   const handleEditModeChangeOriginal = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
     if (mode === "off") {
       setEditMode(false);
       setEditFloorplatesMode(false);
+
+      // Deactivate hierarchy mode if active
+      if (hierarchyDefMode) {
+        setHierarchyDefMode(false);
+        setHierarchySequence([]);
+      }
 
       // Switch back to original floor
       const baseFile = selectedFloorFile || selectedFile;
@@ -2990,6 +3120,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       setEditMode(true);
       setEditFloorplatesMode(false);
 
+      // Deactivate hierarchy mode if active
+      if (hierarchyDefMode) {
+        setHierarchyDefMode(false);
+        setHierarchySequence([]);
+      }
+
       // Switch back to original floor
       const baseFile = selectedFloorFile || selectedFile;
       if (baseFile) {
@@ -3007,6 +3143,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       setEditMode(false);
       setEditFloorplatesMode(true);
 
+      // Deactivate hierarchy mode if active
+      if (hierarchyDefMode) {
+        setHierarchyDefMode(false);
+        setHierarchySequence([]);
+      }
+
       // Switch to shattered floor
       const baseFile = selectedFloorFile || selectedFile;
       if (baseFile) {
@@ -3020,7 +3162,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
       }
     }
-  }, [selectedFloorFile, selectedFile, glbFiles]);
+  }, [selectedFloorFile, selectedFile, glbFiles, hierarchyDefMode]);
 
   // Event handlers for RightInfoPanel
   const handleResetFloorPlate = useCallback((plateData: any, modifiedData: any) => {
@@ -4396,6 +4538,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           editMode={editMode}
           editFloorplatesMode={editFloorplatesMode}
           setSpawnPointMode={setSpawnPointMode}
+          hierarchyDefMode={hierarchyDefMode}
+          hierarchySequenceCount={hierarchySequence.length}
           transformSpace={transformSpace}
           fixtureTypes={fixtureTypes}
           selectedFixtureType={selectedFixtureType}
@@ -4430,6 +4574,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onShowFixtureAreaChange={setShowFixtureArea}
           onEditModeChange={handleEditModeChange}
           onSetSpawnPointModeChange={setSetSpawnPointMode}
+          onHierarchyDefModeChange={handleHierarchyDefModeChange}
+          onAcceptHierarchySequence={handleAcceptHierarchySequence}
           onTransformSpaceChange={setTransformSpace}
           onDownloadGLB={handleDownloadGLB}
           onDownloadModifiedZip={handleDownloadModifiedZip}
@@ -4474,9 +4620,14 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
           onObjectClick={handleObjectClick}
           onObjectPositionChange={handleObjectPositionChange}
+          onCancelAddObject={handleCancelAddObject}
           setSpawnPointMode={setSpawnPointMode}
           spawnPoints={spawnPoints}
           onFloorClickForSpawnPoint={handleFloorClickForSpawnPoint}
+          hierarchyDefMode={hierarchyDefMode}
+          hierarchySequence={hierarchySequence}
+          hierarchySequenceMap={hierarchySequenceMap}
+          onClearHierarchySequence={handleClearHierarchySequence}
           isMeasuring={isMeasuring}
           measurementPoints={measurementPoints}
           onFloorClickForMeasurement={handleFloorClickForMeasurement}
@@ -4508,7 +4659,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onMergeFixtures={handleMergeFixtures}
             canMergeFixtures={canMergeFixtures}
             onCountChange={handleFixtureCountChangeMulti}
-            onHierarchyChange={handleFixtureHierarchyChangeMulti}
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
@@ -4661,6 +4811,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
+            locationData={locationData}
             onFloorChange={(location, newFloorIndex, keepSamePosition = false) => {
               // Update the location's floor index, origin values, and position
               const key = generateFixtureUID(location);

@@ -57,7 +57,6 @@ interface MultiRightInfoPanelProps {
   onMergeFixtures?: (locations: LocationData[]) => void;
   canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
   onCountChange?: (locations: LocationData[], newCount: number) => void;
-  onHierarchyChange?: (locations: LocationData[], newHierarchy: number) => void;
   onFloorChange?: (locations: LocationData[], newFloorIndex: number, keepSamePosition?: boolean) => void;
   onAlignFixtures?: (locations: LocationData[], alignment: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom', transformSpace: 'world' | 'local') => void;
 }
@@ -93,7 +92,6 @@ export function MultiRightInfoPanel({
   onMergeFixtures,
   canMergeFixtures,
   onCountChange,
-  onHierarchyChange,
   onFloorChange,
   onAlignFixtures,
 }: MultiRightInfoPanelProps) {
@@ -101,8 +99,6 @@ export function MultiRightInfoPanel({
   const [customRotationValue, setCustomRotationValue] = useState('');
   const [isEditingCount, setIsEditingCount] = useState(false);
   const [countValue, setCountValue] = useState('');
-  const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
-  const [hierarchyValue, setHierarchyValue] = useState('');
   const [isEditingFloor, setIsEditingFloor] = useState(false);
   const [floorValue, setFloorValue] = useState('');
   const [keepSamePosition, setKeepSamePosition] = useState(false);
@@ -160,37 +156,6 @@ export function MultiRightInfoPanel({
       handleCountSave();
     } else if (e.key === 'Escape') {
       handleCountCancel();
-    }
-  };
-  
-  const handleHierarchyEdit = () => {
-    setIsEditingHierarchy(true);
-    if (commonHierarchy !== "Multiple Values" && commonHierarchy !== "N/A") {
-      setHierarchyValue(commonHierarchy.toString());
-    } else {
-      setHierarchyValue('');
-    }
-  };
-  
-  const handleHierarchySave = () => {
-    const newHierarchy = parseInt(hierarchyValue);
-    if (!isNaN(newHierarchy) && onHierarchyChange) {
-      onHierarchyChange(selectedLocations, newHierarchy);
-    }
-    setIsEditingHierarchy(false);
-    setHierarchyValue('');
-  };
-  
-  const handleHierarchyCancel = () => {
-    setIsEditingHierarchy(false);
-    setHierarchyValue('');
-  };
-  
-  const handleHierarchyKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleHierarchySave();
-    } else if (e.key === 'Escape') {
-      handleHierarchyCancel();
     }
   };
 
@@ -373,19 +338,10 @@ export function MultiRightInfoPanel({
           )}
         </div>
         
-        <div className="flex items-center justify-between">
+        <div>
           <div style={{ color: hasAnyHierarchyChanges ? '#ef4444' : 'inherit' }}>
             <span className="font-medium">Hierarchy:</span> {commonHierarchy === "Multiple Values" || commonHierarchy === "N/A" ? commonHierarchy : String(commonHierarchy)}
           </div>
-          {editMode && onHierarchyChange && (
-            <button
-              onClick={handleHierarchyEdit}
-              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
-              title="Change hierarchy"
-            >
-              <Pencil className="h-3 w-3" />
-            </button>
-          )}
         </div>
       </div>
       
@@ -406,30 +362,6 @@ export function MultiRightInfoPanel({
               size="sm"
               variant="outline"
               onClick={handleCountSave}
-              className="text-xs px-2 py-1 h-auto"
-            >
-              <Check className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
-      )}
-      
-      {isEditingHierarchy && (
-        <div className="mt-3 pt-2 border-t border-border">
-          <div className="flex gap-1 mb-2">
-            <input
-              type="number"
-              value={hierarchyValue}
-              onChange={(e) => setHierarchyValue(e.target.value)}
-              onKeyDown={handleHierarchyKeyPress}
-              placeholder="Hierarchy"
-              className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
-              autoFocus
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleHierarchySave}
               className="text-xs px-2 py-1 h-auto"
             >
               <Check className="h-3 w-3" />

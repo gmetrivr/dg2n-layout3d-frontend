@@ -38,6 +38,8 @@ interface LocationData {
   wasBrandChanged?: boolean;
   wasCountChanged?: boolean;
   wasHierarchyChanged?: boolean;
+  // Deletion tracking
+  forDelete?: boolean;
 }
 
 
@@ -72,6 +74,7 @@ interface RightInfoPanelProps {
   availableFloorIndices?: number[];
   floorNames?: Map<number, string>;
   floorDisplayOrder?: number[];
+  locationData?: LocationData[];
 
   // Event handlers
   onCloseLocation: () => void;
@@ -104,6 +107,7 @@ export function RightInfoPanel({
   availableFloorIndices = [],
   floorNames = new Map(),
   floorDisplayOrder = [],
+  locationData = [],
   onCloseLocation,
   onCloseFloorPlate,
   onOpenFixtureTypeModal,
@@ -126,6 +130,7 @@ export function RightInfoPanel({
   const [countValue, setCountValue] = useState('');
   const [isEditingHierarchy, setIsEditingHierarchy] = useState(false);
   const [hierarchyValue, setHierarchyValue] = useState('');
+  const [hierarchyError, setHierarchyError] = useState('');
   const [isEditingPosition, setIsEditingPosition] = useState(false);
   const [positionValues, setPositionValues] = useState({ x: '', y: '', z: '' });
   const [isEditingRotation, setIsEditingRotation] = useState(false);
@@ -141,6 +146,7 @@ export function RightInfoPanel({
     setCountValue('');
     setIsEditingHierarchy(false);
     setHierarchyValue('');
+    setHierarchyError('');
     setIsEditingPosition(false);
     setPositionValues({ x: '', y: '', z: '' });
     setIsEditingRotation(false);
@@ -209,20 +215,45 @@ export function RightInfoPanel({
   const handleHierarchyEdit = () => {
     setIsEditingHierarchy(true);
     setHierarchyValue(selectedLocation?.hierarchy?.toString() || '0');
+    setHierarchyError('');
   };
-  
+
   const handleHierarchySave = () => {
     const newHierarchy = parseInt(hierarchyValue);
-    if (!isNaN(newHierarchy) && selectedLocation && onHierarchyChange) {
-      onHierarchyChange(selectedLocation, newHierarchy);
+    if (isNaN(newHierarchy)) {
+      setHierarchyError('Please enter a valid number');
+      return;
     }
+
+    if (!selectedLocation || !onHierarchyChange) return;
+
+    // Check for duplicate hierarchy on the same floor
+    const currentFloor = selectedLocation.floorIndex;
+    const duplicate = locationData.find(loc =>
+      loc.floorIndex === currentFloor &&
+      loc.hierarchy === newHierarchy &&
+      !loc.forDelete &&
+      // Exclude the current fixture being edited
+      !(loc.posX === selectedLocation.posX &&
+        loc.posY === selectedLocation.posY &&
+        loc.posZ === selectedLocation.posZ)
+    );
+
+    if (duplicate) {
+      setHierarchyError(`Hierarchy ${newHierarchy} already exists on this floor`);
+      return;
+    }
+
+    onHierarchyChange(selectedLocation, newHierarchy);
     setIsEditingHierarchy(false);
     setHierarchyValue('');
+    setHierarchyError('');
   };
-  
+
   const handleHierarchyCancel = () => {
     setIsEditingHierarchy(false);
     setHierarchyValue('');
+    setHierarchyError('');
   };
   
   const handleHierarchyKeyPress = (e: React.KeyboardEvent) => {
@@ -560,24 +591,34 @@ export function RightInfoPanel({
               </div>
             )}
             {isEditingHierarchy && (
-              <div className="flex gap-1 mb-2">
-                <input
-                  type="number"
-                  value={hierarchyValue}
-                  onChange={(e) => setHierarchyValue(e.target.value)}
-                  onKeyDown={handleHierarchyKeyPress}
-                  placeholder="Hierarchy"
-                  className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
-                  autoFocus
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleHierarchySave}
-                  className="text-xs px-2 py-1 h-auto"
-                >
-                  <Check className="h-3 w-3" />
-                </Button>
+              <div>
+                <div className="flex gap-1 mb-2">
+                  <input
+                    type="number"
+                    value={hierarchyValue}
+                    onChange={(e) => {
+                      setHierarchyValue(e.target.value);
+                      setHierarchyError(''); // Clear error on change
+                    }}
+                    onKeyDown={handleHierarchyKeyPress}
+                    placeholder="Hierarchy"
+                    className="flex-1 px-2 py-1 text-xs border border-border rounded bg-background text-foreground"
+                    autoFocus
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleHierarchySave}
+                    className="text-xs px-2 py-1 h-auto"
+                  >
+                    <Check className="h-3 w-3" />
+                  </Button>
+                </div>
+                {hierarchyError && (
+                  <div className="text-xs text-red-500 dark:text-red-400 mb-2">
+                    {hierarchyError}
+                  </div>
+                )}
               </div>
             )}
             {isEditingFloor && (

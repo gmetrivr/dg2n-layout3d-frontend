@@ -259,7 +259,7 @@ export const apiService = {
   },
 
   async getToleranceDefaults(pipelineVersion: string): Promise<{ pipeline_version: string; default_tolerances: Record<string, number> }> {
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/config/tolerances/${pipelineVersion}`);
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/config/tolerances/${pipelineVersion}`);
     
     if (!response.ok) {
       throw new Error(`Failed to get tolerance defaults: ${response.statusText}`);

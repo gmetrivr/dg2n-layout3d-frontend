@@ -22,6 +22,8 @@ interface LeftControlPanelProps {
   editMode: boolean;
   editFloorplatesMode: boolean;
   setSpawnPointMode: boolean;
+  hierarchyDefMode: boolean;
+  hierarchySequenceCount?: number;
   transformSpace: 'world' | 'local';
 
   // Fixture data
@@ -76,6 +78,8 @@ interface LeftControlPanelProps {
   onShowFixtureAreaChange: (show: boolean) => void;
   onEditModeChange: (enabled: boolean) => void;
   onSetSpawnPointModeChange: (enabled: boolean) => void;
+  onHierarchyDefModeChange: (enabled: boolean) => void;
+  onAcceptHierarchySequence: () => void;
   onTransformSpaceChange: (space: 'world' | 'local') => void;
   onDownloadGLB: () => void;
   onDownloadModifiedZip: () => void;
@@ -101,6 +105,8 @@ export function LeftControlPanel({
   editMode,
   editFloorplatesMode,
   setSpawnPointMode,
+  hierarchyDefMode,
+  hierarchySequenceCount,
   transformSpace,
   fixtureTypes,
   selectedFixtureType,
@@ -133,6 +139,8 @@ export function LeftControlPanel({
   onShowFixtureAreaChange,
   onEditModeChange,
   onSetSpawnPointModeChange,
+  onHierarchyDefModeChange,
+  onAcceptHierarchySequence,
   onTransformSpaceChange,
   onDownloadGLB,
   onDownloadModifiedZip,
@@ -414,6 +422,45 @@ export function LeftControlPanel({
             </div>
           </label>
         </div>
+
+        {/* Define Hierarchy Switch */}
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium">Define Hierarchy:</label>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={hierarchyDefMode}
+              onChange={(e) => onHierarchyDefModeChange(e.target.checked)}
+              className="sr-only"
+            />
+            <div className={`w-11 h-6 rounded-full transition-colors border-2 flex items-center ${
+              hierarchyDefMode
+                ? 'bg-blue-600 dark:bg-blue-500 border-blue-600 dark:border-blue-500'
+                : 'bg-gray-200 dark:bg-muted border-gray-300 dark:border-gray-700'
+            }`}>
+              <div className={`w-5 h-5 bg-white dark:bg-background rounded-full shadow-sm transition-transform ${
+                hierarchyDefMode ? 'translate-x-5' : 'translate-x-0.5'
+              }`} />
+            </div>
+          </label>
+        </div>
+
+        {/* Counter showing fixtures in sequence */}
+        {hierarchyDefMode && hierarchySequenceCount !== undefined && hierarchySequenceCount > 0 && (
+          <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+            {hierarchySequenceCount} fixture{hierarchySequenceCount !== 1 ? 's' : ''} selected
+          </div>
+        )}
+
+        {/* Accept Hierarchy Sequence Button */}
+        {hierarchyDefMode && hierarchySequenceCount !== undefined && hierarchySequenceCount > 0 && (
+          <button
+            onClick={onAcceptHierarchySequence}
+            className="w-full px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors font-medium text-sm"
+          >
+            Accept Sequence
+          </button>
+        )}
 
         {/* Edit Fixtures Switch */}
         <div className="flex items-center justify-between">

@@ -239,9 +239,11 @@ interface LocationGLBProps {
   showFixtureArea?: boolean;
   fixtureType?: string;
   brandCategoryMapping?: Record<string, string>;
+  hierarchyDefMode?: boolean;
+  hierarchySequencePosition?: number;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType, brandCategoryMapping = {} }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType, brandCategoryMapping = {}, hierarchyDefMode = false, hierarchySequencePosition }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -410,12 +412,12 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           />
         )}
 
-        {/* Red edge outline when selected - use stack bounding box */}
-        {isSelected && (
+        {/* Red/Blue edge outline when selected or in hierarchy sequence */}
+        {(isSelected || (hierarchyDefMode && hierarchySequencePosition !== undefined)) && (
           <BoundingBox
             size={stackBoundingBox.size as [number, number, number]}
             position={stackBoundingBox.center as [number, number, number]}
-            color="red"
+            color={hierarchyDefMode && hierarchySequencePosition !== undefined ? "#2563eb" : "red"}
             renderOrder={999}
           />
         )}
@@ -447,6 +449,33 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
               {`*${location.brand}*
 ${location.blockName}
 ${location.hierarchy}`}
+            </Text>
+          </Billboard>
+        )}
+
+        {/* Hierarchy sequence number label */}
+        {hierarchyDefMode && hierarchySequencePosition !== undefined && (
+          <Billboard position={[
+            stackBoundingBox.center[0],
+            stackBoundingBox.center[1] + stackBoundingBox.size[1] / 2 + 1.0,
+            stackBoundingBox.center[2]
+          ]}>
+            {/* Circular background */}
+            <mesh renderOrder={1001}>
+              <circleGeometry args={[0.25]} />
+              <meshBasicMaterial color="#2563eb" transparent opacity={0.9} />
+            </mesh>
+
+            {/* Sequence number */}
+            <Text
+              position={[0, 0, 0.001]}
+              fontSize={0.2}
+              color="white"
+              anchorX="center"
+              anchorY="middle"
+              renderOrder={1002}
+            >
+              {hierarchySequencePosition}
             </Text>
           </Billboard>
         )}
@@ -519,6 +548,8 @@ ${location.hierarchy}`}
     prevProps.showFixtureLabels === nextProps.showFixtureLabels &&
     prevProps.showFixtureArea === nextProps.showFixtureArea &&
     prevProps.fixtureType === nextProps.fixtureType &&
+    prevProps.hierarchyDefMode === nextProps.hierarchyDefMode &&
+    prevProps.hierarchySequencePosition === nextProps.hierarchySequencePosition &&
     // Compare pendingMultiDelta (deep comparison for arrays)
     (prevProps.pendingMultiDelta === nextProps.pendingMultiDelta || (
       prevProps.pendingMultiDelta?.[0] === nextProps.pendingMultiDelta?.[0] &&
@@ -1544,10 +1575,16 @@ interface Canvas3DProps {
   onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
   onObjectClick?: (object: ArchitecturalObject) => void;
   onObjectPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  onCancelAddObject?: () => void;
   // Spawn point props
   setSpawnPointMode?: boolean;
   spawnPoints?: Map<number, [number, number, number]>;
   onFloorClickForSpawnPoint?: (point: [number, number, number]) => void;
+  // Hierarchy definition props
+  hierarchyDefMode?: boolean;
+  hierarchySequence?: LocationData[];
+  hierarchySequenceMap?: Map<string, number>;
+  onClearHierarchySequence?: () => void;
   // Measurement tool props
   isMeasuring?: boolean;
   measurementPoints?: [number, number, number][];
@@ -1597,9 +1634,14 @@ export function Canvas3D({
   onFloorClickForObjectPlacement,
   onObjectClick,
   onObjectPositionChange,
+  onCancelAddObject,
   setSpawnPointMode = false,
   spawnPoints = new Map(),
   onFloorClickForSpawnPoint,
+  hierarchyDefMode = false,
+  hierarchySequence = [],
+  hierarchySequenceMap = new Map(),
+  onClearHierarchySequence,
   isMeasuring = false,
   measurementPoints = [],
   onFloorClickForMeasurement,
@@ -1638,12 +1680,71 @@ export function Canvas3D({
     fetchBrandCategoryMapping();
   }, []);
 
+  // Track right-click drag for hierarchy mode and add object cancel
+  const rightClickStartPos = useRef<{ x: number; y: number } | null>(null);
+  const isRightClickDragging = useRef(false);
+
+  useEffect(() => {
+    if (!hierarchyDefMode && !isAddingObject) return;
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 2) { // Right mouse button
+        rightClickStartPos.current = { x: e.clientX, y: e.clientY };
+        isRightClickDragging.current = false;
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (rightClickStartPos.current) {
+        const dx = Math.abs(e.clientX - rightClickStartPos.current.x);
+        const dy = Math.abs(e.clientY - rightClickStartPos.current.y);
+        // If moved more than 5 pixels, consider it a drag
+        if (dx > 5 || dy > 5) {
+          isRightClickDragging.current = true;
+        }
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) {
+        rightClickStartPos.current = null;
+      }
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [hierarchyDefMode, isAddingObject]);
+
   return (
     <Canvas
       camera={{ position: cameraPosition, fov: 50 }}
       shadows
       className="bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-800"
       onPointerMissed={onPointerMissed}
+      onContextMenu={(e) => {
+        // Handle right-click cancel for hierarchy mode or add object mode
+        if ((hierarchyDefMode && onClearHierarchySequence) || (isAddingObject && onCancelAddObject)) {
+          e.stopPropagation();
+          e.nativeEvent.preventDefault();
+
+          // Only cancel if it wasn't a drag (panning)
+          if (!isRightClickDragging.current) {
+            if (hierarchyDefMode && onClearHierarchySequence) {
+              onClearHierarchySequence();
+            }
+            if (isAddingObject && onCancelAddObject) {
+              onCancelAddObject();
+            }
+          }
+        }
+      }}
     >
       {/* Camera controller for dynamic mode switching */}
       <CameraController mode={cameraMode} position={cameraPosition} zoom={orthoZoom} />
@@ -1740,13 +1841,16 @@ export function Canvas3D({
             if (selectedBrand.includes('all')) return true;
             return location.brand ? selectedBrand.includes(location.brand) : false;
           })
-          .map((location, index) => (
-            location.glbUrl ? (
+          .map((location, index) => {
+            const uid = generateFixtureUID(location);
+            const hierarchyPos = hierarchySequenceMap.get(uid);
+
+            return location.glbUrl ? (
               <LocationGLB
-                key={generateFixtureUID(location)}
+                key={uid}
                 location={location}
-                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? undefined : onFixtureClick}
-                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? false : isLocationSelected(location)}
+                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring) ? undefined : onFixtureClick}
+                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring || hierarchyDefMode) ? false : isLocationSelected(location)}
                 isSingleSelection={selectedLocations.length === 1}
                 onError={onGLBError}
                 editMode={editMode}
@@ -1756,6 +1860,8 @@ export function Canvas3D({
                 showFixtureArea={showFixtureArea}
                 fixtureType={fixtureTypeMap.get(location.blockName)}
                 brandCategoryMapping={brandCategoryMapping}
+                hierarchyDefMode={hierarchyDefMode}
+                hierarchySequencePosition={hierarchyPos}
                 onPositionChange={editMode ? onPositionChange : undefined}
                 pendingMultiDelta={pendingMultiDelta}
                 {...(editMode && {
@@ -1772,11 +1878,58 @@ export function Canvas3D({
                 key={`${location.blockName}-${index}`}
                 location={location}
                 color={`hsl(${(index * 137.5) % 360}, 70%, 50%)`}
-                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? undefined : onFixtureClick}
-                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject) ? false : isLocationSelected(location)}
+                onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring) ? undefined : onFixtureClick}
+                isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring || hierarchyDefMode) ? false : isLocationSelected(location)}
               />
-            )
-          ));
+            );
+          });
+      })()}
+
+      {/* Hierarchy sequence connection lines */}
+      {hierarchyDefMode && hierarchySequence.length > 1 && (() => {
+        const fileForFloorExtraction = selectedFloorFile || selectedFile;
+        const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) ||
+                           fileForFloorExtraction?.name.match(/(\d+)/i);
+        const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+        const currentFloorSequence = hierarchySequence.filter(
+          loc => loc.floorIndex === currentFloor
+        );
+
+        if (currentFloorSequence.length < 2) return null;
+
+        const lines = [];
+        for (let i = 0; i < currentFloorSequence.length - 1; i++) {
+          const loc1 = currentFloorSequence[i];
+          const loc2 = currentFloorSequence[i + 1];
+
+          const point1: [number, number, number] = [loc1.posX, loc1.posZ + 0.5, -loc1.posY];
+          const point2: [number, number, number] = [loc2.posX, loc2.posZ + 0.5, -loc2.posY];
+
+          lines.push(
+            <line key={`hierarchy-line-${i}`}>
+              <bufferGeometry
+                attach="geometry"
+                onUpdate={(self) => {
+                  const positions = new Float32Array([
+                    point1[0], point1[1], point1[2],
+                    point2[0], point2[1], point2[2],
+                  ]);
+                  self.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                }}
+              />
+              <lineBasicMaterial
+                attach="material"
+                color="#2563eb"
+                linewidth={3}
+                opacity={0.7}
+                transparent
+              />
+            </line>
+          );
+        }
+
+        return <group>{lines}</group>;
       })()}
 
       {/* Multi-fixture transform control for moving multiple fixtures together */}
