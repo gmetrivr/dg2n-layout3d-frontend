@@ -684,6 +684,140 @@ const MultiFixtureTransformGroup = memo(function MultiFixtureTransformGroup({
   );
 });
 
+// Multi-object transform group for architectural objects
+interface MultiObjectTransformGroupProps {
+  selectedObjects: ArchitecturalObject[];
+  editMode?: boolean;
+  transformSpace?: 'world' | 'local';
+  onMultiPositionChange?: (delta: [number, number, number]) => void;
+  onTransformStart?: () => void;
+  onTransformEnd?: () => void;
+  setPendingDelta: (delta: [number, number, number] | null) => void;
+}
+
+const MultiObjectTransformGroup = memo(function MultiObjectTransformGroup({
+  selectedObjects,
+  editMode,
+  transformSpace,
+  onMultiPositionChange,
+  onTransformStart,
+  onTransformEnd,
+  setPendingDelta
+}: MultiObjectTransformGroupProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [initialPosition, setInitialPosition] = useState<[number, number, number] | null>(null);
+
+  // Calculate center point of all selected objects
+  const centerPosition = useMemo((): [number, number, number] => {
+    if (selectedObjects.length === 0) return [0, 0, 0];
+
+    const sum = selectedObjects.reduce(
+      (acc, obj) => {
+        // Handle single-point objects
+        if (obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined) {
+          return [
+            acc[0] + obj.posX,
+            acc[1] + obj.posZ,
+            acc[2] + -obj.posY
+          ];
+        }
+        // Handle two-point objects (use midpoint)
+        if (obj.startPoint && obj.endPoint) {
+          const midX = (obj.startPoint[0] + obj.endPoint[0]) / 2;
+          const midY = (obj.startPoint[1] + obj.endPoint[1]) / 2;
+          const midZ = (obj.startPoint[2] + obj.endPoint[2]) / 2;
+          return [
+            acc[0] + midX,
+            acc[1] + midZ,
+            acc[2] + -midY
+          ];
+        }
+        return acc;
+      },
+      [0, 0, 0]
+    );
+
+    const count = selectedObjects.length;
+    return [sum[0] / count, sum[1] / count, sum[2] / count];
+  }, [selectedObjects]);
+
+  // Reset group position when centerPosition changes
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(centerPosition[0], centerPosition[1], centerPosition[2]);
+    }
+    setInitialPosition(centerPosition);
+    setPendingDelta(null);
+  }, [centerPosition]);
+
+  const handleTransformStart = () => {
+    if (groupRef.current) {
+      const pos = groupRef.current.position;
+      setInitialPosition([pos.x, pos.y, pos.z]);
+    }
+    onTransformStart?.();
+  };
+
+  const handleTransformChange = () => {
+    if (groupRef.current && initialPosition) {
+      const currentPos = groupRef.current.position;
+      const delta: [number, number, number] = [
+        currentPos.x - initialPosition[0],
+        -(currentPos.z - initialPosition[2]),
+        currentPos.y - initialPosition[1]
+      ];
+      setPendingDelta(delta);
+    }
+  };
+
+  const handleTransformEnd = () => {
+    if (groupRef.current && initialPosition) {
+      const currentPos = groupRef.current.position;
+      const finalDelta: [number, number, number] = [
+        currentPos.x - initialPosition[0],
+        -(currentPos.z - initialPosition[2]),
+        currentPos.y - initialPosition[1]
+      ];
+
+      if (onMultiPositionChange) {
+        onMultiPositionChange(finalDelta);
+      }
+    }
+
+    setPendingDelta(null);
+
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
+  };
+
+  if (selectedObjects.length <= 1 || !editMode) return null;
+
+  return (
+    <>
+      <group ref={groupRef} position={centerPosition}>
+        {/* Visual indicator - a small sphere at the center */}
+        <mesh>
+          <sphereGeometry args={[0.3, 16, 16]} />
+          <meshBasicMaterial color="cyan" opacity={0.5} transparent />
+        </mesh>
+      </group>
+
+      {editMode && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode="translate"
+          space={transformSpace}
+          showY={false}
+          onObjectChange={handleTransformChange}
+          onMouseDown={handleTransformStart}
+          onMouseUp={handleTransformEnd}
+        />
+      )}
+    </>
+  );
+});
+
 interface GLBModelProps {
   file: ExtractedFile;
   onBoundsCalculated?: (center: [number, number, number], size: [number, number, number]) => void;
@@ -1069,6 +1203,8 @@ interface GlazingProps {
   isSelected?: boolean;
   editMode?: boolean;
   transformSpace?: 'world' | 'local';
+  isSingleSelection?: boolean;
+  pendingMultiObjectDelta?: [number, number, number] | null;
   onClick?: (object: ArchitecturalObject, event?: any) => void;
   onPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
   onTransformStart?: () => void;
@@ -1082,13 +1218,15 @@ interface DoorGLBProps {
   isSelected: boolean;
   editMode?: boolean;
   transformSpace?: 'world' | 'local';
+  isSingleSelection?: boolean;
+  pendingMultiObjectDelta?: [number, number, number] | null;
   onClick?: (obj: ArchitecturalObject, event?: any) => void;
   onPositionChange?: (obj: ArchitecturalObject, newPosition: [number, number, number]) => void;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }
 
-function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: DoorGLBProps) {
+function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, isSingleSelection = true, pendingMultiObjectDelta = null, onClick, onPositionChange, onTransformStart, onTransformEnd }: DoorGLBProps) {
   const gltfResult = useGLTF(glbUrl);
   const scene = gltfResult?.scene;
   const groupRef = useRef<THREE.Group>(null);
@@ -1106,11 +1244,23 @@ function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, onClick
   bbox.getCenter(center);
 
   // Door uses posX, posY, posZ for position
-  const position: [number, number, number] = pendingPosition || [
+  const basePosition: [number, number, number] = [
     object.posX || 0,
     object.posZ || 0,  // Y and Z are swapped
     -(object.posY || 0)
   ];
+
+  // Apply pending multi-object delta if in multi-select mode
+  let position: [number, number, number];
+  if (isSelected && !isSingleSelection && pendingMultiObjectDelta) {
+    position = [
+      basePosition[0] + pendingMultiObjectDelta[0],
+      basePosition[1] + pendingMultiObjectDelta[2],
+      basePosition[2] - pendingMultiObjectDelta[1]
+    ];
+  } else {
+    position = pendingPosition || basePosition;
+  }
 
   // Convert rotations from degrees to radians
   const rotationX = ((object.rotationX || 0) * Math.PI) / 180;
@@ -1178,8 +1328,8 @@ function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, onClick
         )}
       </group>
 
-      {/* Transform controls for editing mode - only show for selected object */}
-      {editMode && isSelected && groupRef.current && (
+      {/* Transform controls for editing mode - only show for selected object and single selection */}
+      {editMode && isSelected && isSingleSelection && groupRef.current && (
         <TransformControls
           object={groupRef.current}
           mode="translate"
@@ -1196,7 +1346,7 @@ function DoorGLB({ object, glbUrl, isSelected, editMode, transformSpace, onClick
   );
 }
 
-function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: GlazingProps) {
+function Glazing({ object, isSelected, editMode, transformSpace, isSingleSelection = true, pendingMultiObjectDelta = null, onClick, onPositionChange, onTransformStart, onTransformEnd }: GlazingProps) {
   const { startPoint, endPoint, height, rotation: additionalRotation } = object;
   const groupRef = useRef<THREE.Group>(null);
   const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
@@ -1213,11 +1363,23 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
   const angle = Math.atan2(-dz, dx);  // Negate dz to match coordinate system
 
   // Position at midpoint - origin at ground level (y=0)
-  const position: [number, number, number] = pendingPosition || [
+  const basePosition: [number, number, number] = [
     (startPoint[0] + endPoint[0]) / 2,
     startPoint[1],  // Ground level, not height/2
     (startPoint[2] + endPoint[2]) / 2
   ];
+
+  // Apply pending multi-object delta if in multi-select mode
+  let position: [number, number, number];
+  if (isSelected && !isSingleSelection && pendingMultiObjectDelta) {
+    position = [
+      basePosition[0] + pendingMultiObjectDelta[0],
+      basePosition[1] + pendingMultiObjectDelta[2],
+      basePosition[2] - pendingMultiObjectDelta[1]
+    ];
+  } else {
+    position = pendingPosition || basePosition;
+  }
 
   const totalRotation = angle + (additionalRotation || 0);
 
@@ -1316,8 +1478,8 @@ function Glazing({ object, isSelected, editMode, transformSpace, onClick, onPosi
         )}
       </group>
 
-      {/* Transform controls for editing mode - only show for selected object */}
-      {editMode && isSelected && groupRef.current && (
+      {/* Transform controls for editing mode - only show for selected object and single selection */}
+      {editMode && isSelected && isSingleSelection && groupRef.current && (
         <TransformControls
           object={groupRef.current}
           mode="translate"
@@ -1340,13 +1502,15 @@ interface PartitionProps {
   isSelected?: boolean;
   editMode?: boolean;
   transformSpace?: 'world' | 'local';
+  isSingleSelection?: boolean;
+  pendingMultiObjectDelta?: [number, number, number] | null;
   onClick?: (object: ArchitecturalObject, event?: any) => void;
   onPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
 }
 
-function Partition({ object, isSelected, editMode, transformSpace, onClick, onPositionChange, onTransformStart, onTransformEnd }: PartitionProps) {
+function Partition({ object, isSelected, editMode, transformSpace, isSingleSelection = true, pendingMultiObjectDelta = null, onClick, onPositionChange, onTransformStart, onTransformEnd }: PartitionProps) {
   const { startPoint, endPoint, height, rotation: additionalRotation } = object;
   const groupRef = useRef<THREE.Group>(null);
   const [pendingPosition, setPendingPosition] = useState<[number, number, number] | null>(null);
@@ -1364,11 +1528,23 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
   const width = 0.06; // 60mm in meters
 
   // Position at midpoint - origin at ground level (y=0)
-  const position: [number, number, number] = pendingPosition || [
+  const basePosition: [number, number, number] = [
     (startPoint[0] + endPoint[0]) / 2,
     startPoint[1],  // Ground level, not height/2
     (startPoint[2] + endPoint[2]) / 2
   ];
+
+  // Apply pending multi-object delta if in multi-select mode
+  let position: [number, number, number];
+  if (isSelected && !isSingleSelection && pendingMultiObjectDelta) {
+    position = [
+      basePosition[0] + pendingMultiObjectDelta[0],
+      basePosition[1] + pendingMultiObjectDelta[2],
+      basePosition[2] - pendingMultiObjectDelta[1]
+    ];
+  } else {
+    position = pendingPosition || basePosition;
+  }
 
   const totalRotation = angle + (additionalRotation || 0);
 
@@ -1416,8 +1592,8 @@ function Partition({ object, isSelected, editMode, transformSpace, onClick, onPo
         )}
       </group>
 
-      {/* Transform controls for editing mode - only show for selected object */}
-      {editMode && isSelected && groupRef.current && (
+      {/* Transform controls for editing mode - only show for selected object and single selection */}
+      {editMode && isSelected && isSingleSelection && groupRef.current && (
         <TransformControls
           object={groupRef.current}
           mode="translate"
@@ -1572,9 +1748,11 @@ interface Canvas3DProps {
   currentObjectType?: ArchitecturalObjectType | null;
   objectPlacementPoint?: [number, number, number] | null;
   selectedObject?: ArchitecturalObject | null;
+  selectedObjects?: ArchitecturalObject[];
   onFloorClickForObjectPlacement?: (point: [number, number, number]) => void;
-  onObjectClick?: (object: ArchitecturalObject) => void;
+  onObjectClick?: (object: ArchitecturalObject, event?: any) => void;
   onObjectPositionChange?: (object: ArchitecturalObject, newPosition: [number, number, number]) => void;
+  onMultiObjectPositionChange?: (delta: [number, number, number]) => void;
   onCancelAddObject?: () => void;
   // Spawn point props
   setSpawnPointMode?: boolean;
@@ -1631,9 +1809,11 @@ export function Canvas3D({
   currentObjectType: _currentObjectType = null,
   objectPlacementPoint = null,
   selectedObject = null,
+  selectedObjects = [],
   onFloorClickForObjectPlacement,
   onObjectClick,
   onObjectPositionChange,
+  onMultiObjectPositionChange,
   onCancelAddObject,
   setSpawnPointMode = false,
   spawnPoints = new Map(),
@@ -1661,6 +1841,9 @@ export function Canvas3D({
 
   // State for multi-fixture drag - stores pending position delta during transform
   const [pendingMultiDelta, setPendingMultiDelta] = useState<[number, number, number] | null>(null);
+
+  // State for multi-object drag - stores pending position delta during transform
+  const [pendingMultiObjectDelta, setPendingMultiObjectDelta] = useState<[number, number, number] | null>(null);
 
   // State for brand category mapping
   const [brandCategoryMapping, setBrandCategoryMapping] = useState<Record<string, string>>({});
@@ -1945,6 +2128,19 @@ export function Canvas3D({
         />
       )}
 
+      {/* Multi-object transform control for moving multiple architectural objects together */}
+      {editMode && onMultiObjectPositionChange && selectedObjects.length > 1 && (
+        <MultiObjectTransformGroup
+          selectedObjects={selectedObjects}
+          editMode={editMode}
+          transformSpace={transformSpace}
+          onMultiPositionChange={onMultiObjectPositionChange}
+          onTransformStart={() => setIsTransforming(true)}
+          onTransformEnd={() => setIsTransforming(false)}
+          setPendingDelta={setPendingMultiObjectDelta}
+        />
+      )}
+
       {/* Render architectural objects */}
       {architecturalObjects.map(obj => {
         const fileForFloorExtraction = selectedFloorFile || selectedFile;
@@ -1957,7 +2153,7 @@ export function Canvas3D({
         // Hide architectural objects when showWalls is false (walls are hidden)
         if (!showWalls) return null;
 
-        const isSelected = selectedObject?.id === obj.id;
+        const isSelected = selectedObject?.id === obj.id || selectedObjects.some(selObj => selObj.id === obj.id);
 
         // Render based on object type
         if (obj.type === 'glazing') {
@@ -1968,6 +2164,8 @@ export function Canvas3D({
               isSelected={isSelected}
               editMode={editMode}
               transformSpace={transformSpace}
+              isSingleSelection={selectedObjects.length <= 1}
+              pendingMultiObjectDelta={pendingMultiObjectDelta}
               onClick={onObjectClick}
               onPositionChange={onObjectPositionChange}
               onTransformStart={() => setIsTransforming(true)}
@@ -1982,6 +2180,8 @@ export function Canvas3D({
               isSelected={isSelected}
               editMode={editMode}
               transformSpace={transformSpace}
+              isSingleSelection={selectedObjects.length <= 1}
+              pendingMultiObjectDelta={pendingMultiObjectDelta}
               onClick={onObjectClick}
               onPositionChange={onObjectPositionChange}
               onTransformStart={() => setIsTransforming(true)}
@@ -2012,6 +2212,8 @@ export function Canvas3D({
                 isSelected={isSelected}
                 editMode={editMode}
                 transformSpace={transformSpace}
+                isSingleSelection={selectedObjects.length <= 1}
+                pendingMultiObjectDelta={pendingMultiObjectDelta}
                 onClick={onObjectClick}
                 onPositionChange={onObjectPositionChange}
                 onTransformStart={() => setIsTransforming(true)}
@@ -2059,7 +2261,7 @@ export function Canvas3D({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (onObjectClick) {
-                    onObjectClick(obj);
+                    onObjectClick(obj, e);
                   }
                 }}
               >

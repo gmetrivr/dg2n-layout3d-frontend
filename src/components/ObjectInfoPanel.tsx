@@ -1,4 +1,4 @@
-import { Trash2, RotateCw, RotateCcw, Pencil, Check, RefreshCw } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Pencil, Check, RefreshCw, Copy } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import type { ArchitecturalObject, ArchitecturalObjectType } from './3DViewerModifier';
 import { useState, useEffect } from 'react';
@@ -34,6 +34,7 @@ interface ObjectInfoPanelProps {
   onHeightChange: (object: ArchitecturalObject, height: number) => void;
   onPositionChange?: (object: ArchitecturalObject, startPoint: [number, number, number], endPoint: [number, number, number]) => void;
   onSinglePointPositionChange?: (object: ArchitecturalObject, posX: number, posY: number, posZ: number) => void;
+  onCopyObject?: (object: ArchitecturalObject) => void;
   onVariantChange?: (object: ArchitecturalObject, variant: FixtureVariant) => void;
   onDelete: (object: ArchitecturalObject) => void;
   onReset: (object: ArchitecturalObject) => void;
@@ -47,6 +48,7 @@ export function ObjectInfoPanel({
   onHeightChange,
   onPositionChange,
   onSinglePointPositionChange,
+  onCopyObject,
   onVariantChange,
   onDelete,
   onReset
@@ -684,8 +686,20 @@ export function ObjectInfoPanel({
             )}
           </div>
 
-          {/* Delete Button */}
+          {/* Copy & Delete Buttons */}
           <div className="flex gap-1">
+            {onCopyObject && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onCopyObject(selectedObject)}
+                className="text-xs flex items-center justify-center gap-1 flex-1"
+                title="Copy object (Ctrl+C / Cmd+C)"
+              >
+                <Copy className="h-3 w-3" />
+                Copy
+              </Button>
+            )}
             <Button
               size="sm"
               variant="destructive"

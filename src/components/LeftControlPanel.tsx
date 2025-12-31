@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Settings, Plus, Clipboard } from 'lucide-react';
 import { Select } from "./ui/select";
 import { MultiSelect } from "./ui/multi-select";
 import { Button } from "@/shadcn/components/ui/button";
@@ -65,6 +65,14 @@ interface LeftControlPanelProps {
   // Camera controls
   cameraMode?: 'perspective' | 'orthographic';
 
+  // Clipboard state
+  clipboardState?: {
+    hasData: boolean;
+    itemCount: number;
+    fixtureCount: number;
+    archObjectCount: number;
+  };
+
   // Event handlers
   onCameraModeChange?: (mode: 'perspective' | 'orthographic') => void;
   onSwitchToTopView?: () => void;
@@ -90,6 +98,7 @@ interface LeftControlPanelProps {
   onAddObjectsClick?: () => void;
   onMeasuringChange?: (enabled: boolean) => void;
   onClearMeasurement?: () => void;
+  onPaste?: () => void;
 }
 
 export function LeftControlPanel({
@@ -127,6 +136,7 @@ export function LeftControlPanel({
   isMeasuring,
   measurementPoints,
   cameraMode,
+  clipboardState,
   onCameraModeChange,
   onSwitchToTopView,
   onFloorFileChange,
@@ -151,6 +161,7 @@ export function LeftControlPanel({
   onAddObjectsClick,
   onMeasuringChange,
   onClearMeasurement,
+  onPaste,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -486,22 +497,36 @@ export function LeftControlPanel({
 
         {/* Add Fixture Button */}
         {editMode && (
-          <div className="flex gap-2">
-            <button
-              onClick={onAddFixtureClick}
-              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 w-full justify-center"
-            >
-              <Plus className="h-4 w-4" />
-              Add Fixture
-            </button>
-            <button
-              onClick={onAddObjectsClick}
-              className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:opacity-90 w-full justify-center"
-            >
-              <Plus className="h-4 w-4" />
-              Add Objects
-            </button>
-          </div>
+          <>
+            <div className="flex gap-2">
+              <button
+                onClick={onAddFixtureClick}
+                className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 w-full justify-center"
+              >
+                <Plus className="h-4 w-4" />
+                Add Fixture
+              </button>
+              <button
+                onClick={onAddObjectsClick}
+                className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-secondary text-secondary-foreground hover:opacity-90 w-full justify-center"
+              >
+                <Plus className="h-4 w-4" />
+                Add Objects
+              </button>
+            </div>
+
+            {/* Paste Button */}
+            {clipboardState?.hasData && onPaste && (
+              <button
+                onClick={onPaste}
+                className="flex items-center gap-2 text-sm px-3 py-1.5 rounded bg-accent text-accent-foreground hover:opacity-90 w-full justify-center"
+                title={`Paste ${clipboardState.itemCount} item(s) (Ctrl+V / Cmd+V)`}
+              >
+                <Clipboard className="h-4 w-4" />
+                Paste ({clipboardState.itemCount})
+              </button>
+            )}
+          </>
         )}
 
         {/* Floor Plates Controls */}

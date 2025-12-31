@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Check, Link, AlignHorizontalDistributeStart, AlignHorizontalDistributeCenter, AlignHorizontalDistributeEnd, AlignVerticalDistributeStart, AlignVerticalDistributeCenter, AlignVerticalDistributeEnd } from 'lucide-react';
+import { Pencil, Trash2, Check, Link, Copy, AlignHorizontalDistributeStart, AlignHorizontalDistributeCenter, AlignHorizontalDistributeEnd, AlignVerticalDistributeStart, AlignVerticalDistributeCenter, AlignVerticalDistributeEnd } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import { useState } from 'react';
 
@@ -53,6 +53,7 @@ interface MultiRightInfoPanelProps {
   onRotateFixture?: (angle: number) => void;
   onResetLocation?: (location: LocationData) => void;
   onResetMultiple?: (locations: LocationData[]) => void;
+  onCopyFixtures?: (locations: LocationData[]) => void;
   onDeleteFixtures?: (locations: LocationData[]) => void;
   onMergeFixtures?: (locations: LocationData[]) => void;
   canMergeFixtures?: (locations: LocationData[], fixtureTypeMap: Map<string, string>) => boolean;
@@ -88,6 +89,7 @@ export function MultiRightInfoPanel({
   onRotateFixture,
   onResetLocation,
   onResetMultiple,
+  onCopyFixtures,
   onDeleteFixtures,
   onMergeFixtures,
   canMergeFixtures,
@@ -544,6 +546,18 @@ export function MultiRightInfoPanel({
             >
               <Link className="h-3 w-3" />
               Merge ({selectedLocations.length})
+            </Button>
+          )}
+          {onCopyFixtures && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onCopyFixtures(selectedLocations)}
+              className="w-full text-xs flex items-center justify-center gap-1 mt-2"
+              title="Copy fixtures (Ctrl+C / Cmd+C)"
+            >
+              <Copy className="h-3 w-3" />
+              Copy All ({selectedLocations.length})
             </Button>
           )}
           {onDeleteFixtures && (

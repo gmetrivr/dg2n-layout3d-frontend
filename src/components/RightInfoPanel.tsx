@@ -84,6 +84,7 @@ interface RightInfoPanelProps {
   onRotateFixture: (angle: number) => void;
   onResetLocation: (location: LocationData) => void;
   onResetFloorPlate: (plateData: FloorPlateData, modifiedData: any) => void;
+  onCopyFixture?: (location: LocationData) => void;
   onDuplicateFixture?: (location: LocationData) => void;
   onDeleteFixture?: (location: LocationData) => void;
   onSplitFixture?: (location: LocationData, leftCount: number, rightCount: number) => void;
@@ -115,6 +116,7 @@ export function RightInfoPanel({
   onRotateFixture,
   onResetLocation,
   onResetFloorPlate,
+  onCopyFixture,
   onDuplicateFixture,
   onDeleteFixture,
   onSplitFixture,
@@ -780,7 +782,20 @@ export function RightInfoPanel({
                   </Button>
                 </div>
               )}
+              {/* Copy and Duplicate buttons row */}
               <div className="flex gap-1">
+                {onCopyFixture && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onCopyFixture(selectedLocation)}
+                    className="text-xs flex items-center justify-center gap-1 flex-1"
+                    title="Copy fixture (Ctrl+C / Cmd+C)"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Copy
+                  </Button>
+                )}
                 {onDuplicateFixture && (
                   <Button
                     size="sm"
@@ -792,18 +807,21 @@ export function RightInfoPanel({
                     Duplicate
                   </Button>
                 )}
-                {onDeleteFixture && (
+              </div>
+              {/* Delete button row */}
+              {onDeleteFixture && (
+                <div className="flex gap-1">
                   <Button
                     size="sm"
                     variant="destructive"
                     onClick={() => onDeleteFixture(selectedLocation)}
-                    className="text-xs flex items-center justify-center gap-1 flex-1"
+                    className="text-xs flex items-center justify-center gap-1 w-full"
                   >
                     <Trash2 className="h-3 w-3" />
                     Delete
                   </Button>
-                )}
-              </div>
+                </div>
+              )}
             </>
             )}
           </div>

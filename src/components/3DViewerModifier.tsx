@@ -20,6 +20,9 @@ import { FloorManagementModal } from './FloorManagementModal';
 import { Canvas3D } from './Canvas3D';
 import { useFixtureSelection, type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
+import { useClipboard, transformFixturesForPaste, transformArchObjectsForPaste, type PasteOptions } from '../hooks/useClipboard';
+import { usePasteValidation, type ValidationResult, type ValidationError } from '../hooks/usePasteValidation';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from '@/shadcn/components/ui/dialog';
 import { DEFAULT_BUCKET, useSupabaseService } from '../services/supabaseService';
 import { supabase } from '../lib/supabaseClient';
@@ -28,6 +31,10 @@ import { generateSpaceTrackerData, spaceTrackerToCSV, downloadSpaceTrackerCSV } 
 import { AddObjectModal } from './AddObjectModal';
 import { VariantSelectionModal } from './VariantSelectionModal';
 import { ObjectInfoPanel } from './ObjectInfoPanel';
+import { MultiObjectInfoPanel } from './MultiObjectInfoPanel';
+import { PasteConfirmationDialog } from './PasteConfirmationDialog';
+import { ValidationErrorDialog } from './ValidationErrorDialog';
+import { ClipboardNotification } from './ClipboardNotification';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -385,7 +392,7 @@ export function ThreeDViewerModifier() {
   const [saveEntity, setSaveEntity] = useState('trends');
   const [saveStoreId, setSaveStoreId] = useState('');
   const [saveStoreName, setSaveStoreName] = useState('');
-  const [, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
+  const [brandCategories, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
   const fixtureCache = useRef<Map<string, string>>(new Map());
   const [fixtureTypes, setFixtureTypes] = useState<string[]>([]);
   const [selectedFixtureType, setSelectedFixtureType] = useState<string[]>(['all']);
@@ -408,6 +415,7 @@ export function ThreeDViewerModifier() {
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
   const [objectHeight] = useState<number>(4.5); // Default height in meters
   const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
+  const [selectedObjects, setSelectedObjects] = useState<ArchitecturalObject[]>([]);
 
   // Variant selection for architectural objects
   const [archObjectVariantModalOpen, setArchObjectVariantModalOpen] = useState(false);
@@ -438,8 +446,15 @@ export function ThreeDViewerModifier() {
     setSelectedLocations,
     handleFixtureClick,
     isLocationSelected,
-    clearSelections,
+    clearSelections: clearFixtureSelections,
   } = useFixtureSelection(editFloorplatesMode);
+
+  // Enhanced clear selections that also clears architectural objects
+  const clearSelections = useCallback(() => {
+    clearFixtureSelections();
+    setSelectedObject(null);
+    setSelectedObjects([]);
+  }, [clearFixtureSelections]);
 
   const {
     modifiedFloorPlates,
@@ -478,6 +493,30 @@ export function ThreeDViewerModifier() {
     setSelectedFloorPlate
   );
 
+  // Clipboard hooks
+  const {
+    clipboardState,
+    copyFixtures,
+    copyArchObjects,
+    getClipboardData,
+    checkClipboard,
+  } = useClipboard();
+
+  // Clipboard-related state
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: 'success' | 'warning' | 'error';
+  } | null>(null);
+  const [showPasteConfirmDialog, setShowPasteConfirmDialog] = useState(false);
+  const [showValidationErrorDialog, setShowValidationErrorDialog] = useState(false);
+  const [pasteValidationResult, setPasteValidationResult] = useState<ValidationResult | null>(null);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+
+  // Check clipboard on mount
+  useEffect(() => {
+    checkClipboard();
+  }, [checkClipboard]);
+
   // Click handler wrapper for hierarchy definition mode
   const handleFixtureClickWrapper = useCallback((clickedLocation: LocationData, event?: any) => {
     if (hierarchyDefMode) {
@@ -514,6 +553,7 @@ export function ThreeDViewerModifier() {
     }
 
     setSelectedObject(null); // Clear selected architectural object
+    setSelectedObjects([]); // Clear selected architectural objects array
     handleFixtureClickWrapper(clickedLocation, event);
   }, [handleFixtureClickWrapper]);
 
@@ -550,6 +590,133 @@ export function ThreeDViewerModifier() {
     });
     return Array.from(floorIndices).sort((a, b) => a - b);
   }, [glbFiles]);
+
+  // Get current floor index from selected floor file
+  const currentFloor = useMemo(() => {
+    const fileForFloorExtraction = selectedFloorFile || selectedFile;
+    const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
+    return floorMatch ? parseInt(floorMatch[1]) : 0;
+  }, [selectedFloorFile, selectedFile]);
+
+  // Paste validation hook (needs availableFloorIndices)
+  const { validatePaste } = usePasteValidation(
+    availableFloorIndices,
+    brandCategories,
+    fixtureTypeMap.current
+  );
+
+  // Copy/Paste handlers
+  const showNotification = useCallback((message: string, type: 'success' | 'warning' | 'error' = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 2500);
+  }, []);
+
+  const handleCopySelected = useCallback(() => {
+    if (selectedObjects.length > 0) {
+      // Copy multiple arch objects
+      const success = copyArchObjects(selectedObjects, jobId || undefined);
+      if (success) {
+        showNotification(`${selectedObjects.length} architectural object${selectedObjects.length > 1 ? 's' : ''} copied`);
+      }
+    } else if (selectedObject) {
+      // Copy single arch object
+      const success = copyArchObjects([selectedObject], jobId || undefined);
+      if (success) {
+        showNotification('1 architectural object copied');
+      }
+    } else if (selectedLocations.length > 0) {
+      // Copy multiple fixtures
+      const success = copyFixtures(selectedLocations, jobId || undefined);
+      if (success) {
+        showNotification(`${selectedLocations.length} fixture${selectedLocations.length > 1 ? 's' : ''} copied`);
+      }
+    } else if (selectedLocation) {
+      // Copy single fixture
+      const success = copyFixtures([selectedLocation], jobId || undefined);
+      if (success) {
+        showNotification('1 fixture copied');
+      }
+    } else {
+      showNotification('No items selected to copy', 'warning');
+    }
+  }, [selectedLocation, selectedLocations, selectedObject, selectedObjects, copyFixtures, copyArchObjects, jobId, showNotification]);
+
+  const executePaste = useCallback((
+    clipboardData: any,
+    options: PasteOptions
+  ) => {
+    // Transform fixtures
+    const newFixtures = transformFixturesForPaste(
+      clipboardData.fixtures,
+      options,
+      locationData
+    );
+
+    // Transform arch objects
+    const newArchObjects = transformArchObjectsForPaste(
+      clipboardData.architecturalObjects,
+      options
+    );
+
+    // Add to state
+    setLocationData(prev => [...prev, ...newFixtures]);
+    setArchitecturalObjects(prev => [...prev, ...newArchObjects]);
+
+    // Select pasted items (mutually exclusive - prefer fixtures if both types pasted)
+    if (newFixtures.length > 0) {
+      setSelectedLocations(newFixtures);
+      setSelectedLocation(newFixtures[0]);
+      setSelectedObject(null);
+      setSelectedObjects([]);
+    } else if (newArchObjects.length > 0) {
+      setSelectedObjects(newArchObjects);
+      setSelectedObject(newArchObjects[0]);
+      setSelectedLocation(null);
+      setSelectedLocations([]);
+    }
+
+    // Show notification
+    const totalItems = newFixtures.length + newArchObjects.length;
+    showNotification(`Pasted ${totalItems} item${totalItems > 1 ? 's' : ''}`);
+
+    // Close dialog
+    setShowPasteConfirmDialog(false);
+  }, [locationData, setLocationData, setArchitecturalObjects, setSelectedLocation, setSelectedLocations, showNotification]);
+
+  const handlePaste = useCallback(() => {
+    const clipboardData = getClipboardData();
+    if (!clipboardData) {
+      showNotification('Clipboard is empty', 'warning');
+      return;
+    }
+
+    // Validate
+    const validationResult = validatePaste(clipboardData, currentFloor);
+
+    if (validationResult.errors.length > 0) {
+      // Show error dialog - cannot paste
+      setValidationErrors(validationResult.errors);
+      setShowValidationErrorDialog(true);
+      return;
+    }
+
+    if (validationResult.warnings.length > 0) {
+      // Show confirmation dialog with warnings
+      setPasteValidationResult(validationResult);
+      setShowPasteConfirmDialog(true);
+      return;
+    }
+
+    // No warnings/errors - paste directly
+    executePaste(clipboardData, { targetFloorIndex: currentFloor });
+  }, [currentFloor, getClipboardData, validatePaste, executePaste, showNotification]);
+
+  // Keyboard shortcuts for copy/paste
+  useKeyboardShortcuts({
+    onCopy: handleCopySelected,
+    onPaste: handlePaste,
+    enabled: editMode && !editFloorplatesMode && !hierarchyDefMode,
+  });
 
   // Map from fixture UID to sequence position (1-based) for hierarchy definition mode
   const hierarchySequenceMap = useMemo(() => {
@@ -729,7 +896,9 @@ export function ThreeDViewerModifier() {
       // Update selected location to point to the new fixture
       setSelectedLocation(newFixture);
       setSelectedLocations([newFixture]);
-      
+      setSelectedObject(null);
+      setSelectedObjects([]);
+
     } catch (error) {
       console.error('Failed to change fixture type:', error);
       // Could add error toast here
@@ -854,6 +1023,8 @@ export function ThreeDViewerModifier() {
       // Select the newly added fixture
       setSelectedLocation(newFixture);
       setSelectedLocations([newFixture]);
+      setSelectedObject(null);
+      setSelectedObjects([]);
 
     } catch (error) {
       console.error('Failed to add fixture:', error);
@@ -967,6 +1138,8 @@ export function ThreeDViewerModifier() {
       // Select the newly added fixture
       setSelectedLocation(newFixture);
       setSelectedLocations([newFixture]);
+      setSelectedObject(null);
+      setSelectedObjects([]);
 
       // Clear pending state
       setPendingFixtureType(null);
@@ -1167,6 +1340,7 @@ export function ThreeDViewerModifier() {
       setTimeout(() => {
         console.log('Selecting newly created architectural object:', newObject.id, newObject.type);
         setSelectedObject(newObject);
+        setSelectedObjects([newObject]);
         setSelectedLocation(null);
         setSelectedLocations([]);
         setSelectedFloorPlate(null);
@@ -1216,6 +1390,7 @@ export function ThreeDViewerModifier() {
         setTimeout(() => {
           console.log('Selecting newly created object:', newObject.id, newObject.type);
           setSelectedObject(newObject);
+          setSelectedObjects([newObject]);
           setSelectedLocation(null);
           setSelectedLocations([]);
           setSelectedFloorPlate(null);
@@ -1278,7 +1453,7 @@ export function ThreeDViewerModifier() {
   }, [setSpawnPointMode, selectedFloorFile, selectedFile]);
 
   // Handler for object click
-  const handleObjectClick = useCallback((object: ArchitecturalObject) => {
+  const handleObjectClick = useCallback((object: ArchitecturalObject, event?: any) => {
     if (!editMode || isAddingObject) return;
 
     // Don't process clicks if mouse was down on transform controls
@@ -1287,12 +1462,121 @@ export function ThreeDViewerModifier() {
       return;
     }
 
-    setSelectedObject(object);
+    const isMultiSelect = event?.shiftKey || event?.metaKey || event?.ctrlKey;
+
+    if (isMultiSelect) {
+      setSelectedObjects(prev => {
+        // Include current single selection if transitioning from single to multi
+        const currentSelections = prev.length === 0 && selectedObject ? [selectedObject] : prev;
+
+        const isAlreadySelected = currentSelections.some(obj => obj.id === object.id);
+
+        if (isAlreadySelected) {
+          // Remove from selection
+          return currentSelections.filter(obj => obj.id !== object.id);
+        } else {
+          // Add to selection
+          return [...currentSelections, object];
+        }
+      });
+
+      // Update selectedObject based on new selection state
+      setSelectedObject(null); // Will be managed by selectedObjects array
+    } else {
+      // Single select
+      setSelectedObjects([object]);
+      setSelectedObject(object);
+    }
+
     // Clear fixture selections when selecting an object
     setSelectedLocation(null);
     setSelectedLocations([]);
     setSelectedFloorPlate(null);
-  }, [editMode, isAddingObject]);
+  }, [editMode, isAddingObject, selectedObject]);
+
+  // Handler for multi-object position change (when moving multiple objects together)
+  const handleMultiObjectPositionChange = useCallback((delta: [number, number, number]) => {
+    const objectIds = selectedObjects.map(obj => obj.id);
+
+    setArchitecturalObjects(prev => prev.map(obj => {
+      if (!objectIds.includes(obj.id)) return obj;
+
+      // Handle single-point objects
+      if (obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined) {
+        return {
+          ...obj,
+          posX: obj.posX + delta[0],
+          posY: obj.posY + delta[1],
+          posZ: obj.posZ + delta[2],
+          wasMoved: true,
+          originalPosX: obj.originalPosX ?? obj.posX,
+          originalPosY: obj.originalPosY ?? obj.posY,
+          originalPosZ: obj.originalPosZ ?? obj.posZ,
+        };
+      }
+
+      // Handle two-point objects
+      if (obj.startPoint && obj.endPoint) {
+        return {
+          ...obj,
+          startPoint: [
+            obj.startPoint[0] + delta[0],
+            obj.startPoint[1] + delta[1],
+            obj.startPoint[2] + delta[2]
+          ] as [number, number, number],
+          endPoint: [
+            obj.endPoint[0] + delta[0],
+            obj.endPoint[1] + delta[1],
+            obj.endPoint[2] + delta[2]
+          ] as [number, number, number],
+          wasMoved: true,
+          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
+          originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
+        };
+      }
+
+      return obj;
+    }));
+
+    // Update selected objects state
+    setSelectedObjects(prev => prev.map(obj => {
+      // Handle single-point objects
+      if (obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined) {
+        return {
+          ...obj,
+          posX: obj.posX + delta[0],
+          posY: obj.posY + delta[1],
+          posZ: obj.posZ + delta[2],
+          wasMoved: true,
+          originalPosX: obj.originalPosX ?? obj.posX,
+          originalPosY: obj.originalPosY ?? obj.posY,
+          originalPosZ: obj.originalPosZ ?? obj.posZ,
+        };
+      }
+
+      // Handle two-point objects
+      if (obj.startPoint && obj.endPoint) {
+        return {
+          ...obj,
+          startPoint: [
+            obj.startPoint[0] + delta[0],
+            obj.startPoint[1] + delta[1],
+            obj.startPoint[2] + delta[2]
+          ] as [number, number, number],
+          endPoint: [
+            obj.endPoint[0] + delta[0],
+            obj.endPoint[1] + delta[1],
+            obj.endPoint[2] + delta[2]
+          ] as [number, number, number],
+          wasMoved: true,
+          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
+          originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
+        };
+      }
+
+      return obj;
+    }));
+  }, [selectedObjects]);
 
   // Handler for object position change
   const handleObjectPositionChange = useCallback((object: ArchitecturalObject, newCenterPosition: [number, number, number]) => {
@@ -4560,6 +4844,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           isMeasuring={isMeasuring}
           measurementPoints={measurementPoints}
           cameraMode={cameraMode}
+          clipboardState={clipboardState}
           onCameraModeChange={handleCameraModeChange}
           onSwitchToTopView={handleSwitchToTopView}
           onMeasuringChange={setIsMeasuring}
@@ -4587,6 +4872,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             setAddFixtureModalOpen(true);
           }}
           onAddObjectsClick={() => setAddObjectModalOpen(true)}
+          onPaste={handlePaste}
         />
         <Canvas3D
           cameraPosition={cameraPosition}
@@ -4617,9 +4903,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           currentObjectType={currentObjectType}
           objectPlacementPoint={objectPlacementPoint}
           selectedObject={selectedObject}
+          selectedObjects={selectedObjects}
           onFloorClickForObjectPlacement={handleFloorClickForObjectPlacement}
           onObjectClick={handleObjectClick}
           onObjectPositionChange={handleObjectPositionChange}
+          onMultiObjectPositionChange={handleMultiObjectPositionChange}
           onCancelAddObject={handleCancelAddObject}
           setSpawnPointMode={setSpawnPointMode}
           spawnPoints={spawnPoints}
@@ -4655,6 +4943,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onRotateFixture={handleMultiRotateFixture}
             onResetLocation={handleResetPosition}
             onResetMultiple={handleResetMultiplePositions}
+            onCopyFixtures={(locations) => {
+              const success = copyFixtures(locations, jobId || undefined);
+              if (success) showNotification(`${locations.length} fixture${locations.length > 1 ? 's' : ''} copied`);
+            }}
             onDeleteFixtures={handleDeleteFixtures}
             onMergeFixtures={handleMergeFixtures}
             canMergeFixtures={canMergeFixtures}
@@ -4726,9 +5018,33 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             }}
           />
         )}
-        
-        {/* Show ObjectInfoPanel when an architectural object is selected */}
-        {selectedObject && (
+
+        {/* Show MultiObjectInfoPanel when multiple architectural objects are selected */}
+        {selectedObjects.length > 1 && !editFloorplatesMode && (
+          <MultiObjectInfoPanel
+            selectedObjects={selectedObjects}
+            editMode={editMode}
+            floorNames={floorNames}
+            onClose={() => {
+              setSelectedObjects([]);
+              setSelectedObject(null);
+            }}
+            onCopyObjects={(objects) => {
+              const success = copyArchObjects(objects, jobId || undefined);
+              if (success) showNotification(`${objects.length} architectural object${objects.length > 1 ? 's' : ''} copied`);
+            }}
+            onDeleteObjects={(objects) => {
+              // Delete multiple objects
+              const objectIds = objects.map(obj => obj.id);
+              setArchitecturalObjects(prev => prev.filter(obj => !objectIds.includes(obj.id)));
+              setSelectedObjects([]);
+              setSelectedObject(null);
+            }}
+          />
+        )}
+
+        {/* Show ObjectInfoPanel when a single architectural object is selected */}
+        {selectedObject && selectedObjects.length <= 1 && (
           <ObjectInfoPanel
             selectedObject={selectedObject}
             editMode={editMode}
@@ -4737,6 +5053,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onHeightChange={handleObjectHeightChange}
             onPositionChange={handleObjectPointsChange}
             onSinglePointPositionChange={handleSinglePointPositionChange}
+            onCopyObject={(object) => {
+              const success = copyArchObjects([object], jobId || undefined);
+              if (success) showNotification('1 architectural object copied');
+            }}
             onVariantChange={handleObjectVariantChange}
             onDelete={handleObjectDelete}
             onReset={handleObjectReset}
@@ -4766,6 +5086,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             onRotateFixture={handleRotateFixture}
             onResetLocation={handleResetPosition}
             onResetFloorPlate={handleResetFloorPlate}
+            onCopyFixture={(location) => {
+              const success = copyFixtures([location], jobId || undefined);
+              if (success) showNotification('1 fixture copied');
+            }}
             onDuplicateFixture={handleDuplicateFixture}
             onDeleteFixture={handleDeleteFixture}
             onSplitFixture={handleSplitFixture}
@@ -5038,6 +5362,37 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Paste Confirmation Dialog */}
+      {pasteValidationResult && (
+        <PasteConfirmationDialog
+          open={showPasteConfirmDialog}
+          onOpenChange={setShowPasteConfirmDialog}
+          validationResult={pasteValidationResult}
+          itemCount={clipboardState.itemCount}
+          onConfirm={() => {
+            const clipboardData = getClipboardData();
+            if (clipboardData) {
+              executePaste(clipboardData, { targetFloorIndex: currentFloor });
+            }
+          }}
+        />
+      )}
+
+      {/* Validation Error Dialog */}
+      <ValidationErrorDialog
+        open={showValidationErrorDialog}
+        onOpenChange={setShowValidationErrorDialog}
+        errors={validationErrors}
+      />
+
+      {/* Clipboard Notification */}
+      {notification && (
+        <ClipboardNotification
+          message={notification.message}
+          type={notification.type}
+        />
+      )}
     </div>
   );
 }
