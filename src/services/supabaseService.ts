@@ -40,6 +40,12 @@ export interface StoreFixtureIdRow extends StoreFixtureId {
   updated_at: string; // When this specific entry was created
 }
 
+export interface StoreFixtureWithHistory extends StoreFixtureIdRow {
+  isNew: boolean;
+  movedFrom: string | null; // Format: "floor-brand" (e.g., "0-Nike")
+  movedTo: string | null;   // Format: "floor-brand" (e.g., "1-Adidas")
+}
+
 type UploadOptions = {
   bucket?: string;
   contentType?: string;
@@ -219,6 +225,97 @@ export const useSupabaseService = () => {
 
         console.log(`[getStoreFixtures] Fetched ${allData.length} total rows, deduplicated to ${latestByFixture.size} unique fixtures`);
         return Array.from(latestByFixture.values());
+      },
+
+      async getStoreFixturesWithHistory(storeId: string, deploymentTimestamp?: string) {
+        // Fetch all rows with pagination to avoid 1000-row limit
+        let allData: any[] = [];
+        let offset = 0;
+        const limit = 1000;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('store_fixture_ids')
+            .select('*')
+            .eq('store_id', storeId)
+            .order('fixture_id', { ascending: true })
+            .order('updated_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) {
+            throw new Error(error.message || 'Failed to get store fixtures');
+          }
+
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            offset += limit;
+            hasMore = data.length === limit;
+          } else {
+            hasMore = false;
+          }
+        }
+
+        // Group by fixture_id and analyze history
+        const fixtureGroups = new Map<string, StoreFixtureIdRow[]>();
+        for (const row of allData) {
+          if (!fixtureGroups.has(row.fixture_id)) {
+            fixtureGroups.set(row.fixture_id, []);
+          }
+          fixtureGroups.get(row.fixture_id)!.push(row as StoreFixtureIdRow);
+        }
+
+        // If deployment timestamp is provided, use it to determine current deployment window
+        const deploymentTime = deploymentTimestamp ? new Date(deploymentTimestamp).getTime() : null;
+        const DEPLOYMENT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes window
+
+        // Build result with history analysis
+        const result = Array.from(fixtureGroups.entries()).map(([, history]) => {
+          // Sort by updated_at descending (latest first)
+          history.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+
+          const latest = history[0];
+          const latestUpdatedTime = new Date(latest.updated_at).getTime();
+
+          // Determine if this fixture was part of the current deployment
+          let isPartOfCurrentDeployment = true;
+          if (deploymentTime !== null) {
+            const timeDiff = Math.abs(latestUpdatedTime - deploymentTime);
+            isPartOfCurrentDeployment = timeDiff <= DEPLOYMENT_WINDOW_MS;
+          }
+
+          // Check if it's a new fixture (only one entry in history)
+          const isNew = history.length === 1;
+
+          let movedFrom: string | null = null;
+          let movedTo: string | null = null;
+
+          // Only show movement if:
+          // 1. Fixture is part of current deployment
+          // 2. It's not new (has history)
+          // 3. It actually moved (floor or brand changed)
+          if (isPartOfCurrentDeployment && !isNew && history.length >= 2) {
+            const previous = history[1];
+            const floorChanged = latest.floor_index !== previous.floor_index;
+            const brandChanged = latest.brand !== previous.brand;
+
+            // Only set movedFrom/movedTo if actually moved in THIS deployment
+            if (floorChanged || brandChanged) {
+              movedFrom = `${previous.floor_index}-${previous.brand}`;
+              movedTo = `${latest.floor_index}-${latest.brand}`;
+            }
+          }
+
+          return {
+            ...latest,
+            isNew,
+            movedFrom,
+            movedTo,
+          };
+        });
+
+        console.log(`[getStoreFixturesWithHistory] Fetched ${allData.length} total rows, deduplicated to ${result.length} unique fixtures`);
+        return result;
       },
 
       async insertFixtures(fixtures: StoreFixtureId[]) {

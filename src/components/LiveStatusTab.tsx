@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { RefreshCw, Clock, CheckCircle, AlertCircle, Loader2, Download } from 'lucide-react';
 import { useSupabaseService, type StoreSaveRow } from '../services/supabaseService';
+import { downloadQRCodesZIP } from '../services/qrDownloadService';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
 const POLL_INTERVAL_MS = 30 * 1000; // Check every 30 seconds
@@ -11,6 +12,7 @@ export default function LiveStatusTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const fetchDeployments = async (showLoading = true) => {
     try {
@@ -80,6 +82,33 @@ export default function LiveStatusTab() {
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchDeployments(false);
+  };
+
+  const handleDownloadQRCodes = async (deployment: StoreSaveRow) => {
+    try {
+      setDownloadingId(deployment.id);
+
+      // Pass deployment timestamp to filter fixtures to this deployment only
+      const fixtures = await supabaseService.getStoreFixturesWithHistory(
+        deployment.store_id,
+        deployment.deployed_at || undefined
+      );
+
+      if (fixtures.length === 0) {
+        alert('No fixtures available for this store.');
+        return;
+      }
+
+      // Use entity from deployment, default to 'trends' if not set
+      const entity = deployment.entity || 'trends';
+
+      await downloadQRCodesZIP(entity, deployment.store_id, deployment.store_name, fixtures);
+    } catch (error) {
+      console.error('QR download failed:', error);
+      alert(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   useEffect(() => {
@@ -243,6 +272,9 @@ export default function LiveStatusTab() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Status
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="bg-card divide-y divide-border">
@@ -287,6 +319,16 @@ export default function LiveStatusTab() {
                         </span>
                       )}
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <button
+                      onClick={() => handleDownloadQRCodes(deployment)}
+                      disabled={downloadingId === deployment.id}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      {downloadingId === deployment.id ? 'Downloading...' : 'QR Codes'}
+                    </button>
                   </td>
                 </tr>
               ))}
