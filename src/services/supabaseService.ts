@@ -180,27 +180,44 @@ export const useSupabaseService = () => {
 
       // Store Fixture ID (SFI) CRUD operations
       async getStoreFixtures(storeId: string) {
-        // Get latest entry for each fixture using DISTINCT ON
-        const { data, error } = await supabase
-          .from('store_fixture_ids')
-          .select('*')
-          .eq('store_id', storeId)
-          .order('fixture_id', { ascending: true })
-          .order('updated_at', { ascending: false });
+        // Fetch all rows with pagination to avoid 1000-row limit
+        let allData: any[] = [];
+        let offset = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (error) {
-          throw new Error(error.message || 'Failed to get store fixtures');
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('store_fixture_ids')
+            .select('*')
+            .eq('store_id', storeId)
+            .order('fixture_id', { ascending: true })
+            .order('updated_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) {
+            throw new Error(error.message || 'Failed to get store fixtures');
+          }
+
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            offset += limit;
+            hasMore = data.length === limit; // Continue if we got a full page
+          } else {
+            hasMore = false;
+          }
         }
 
         // Filter to get only latest entry per fixture_id (client-side dedup)
         const latestByFixture = new Map<string, StoreFixtureIdRow>();
-        for (const row of (data ?? [])) {
+        for (const row of allData) {
           const existing = latestByFixture.get(row.fixture_id);
           if (!existing || new Date(row.updated_at) > new Date(existing.updated_at)) {
             latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
           }
         }
 
+        console.log(`[getStoreFixtures] Fetched ${allData.length} total rows, deduplicated to ${latestByFixture.size} unique fixtures`);
         return Array.from(latestByFixture.values());
       },
 
@@ -232,22 +249,38 @@ export const useSupabaseService = () => {
       },
 
       async getFixturesByBrand(storeId: string, brand: string) {
-        // Get all fixtures with brand, then filter to latest
-        const { data, error } = await supabase
-          .from('store_fixture_ids')
-          .select('*')
-          .eq('store_id', storeId)
-          .eq('brand', brand)
-          .order('fixture_id', { ascending: true })
-          .order('updated_at', { ascending: false });
+        // Fetch all rows with pagination to avoid 1000-row limit
+        let allData: any[] = [];
+        let offset = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (error) {
-          throw new Error(error.message || 'Failed to get fixtures by brand');
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('store_fixture_ids')
+            .select('*')
+            .eq('store_id', storeId)
+            .eq('brand', brand)
+            .order('fixture_id', { ascending: true })
+            .order('updated_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) {
+            throw new Error(error.message || 'Failed to get fixtures by brand');
+          }
+
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            offset += limit;
+            hasMore = data.length === limit;
+          } else {
+            hasMore = false;
+          }
         }
 
         // Filter to get only latest entry per fixture_id
         const latestByFixture = new Map<string, StoreFixtureIdRow>();
-        for (const row of (data ?? [])) {
+        for (const row of allData) {
           if (!latestByFixture.has(row.fixture_id)) {
             latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
           }
@@ -273,22 +306,38 @@ export const useSupabaseService = () => {
       },
 
       async getFixturesByFloor(storeId: string, floorIndex: number) {
-        // Get all fixtures on a specific floor
-        const { data, error } = await supabase
-          .from('store_fixture_ids')
-          .select('*')
-          .eq('store_id', storeId)
-          .eq('floor_index', floorIndex)
-          .order('fixture_id', { ascending: true })
-          .order('updated_at', { ascending: false });
+        // Fetch all rows with pagination to avoid 1000-row limit
+        let allData: any[] = [];
+        let offset = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (error) {
-          throw new Error(error.message || 'Failed to get fixtures by floor');
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('store_fixture_ids')
+            .select('*')
+            .eq('store_id', storeId)
+            .eq('floor_index', floorIndex)
+            .order('fixture_id', { ascending: true })
+            .order('updated_at', { ascending: false })
+            .range(offset, offset + limit - 1);
+
+          if (error) {
+            throw new Error(error.message || 'Failed to get fixtures by floor');
+          }
+
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            offset += limit;
+            hasMore = data.length === limit;
+          } else {
+            hasMore = false;
+          }
         }
 
         // Filter to get only latest entry per fixture_id
         const latestByFixture = new Map<string, StoreFixtureIdRow>();
-        for (const row of (data ?? [])) {
+        for (const row of allData) {
           if (!latestByFixture.has(row.fixture_id)) {
             latestByFixture.set(row.fixture_id, row as StoreFixtureIdRow);
           }
