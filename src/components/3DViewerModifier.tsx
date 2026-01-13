@@ -3941,7 +3941,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
         setExtracting(true);
         setFixturesLoaded(false);
-        const zipBlob = await apiService.fetchJobFilesAsZip(jobData.job_id);
+        const zipBlob = await apiService.fetchJobFilesAsZip(jobId);
         const extracted = await extractZipFiles(zipBlob);
 
         setExtractedFiles(extracted);

@@ -475,14 +475,17 @@ export const useSupabaseService = () => {
           .from('store_saves')
           .update(updateData)
           .eq('id', id)
-          .select()
-          .single();
+          .select();
 
         if (error) {
           throw new Error(error.message || 'Failed to update deployment status');
         }
 
-        return data as StoreSaveRow;
+        if (!data || data.length === 0) {
+          throw new Error(`No store record found with id: ${id}`);
+        }
+
+        return data[0] as StoreSaveRow;
       },
 
       async listDeployedStores(storeId?: string, limit: number = 100) {

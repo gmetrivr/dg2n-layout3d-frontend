@@ -859,15 +859,10 @@ export function MyCreatedStores() {
 
       // Update store record with deployment status
       console.log('[MyCreatedStores] Updating store record with deployment status...');
-      try {
-        await updateStoreDeploymentStatus(r.id, 'deploying', {
-          deployed_at: new Date().toISOString(),
-        });
-        console.log('[MyCreatedStores] Store record updated with deployment status successfully');
-      } catch (deploymentError) {
-        console.error('[MyCreatedStores] Failed to update store record with deployment status:', deploymentError);
-        // Don't fail the overall process if deployment tracking fails
-      }
+      await updateStoreDeploymentStatus(r.id, 'deploying', {
+        deployed_at: new Date().toISOString(),
+      });
+      console.log('[MyCreatedStores] Store record updated with deployment status successfully');
 
       // Refresh the store list to get the latest record from backend
       await fetchRows(search);

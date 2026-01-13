@@ -8,6 +8,7 @@ import { AuthGate } from './components/AuthGate';
 import { Home } from './components/Home';
 import { CadTo3D } from './components/CadTo3D';
 import { MyCreatedStores } from './components/MyCreatedStores';
+import { Jobs } from './components/Jobs';
 import { AuthProvider } from './contexts/AuthContext';
 import { StoreProvider } from './contexts/StoreContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -47,6 +48,7 @@ function App() {
                 <Route path="/cad-to-3d" element={<CadTo3D />} />
                 <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
                 <Route path="/my-stores" element={<MyCreatedStores />} />
+                <Route path="/jobs" element={<Jobs />} />
               </Routes>
             </Suspense>
 
