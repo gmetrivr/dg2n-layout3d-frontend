@@ -1,17 +1,13 @@
-import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FileUpload } from './FileUpload';
-import { JobStatus } from './JobStatus';
 import { Layers3, Building2 } from 'lucide-react';
 
 export function CadTo3D() {
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const navigate = useNavigate();
 
-  const handleUploadSuccess = (jobId: string) => {
-    setCurrentJobId(jobId);
-  };
-
-  const handleReset = () => {
-    setCurrentJobId(null);
+  const handleUploadSuccess = (_jobId: string) => {
+    // Redirect to Jobs page after successful upload
+    navigate('/jobs');
   };
 
   return (
@@ -28,15 +24,10 @@ export function CadTo3D() {
         </div>
 
         <div className="flex justify-center">
-          {currentJobId ? (
-            <JobStatus jobId={currentJobId} onReset={handleReset} />
-          ) : (
-            <FileUpload onUploadSuccess={handleUploadSuccess} />
-          )}
+          <FileUpload onUploadSuccess={handleUploadSuccess} />
         </div>
 
-        {!currentJobId && (
-          <div className="mt-16 grid md:grid-cols-3 gap-8">
+        <div className="mt-16 grid md:grid-cols-3 gap-8">
             <div className="text-center p-6">
               <div className="inline-flex items-center justify-center w-12 h-12 bg-primary/10 rounded-lg mb-4">
                 <Layers3 className="h-6 w-6 text-primary" />
@@ -66,8 +57,7 @@ export function CadTo3D() {
                 Our cloud engine processes your files in real-time with smart cleanup, validation, and structured outputs—ready to plug into your workflow.
               </p>
             </div>
-          </div>
-        )}
+        </div>
       </div>
     </main>
   );
