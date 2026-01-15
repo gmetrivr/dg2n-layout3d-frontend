@@ -20,10 +20,16 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
-      // Fastify backend - handles config, brands, fixtures, and rhino proxy APIs
+      // Fastify backend - handles config, brands, fixtures APIs
       '^/(api|config)': {
         // target: 'https://dg2n-layout3d-backend.rc.dg2n.com',
         target: 'http://localhost:4260',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Rhino backend - handles DWG upload, job processing, downloads only
+      '^/(upload|jobs|download)': {
+        target: 'http://0.0.0.0:8081',
         changeOrigin: true,
         secure: false,
       }

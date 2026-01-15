@@ -1,7 +1,11 @@
 import type { ToleranceOverrides } from '../types/tolerance';
-import { supabase } from '../lib/supabaseClient';
 
-// Fastify backend - Config, brands, fixtures, and rhino proxy
+// Rhino server - Job management only (upload, jobs, downloads)
+const RHINO_API_BASE_URL = import.meta.env.MODE === "production"
+  ? 'https://ec2-prod-rhino.dg2n.com'
+  : ""; // Empty string uses relative URLs (goes through Vite proxy)
+
+// Fastify backend - Config, brands, fixtures
 const FASTIFY_API_BASE_URL =
   import.meta.env.MODE === "production"
     ? 'https://dg2n-layout3d-backend.rc.dg2n.com'
@@ -20,89 +24,6 @@ export interface JobStatus {
   created_at: string;
   started_at?: string;
   completed_at?: string;
-}
-
-// Job Management API types
-export interface JobFile {
-  id: string;
-  originalName: string;
-  fileSize: number;
-  fileType: string;
-  mimeType?: string;
-  downloadUrl: string;
-}
-
-export interface ScriptProgress {
-  script_number: number;
-  script_name: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress_percent: number;
-  log_messages: string[];
-  started_at?: string;
-  completed_at?: string;
-}
-
-export interface JobDetail {
-  id: string;
-  user_id: string;
-  username?: string;
-  filename?: string;
-  job_type: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
-  priority: number;
-  config: Record<string, any>;
-  scripts_to_run: number[];
-  worker_id?: string;
-  started_at?: string;
-  completed_at?: string;
-  logs: Record<string, any>;
-  error_message?: string;
-  created_at: string;
-  updated_at: string;
-  progress_percent?: number;
-  inputFiles?: JobFile[];
-  outputFiles?: JobFile[];
-  progress?: ScriptProgress[];
-}
-
-export interface JobListItem {
-  id: string;
-  user_id: string;
-  username?: string;
-  filename?: string;
-  job_type: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
-  priority: number;
-  config: Record<string, any>;
-  scripts_to_run: number[];
-  worker_id?: string;
-  started_at?: string;
-  completed_at?: string;
-  logs: Record<string, any>;
-  error_message?: string;
-  created_at: string;
-  updated_at: string;
-  progress_percent?: number;
-}
-
-export interface JobListResponse {
-  status: { success: boolean };
-  data: {
-    jobs: JobListItem[];
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      pages: number;
-    };
-  };
-}
-
-export interface JobDetailResponse {
-  status: { success: boolean };
-  data: {
-    job: JobDetail;
-  };
 }
 
 export interface UploadResponse {
@@ -209,39 +130,21 @@ export interface BrandCategoryMappingResponse {
 
 export const apiService = {
   async uploadDwgFile(
-    file: File,
-    pipelineVersion: string = '01',
+    file: File, 
+    pipelineVersion: string = '01', 
     toleranceOverrides: ToleranceOverrides = {}
   ): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append('files', file);
-
-    // Create config object with pipeline_version and tolerance_overrides
-    const config: Record<string, any> = {
-      pipeline_version: pipelineVersion
-    };
-
-    // Add tolerance overrides to config if any are provided
+    formData.append('pipeline_version', pipelineVersion);
+    
+    // Add tolerance overrides if any are provided
     if (Object.keys(toleranceOverrides).length > 0) {
-      config.tolerance_overrides = toleranceOverrides;
+      formData.append('tolerance_overrides', JSON.stringify(toleranceOverrides));
     }
 
-    // Append config as JSON string
-    formData.append('config', JSON.stringify(config));
-
-    // Get the JWT token from Supabase session
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/jobs/upload`, {
+    const response = await fetch(`${RHINO_API_BASE_URL}/upload`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
       body: formData,
     });
 
@@ -254,59 +157,27 @@ export const apiService = {
   },
 
   async getJobStatus(jobId: string): Promise<JobStatus> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 600000);
-
+    
     try {
-      const response = await fetch(`${FASTIFY_API_BASE_URL}/api/jobs/${jobId}?allUsers=true`, {
-        signal: controller.signal,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}`, {
+        signal: controller.signal
       });
-
+      
       if (!response.ok) {
         throw new Error(`Failed to get job status: ${response.statusText}`);
       }
 
-      const result = await response.json();
-
-      // Handle both old and new API response formats
-      // New format: { status: { success: boolean }, data: { job: JobDetail } }
-      // Old format: JobStatus object directly
-      if (result.data && result.data.job) {
-        // New format - extract the job from data
-        return result.data.job;
-      }
-
-      // Old format - return as is
-      return result;
+      return response.json();
     } finally {
       clearTimeout(timeoutId);
     }
   },
 
   async getAllJobs(): Promise<JobStatus[]> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/jobs?allUsers=true`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
+    const response = await fetch(`${RHINO_API_BASE_URL}/jobs`);
+    
     if (!response.ok) {
       throw new Error(`Failed to get jobs: ${response.statusText}`);
     }
@@ -315,24 +186,14 @@ export const apiService = {
   },
 
   async downloadFile(jobId: string, fileName: string): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
-
+    
     try {
-      const response = await fetch(`${FASTIFY_API_BASE_URL}/api/rhino/download/${jobId}/${fileName}?allUsers=true`, {
-        signal: controller.signal,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await fetch(`${RHINO_API_BASE_URL}/download/${jobId}/${fileName}`, {
+        signal: controller.signal
       });
-
+      
       if (!response.ok) {
         throw new Error(`Failed to download file: ${response.statusText}`);
       }
@@ -352,46 +213,16 @@ export const apiService = {
   },
   
   async downloadJobZip(jobId: string): Promise<void> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
-
+    
     try {
-      const response = await fetch(`${FASTIFY_API_BASE_URL}/api/rhino/jobs/${jobId}/download-zip?allUsers=true`, {
-        signal: controller.signal,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}/download-zip`, {
+        signal: controller.signal
       });
 
       if (!response.ok) {
-        // Try to parse error message from response
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          throw new Error(`Failed to download ZIP: ${errorData.message || errorData.error || response.statusText}`);
-        }
-        const errorText = await response.text();
-        throw new Error(`Failed to download ZIP: ${errorText || response.statusText}`);
-      }
-
-      // Check if response is actually a zip file
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream')) {
-        // Response might be an error in JSON format with 200 status
-        const text = await response.text();
-        try {
-          const errorData = JSON.parse(text);
-          throw new Error(`Failed to download ZIP: ${errorData.message || errorData.error || 'Invalid response format'}`);
-        } catch (e) {
-          throw new Error(`Failed to download ZIP: Expected zip file but received ${contentType}`);
-        }
+        throw new Error(`Failed to download ZIP: ${response.statusText}`);
       }
 
       const blob = await response.blob();
@@ -409,46 +240,16 @@ export const apiService = {
   },
 
   async fetchJobFilesAsZip(jobId: string): Promise<Blob> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for downloads
 
     try {
-      const response = await fetch(`${FASTIFY_API_BASE_URL}/api/rhino/jobs/${jobId}/download-zip?allUsers=true`, {
-        signal: controller.signal,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const response = await fetch(`${RHINO_API_BASE_URL}/jobs/${jobId}/download-zip`, {
+        signal: controller.signal
       });
-
+      
       if (!response.ok) {
-        // Try to parse error message from response
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          throw new Error(`Failed to fetch ZIP: ${errorData.message || errorData.error || response.statusText}`);
-        }
-        const errorText = await response.text();
-        throw new Error(`Failed to fetch ZIP: ${errorText || response.statusText}`);
-      }
-
-      // Check if response is actually a zip file
-      const contentType = response.headers.get('content-type');
-      if (contentType && !contentType.includes('application/zip') && !contentType.includes('application/octet-stream')) {
-        // Response might be an error in JSON format with 200 status
-        const text = await response.text();
-        try {
-          const errorData = JSON.parse(text);
-          throw new Error(`Failed to fetch ZIP: ${errorData.message || errorData.error || 'Invalid response format'}`);
-        } catch (e) {
-          throw new Error(`Failed to fetch ZIP: Expected zip file but received ${contentType}`);
-        }
+        throw new Error(`Failed to fetch ZIP: ${response.statusText}`);
       }
 
       return response.blob();
@@ -609,66 +410,6 @@ export const apiService = {
 
     if (!response.ok) {
       throw new Error(`Failed to get brand category mapping: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
-
-  // Job Management API methods
-  async listJobs(params?: {
-    status?: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
-    page?: number;
-    limit?: number;
-    sort?: 'createdAt' | 'updatedAt';
-    order?: 'asc' | 'desc';
-    allUsers?: boolean;
-  }): Promise<JobListResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
-    const queryParams = new URLSearchParams();
-    if (params?.status) queryParams.append('status', params.status);
-    if (params?.page) queryParams.append('page', params.page.toString());
-    if (params?.limit) queryParams.append('limit', params.limit.toString());
-    if (params?.sort) queryParams.append('sort', params.sort);
-    if (params?.order) queryParams.append('order', params.order);
-    if (params?.allUsers) queryParams.append('allUsers', 'true');
-
-    const url = `${FASTIFY_API_BASE_URL}/api/jobs${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
-
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to list jobs: ${response.statusText}`);
-    }
-
-    return response.json();
-  },
-
-  async getJobDetail(jobId: string): Promise<JobDetailResponse> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-
-    if (!token) {
-      throw new Error('No authentication token available. Please log in.');
-    }
-
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/jobs/${jobId}?allUsers=true`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get job details: ${response.statusText}`);
     }
 
     return response.json();

@@ -90,13 +90,6 @@ export function Navbar() {
             >
               My Created Stores
             </Link>
-            <Link
-              to="/jobs"
-              onClick={(e) => handleNavigation('/jobs', e)}
-              className={`${linkBase} ${isActive('/jobs') ? 'border-foreground' : ''}`}
-            >
-              Jobs
-            </Link>
           </div>
 
           <Link to="/" onClick={(e) => handleNavigation('/', e)} className="md:absolute md:left-1/2 md:-translate-x-1/2 md:transform">
@@ -186,13 +179,6 @@ export function Navbar() {
                 className={`${linkBase} ${isActive('/my-stores') ? 'border-foreground' : ''}`}
               >
                 My Created Stores
-              </Link>
-              <Link
-                to="/jobs"
-                onClick={(e) => handleNavigation('/jobs', e)}
-                className={`${linkBase} ${isActive('/jobs') ? 'border-foreground' : ''}`}
-              >
-                Jobs
               </Link>
             </div>
             <div className="mt-auto flex flex-col gap-3">
