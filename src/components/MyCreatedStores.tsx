@@ -22,6 +22,84 @@ function formatBytes(bytes?: number | null) {
   return `${val.toFixed(val >= 10 || i === 0 ? 0 : 1)} ${sizes[i]}`;
 }
 
+// Fixture types to exclude from location-master.csv when making live
+const EXCLUDED_FIXTURE_TYPES = [
+  'STAIRCASE', 'STAIR', 'STAIRS',
+  'TOILET', 'RESTROOM',
+  'TRIAL ROOM', 'TRIAL-ROOM', 'FITTING ROOM',
+  'BOH', 'BACK OF HOUSE',
+  'CASH TILL', 'CASH-TILL', 'CHECKOUT', 'TILL',
+  'DOOR', 'INTERIOR-DOOR',
+  'WINDOW', 'WINDOW-DISPLAY', 'WINDOW DISPLAY'
+];
+
+// Helper to filter out excluded fixture types from location-master.csv
+async function filterExcludedFixturesInZip(zipBlob: Blob): Promise<{ zipBlob: Blob; removedCount: number }> {
+  const zip = await JSZip.loadAsync(zipBlob);
+
+  // Find location-master.csv
+  const locationCsvFile = zip.file(/location[-_]master\.csv/i)[0];
+  if (!locationCsvFile) {
+    console.log('[MyCreatedStores] No location-master.csv found, skipping fixture filtering');
+    return { zipBlob, removedCount: 0 };
+  }
+
+  console.log('[MyCreatedStores] Found location-master.csv, filtering excluded fixture types...');
+  const locationCsvText = await locationCsvFile.async('text');
+  const locationLines = locationCsvText.split('\n');
+
+  // Parse CSV header to find BlockName column index (usually column 0)
+  const headerLine = locationLines[0];
+  const headers = headerLine.split(',').map(h => h.trim());
+  const blockNameColumnIndex = headers.findIndex(h => h.toLowerCase() === 'blockname' || h.toLowerCase() === 'block_name' || h.toLowerCase() === 'block name');
+
+  // Default to column 0 if not found by name
+  const columnIndex = blockNameColumnIndex === -1 ? 0 : blockNameColumnIndex;
+
+  // Create set for faster lookup (case-insensitive)
+  const excludedSet = new Set(EXCLUDED_FIXTURE_TYPES.map(t => t.toUpperCase()));
+
+  // Filter out excluded fixture types
+  const filteredLines = [locationLines[0]]; // Keep header
+  let removedCount = 0;
+
+  for (let i = 1; i < locationLines.length; i++) {
+    const line = locationLines[i].trim();
+    if (!line) {
+      filteredLines.push(line);
+      continue;
+    }
+
+    const values = line.split(',');
+    if (values.length > columnIndex) {
+      const blockName = values[columnIndex].trim().toUpperCase();
+
+      // Check if this fixture type should be excluded
+      if (excludedSet.has(blockName)) {
+        console.log(`[MyCreatedStores] Removing excluded fixture type: ${blockName}`);
+        removedCount++;
+        continue; // Skip this row
+      }
+    }
+
+    filteredLines.push(locationLines[i]);
+  }
+
+  if (removedCount === 0) {
+    console.log('[MyCreatedStores] No excluded fixture types found in CSV');
+    return { zipBlob, removedCount: 0 };
+  }
+
+  // Update CSV in ZIP
+  const updatedCsvText = filteredLines.join('\n');
+  zip.file(locationCsvFile.name, updatedCsvText);
+  console.log(`[MyCreatedStores] Removed ${removedCount} excluded fixtures from location-master.csv`);
+
+  // Generate updated ZIP blob
+  const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
+  return { zipBlob: updatedZipBlob, removedCount };
+}
+
 // Helper to migrate brand names in location-master.csv
 async function migrateBrandsInZip(zipBlob: Blob, pipelineVersion: string = '02'): Promise<{ zipBlob: Blob; migratedCount: number }> {
   const zip = await JSZip.loadAsync(zipBlob);
@@ -634,6 +712,14 @@ export function MyCreatedStores() {
         console.log(`[MyCreatedStores] Successfully migrated ${migrationResult.migratedCount} brand names`);
       }
 
+      // Filter out excluded fixture types (stairs, toilets, trial rooms, etc.)
+      console.log('[MyCreatedStores] Filtering excluded fixture types...');
+      const filterResult = await filterExcludedFixturesInZip(zipBlob);
+      zipBlob = filterResult.zipBlob;
+      if (filterResult.removedCount > 0) {
+        console.log(`[MyCreatedStores] Removed ${filterResult.removedCount} excluded fixtures`);
+      }
+
       // Ensure store-config.json exists in the ZIP
       zipBlob = await ensureStoreConfigInZip(zipBlob);
 
@@ -870,7 +956,10 @@ export function MyCreatedStores() {
       const migrationMessage = migrationResult.migratedCount > 0
         ? ` (${migrationResult.migratedCount} brand names were automatically updated to the latest format)`
         : '';
-      alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}`);
+      const filterMessage = filterResult.removedCount > 0
+        ? ` (${filterResult.removedCount} non-retail fixtures were excluded)`
+        : '';
+      alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}${filterMessage}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to make store live';
       alert(`Error: ${message}`);
