@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, AlertCircle, CheckCircle, Clock, XCircle, FileText, Download, ChevronLeft, ChevronRight, RefreshCw, Eye, Boxes } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Clock, XCircle, FileText, Download, ChevronLeft, ChevronRight, RefreshCw, Eye, Boxes, Filter, X } from 'lucide-react';
 import { Button } from '@/shadcn/components/ui/button';
 import { apiService, type JobListItem, type JobDetail } from '../services/api';
-import { Select } from '../components/ui/select';
 
 type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
@@ -22,6 +21,25 @@ export function Jobs() {
   const [totalPages, setTotalPages] = useState(1);
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Column filters
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({
+    filename: '',
+    user: '',
+  });
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
+
+  // Original filter values (stored when filter opens, used to revert on cancel)
+  const [originalFilters, setOriginalFilters] = useState<Record<string, string>>({
+    filename: '',
+    user: '',
+    status: 'all',
+  });
+
+  // Ref for filter popup to detect outside clicks
+  const filterPopupRef = useRef<HTMLDivElement>(null);
+  // Ref for status select to auto-expand
+  const statusSelectRef = useRef<HTMLSelectElement>(null);
 
   const fetchJobs = async () => {
     try {
@@ -68,6 +86,133 @@ export function Jobs() {
 
     return () => clearInterval(interval);
   }, [jobs, autoRefresh, page, statusFilter]);
+
+  // Handle click outside and Escape key for filters
+  useEffect(() => {
+    if (!activeFilter) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterPopupRef.current && !filterPopupRef.current.contains(event.target as Node)) {
+        if (activeFilter === 'status') {
+          // Status filter: clicking outside cancels (reverts)
+          setStatusFilter(originalFilters.status as JobStatus | 'all');
+        } else {
+          // Filename/User filters: clicking outside keeps the value (commit)
+          setOriginalFilters(prev => ({
+            ...prev,
+            [activeFilter]: columnFilters[activeFilter] || '',
+          }));
+        }
+        setActiveFilter(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        // Escape always cancels - revert to original values
+        setColumnFilters(prev => ({
+          ...prev,
+          filename: originalFilters.filename,
+          user: originalFilters.user,
+        }));
+        setStatusFilter(originalFilters.status as JobStatus | 'all');
+        setActiveFilter(null);
+      } else if (event.key === 'Enter' && (activeFilter === 'filename' || activeFilter === 'user')) {
+        // Enter commits the value for text filters
+        setOriginalFilters(prev => ({
+          ...prev,
+          [activeFilter]: columnFilters[activeFilter] || '',
+        }));
+        setActiveFilter(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeFilter, originalFilters, columnFilters]);
+
+  // Auto-expand status dropdown when opened
+  useEffect(() => {
+    if (activeFilter === 'status' && statusSelectRef.current) {
+      // Small delay to ensure the element is rendered
+      setTimeout(() => {
+        if (statusSelectRef.current) {
+          statusSelectRef.current.focus();
+          // Use showPicker() to open the dropdown (supported in modern browsers)
+          if (typeof statusSelectRef.current.showPicker === 'function') {
+            try {
+              statusSelectRef.current.showPicker();
+            } catch (e) {
+              // Fallback: showPicker may fail in some contexts, dropdown will still work on click
+            }
+          }
+        }
+      }, 0);
+    }
+  }, [activeFilter]);
+
+  // Check if any filter is active
+  const hasActiveFilters = statusFilter !== 'all' || columnFilters.filename || columnFilters.user;
+
+  // Filter jobs based on column filters (status is server-side, others are client-side)
+  const filteredJobs = jobs.filter((job) => {
+    // Filename filter
+    const filenameFilter = columnFilters.filename.toLowerCase();
+    if (filenameFilter) {
+      const filename = (job.filename || job.id).toLowerCase();
+      if (!filename.includes(filenameFilter)) return false;
+    }
+
+    // User filter
+    const userFilter = columnFilters.user.toLowerCase();
+    if (userFilter) {
+      const user = (job.username || job.user_id).toLowerCase();
+      if (!user.includes(userFilter)) return false;
+    }
+
+    return true;
+  });
+
+  const handleFilterChange = (column: string, value: string) => {
+    if (column === 'status') {
+      setStatusFilter(value as JobStatus | 'all');
+      setPage(1);
+    } else {
+      setColumnFilters(prev => ({ ...prev, [column]: value }));
+    }
+  };
+
+  const clearColumnFilter = (column: string) => {
+    if (column === 'status') {
+      setStatusFilter('all');
+      setPage(1);
+    } else {
+      setColumnFilters(prev => ({ ...prev, [column]: '' }));
+    }
+    // Update original so closing doesn't revert
+    setOriginalFilters(prev => ({ ...prev, [column]: column === 'status' ? 'all' : '' }));
+    setActiveFilter(null);
+  };
+
+  const toggleFilter = (column: string) => {
+    if (activeFilter === column) {
+      // Closing normally (not cancel) - keep current values
+      setActiveFilter(null);
+    } else {
+      // Opening - store current values as original (for cancel/revert)
+      setOriginalFilters({
+        filename: columnFilters.filename,
+        user: columnFilters.user,
+        status: statusFilter,
+      });
+      setActiveFilter(column);
+    }
+  };
 
   const handleViewDetails = async (jobId: string) => {
     setLoadingDetail(true);
@@ -243,44 +388,24 @@ export function Jobs() {
         <p className="text-muted-foreground">Monitor and manage your processing jobs</p>
       </div>
 
-      {/* Filters and controls */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="flex-1">
-          <Select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as JobStatus | 'all');
-              setPage(1);
-            }}
-            className="w-full sm:w-48"
-          >
-            <option value="all">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
-            <option value="cancelled">Cancelled</option>
-          </Select>
-        </div>
-
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fetchJobs()}
-            disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            variant={autoRefresh ? "default" : "outline"}
-            size="sm"
-            onClick={() => setAutoRefresh(!autoRefresh)}
-          >
-            {autoRefresh ? 'Auto-refresh On' : 'Auto-refresh Off'}
-          </Button>
-        </div>
+      {/* Controls */}
+      <div className="flex justify-end gap-2 mb-6">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fetchJobs()}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+        <Button
+          variant={autoRefresh ? "default" : "outline"}
+          size="sm"
+          onClick={() => setAutoRefresh(!autoRefresh)}
+        >
+          {autoRefresh ? 'Auto-refresh On' : 'Auto-refresh Off'}
+        </Button>
       </div>
 
       {error && (
@@ -293,7 +418,7 @@ export function Jobs() {
       )}
 
       {/* Jobs table */}
-      {jobs.length === 0 ? (
+      {jobs.length === 0 && !hasActiveFilters ? (
         <div className="text-center py-12 border rounded-lg">
           <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
           <p className="text-muted-foreground">No jobs found</p>
@@ -305,13 +430,119 @@ export function Jobs() {
               <thead className="bg-muted/50 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Status
+                    <div className="relative">
+                      <div className="flex items-center gap-1">
+                        <span>Status</span>
+                        <button
+                          onClick={() => toggleFilter('status')}
+                          className={`p-1 hover:bg-muted rounded ${statusFilter !== 'all' ? 'text-primary' : ''}`}
+                        >
+                          <Filter className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {activeFilter === 'status' && (
+                        <div
+                          ref={filterPopupRef}
+                          className="absolute top-full left-0 mt-1 z-20 bg-background border border-border rounded-md shadow-lg"
+                        >
+                          <select
+                            ref={statusSelectRef}
+                            value={statusFilter}
+                            onChange={(e) => {
+                              handleFilterChange('status', e.target.value);
+                              setOriginalFilters(prev => ({ ...prev, status: e.target.value }));
+                              setActiveFilter(null);
+                            }}
+                            className="px-2 py-1 text-sm font-normal normal-case bg-background border-0 rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="all">All Status</option>
+                            <option value="pending">Pending</option>
+                            <option value="processing">Processing</option>
+                            <option value="completed">Completed</option>
+                            <option value="failed">Failed</option>
+                            <option value="cancelled">Cancelled</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Filename
+                    <div className="relative">
+                      <div className="flex items-center gap-1">
+                        <span>Filename</span>
+                        <button
+                          onClick={() => toggleFilter('filename')}
+                          className={`p-1 hover:bg-muted rounded ${columnFilters.filename ? 'text-primary' : ''}`}
+                        >
+                          <Filter className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {activeFilter === 'filename' && (
+                        <div
+                          ref={filterPopupRef}
+                          className="absolute top-full left-0 mt-1 z-20 bg-background border border-border rounded-md shadow-lg min-w-[200px]"
+                        >
+                          <div className="p-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                placeholder="Search..."
+                                value={columnFilters.filename}
+                                onChange={(e) => handleFilterChange('filename', e.target.value)}
+                                className="flex-1 px-2 py-1 text-sm font-normal normal-case bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => clearColumnFilter('filename')}
+                                className="p-1 hover:bg-muted rounded"
+                                title="Clear filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    User
+                    <div className="relative">
+                      <div className="flex items-center gap-1">
+                        <span>User</span>
+                        <button
+                          onClick={() => toggleFilter('user')}
+                          className={`p-1 hover:bg-muted rounded ${columnFilters.user ? 'text-primary' : ''}`}
+                        >
+                          <Filter className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {activeFilter === 'user' && (
+                        <div
+                          ref={filterPopupRef}
+                          className="absolute top-full left-0 mt-1 z-20 bg-background border border-border rounded-md shadow-lg min-w-[180px]"
+                        >
+                          <div className="p-2">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                placeholder="Search..."
+                                value={columnFilters.user}
+                                onChange={(e) => handleFilterChange('user', e.target.value)}
+                                className="flex-1 px-2 py-1 text-sm font-normal normal-case bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                                autoFocus
+                              />
+                              <button
+                                onClick={() => clearColumnFilter('user')}
+                                className="p-1 hover:bg-muted rounded"
+                                title="Clear filter"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Created
@@ -328,90 +559,113 @@ export function Jobs() {
                 </tr>
               </thead>
               <tbody className="bg-background divide-y divide-border">
-                {jobs.map((job) => (
-                  <tr
-                    key={job.id}
-                    className="hover:bg-muted/50 transition-colors cursor-pointer"
-                    onClick={() => handleViewDetails(job.id)}
-                  >
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {getStatusBadge(job.status, job.worker_id, job.progress_percent)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-foreground truncate block max-w-xs" title={job.filename || job.id}>
-                        {job.filename || `Job ${job.id.substring(0, 8)}...`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-foreground truncate block max-w-xs" title={job.username || job.user_id}>
-                        {job.username || `${job.user_id.substring(0, 8)}...`}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-sm text-muted-foreground">
-                        {formatDate(job.created_at)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {job.started_at ? (
-                        <span className="text-sm text-muted-foreground">
-                          {formatDate(job.started_at)}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {job.completed_at ? (
-                        <span className="text-sm text-muted-foreground">
-                          {formatDate(job.completed_at)}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
+                {filteredJobs.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12">
+                      <div className="text-center">
+                        <Filter className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                        <p className="text-muted-foreground">No jobs match your filters</p>
                         <Button
-                          variant="ghost"
+                          variant="link"
                           size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewDetails(job.id);
+                          onClick={() => {
+                            setColumnFilters({ filename: '', user: '' });
+                            setStatusFilter('all');
+                            setActiveFilter(null);
                           }}
-                          title="View Details"
+                          className="mt-2"
                         >
-                          <Eye className="h-4 w-4" />
+                          Clear filters
                         </Button>
-                        {job.status === 'completed' && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => handleDownload(job.id, e)}
-                              disabled={downloadingJobs.has(job.id)}
-                              title="Download Files"
-                            >
-                              {downloadingJobs.has(job.id) ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Download className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => handleVisualize(job.id, e)}
-                              title="Visualize 3D Model"
-                            >
-                              <Boxes className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  filteredJobs.map((job) => (
+                    <tr
+                      key={job.id}
+                      className="hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => handleViewDetails(job.id)}
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {getStatusBadge(job.status, job.worker_id, job.progress_percent)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-foreground truncate block max-w-xs" title={job.filename || job.id}>
+                          {job.filename || `Job ${job.id.substring(0, 8)}...`}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm text-foreground truncate block max-w-xs" title={job.username || job.user_id}>
+                          {job.username || `${job.user_id.substring(0, 8)}...`}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-muted-foreground">
+                          {formatDate(job.created_at)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {job.started_at ? (
+                          <span className="text-sm text-muted-foreground">
+                            {formatDate(job.started_at)}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {job.completed_at ? (
+                          <span className="text-sm text-muted-foreground">
+                            {formatDate(job.completed_at)}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewDetails(job.id);
+                            }}
+                            title="View Details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {job.status === 'completed' && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => handleDownload(job.id, e)}
+                                disabled={downloadingJobs.has(job.id)}
+                                title="Download Files"
+                              >
+                                {downloadingJobs.has(job.id) ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Download className="h-4 w-4" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => handleVisualize(job.id, e)}
+                                title="Visualize 3D Model"
+                              >
+                                <Boxes className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
