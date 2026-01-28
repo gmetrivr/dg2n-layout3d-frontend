@@ -363,8 +363,9 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
               className="w-full p-2 border rounded bg-background text-foreground"
               disabled={isUploading}
             >
-              <option value="02">02 High Precision</option>
-              <option value="01">01-Default</option>
+              <option value="04">04 - Latest (Experimental)</option>
+              <option value="02">02 - High Precision</option>
+              <option value="01">01 - Default</option>
             </select>
           </div>
 
