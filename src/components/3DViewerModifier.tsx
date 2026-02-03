@@ -3072,9 +3072,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const displayName = selectedStore.nocName || selectedStore.sapName || selectedStore.storeName || '';
       setSaveStoreName(`${selectedStoreCode} - ${displayName}`);
 
-      // Set entity from formatType, defaulting to 'trends' if not found
-      // Normalize to lowercase for API compatibility
-      const entity = (selectedStore.formatType || 'trends').toLowerCase();
+      // Set entity from formatType
+      // "Trends Small Town" maps to "tst", all others default to "trends"
+      const formatType = (selectedStore.formatType || '').toLowerCase().trim();
+      const entity = formatType === 'trends small town' ? 'tst' : 'trends';
       setSaveEntity(entity);
     } else {
       setSaveStoreName('');
