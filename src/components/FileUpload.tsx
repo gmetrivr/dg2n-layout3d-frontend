@@ -21,7 +21,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<FileWithStatus[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [pipelineVersion, setPipelineVersion] = useState<string>('02');
+  const [pipelineVersion, setPipelineVersion] = useState<string>('04');
   const [toleranceOverrides, setToleranceOverrides] = useState<ToleranceOverrides>({});
   const [showToleranceModal, setShowToleranceModal] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({
