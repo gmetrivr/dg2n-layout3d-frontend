@@ -51,6 +51,11 @@ export function isFloorFile(fileName: string): boolean {
     return false;
   }
 
+  // Exclude baked floor files - these are generated during save and shouldn't be treated as source floors
+  if (fileName.includes('_baked')) {
+    return false;
+  }
+
   // Check for default floor patterns
   if (fileName.includes('dg2n-3d-floor-')) {
     return true;

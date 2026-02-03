@@ -32,14 +32,22 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
   });
   const [completedJobIds, setCompletedJobIds] = useState<string[]>([]);
 
+  // Sanitize filename by replacing special characters that could break file access on Windows
+  const sanitizeFileName = (fileName: string): string => {
+    // Characters that are problematic on Windows or in command line contexts:
+    // < > : " / \ | ? * - Forbidden in Windows filenames
+    // & ; ! ^ % $ - Can cause issues in command line/scripts
+    // , ' ` ~ # @ = + - Can cause parsing/URL issues
+    // [ ] { } ( ) - Brackets can cause issues in some contexts
+    // \s - All whitespace characters
+    return fileName
+      .replace(/[<>:"/\\|?*&;!^%$,`~#@=+\[\]{}()\s']/g, '_')
+      .replace(/_+/g, '_'); // Collapse multiple underscores into one
+  };
+
   const validateFile = (file: File): { valid: boolean; error?: string } => {
     if (!file.name.toLowerCase().endsWith('.dwg')) {
       return { valid: false, error: 'Must be a .dwg file' };
-    }
-    // Check for special characters that cause backend errors
-    const specialCharsRegex = /[&,\s]/;
-    if (specialCharsRegex.test(file.name)) {
-      return { valid: false, error: 'Filename cannot contain &, comma, or spaces' };
     }
     if (file.size > 100 * 1024 * 1024) { // 100MB limit
       return { valid: false, error: 'File size must be less than 100MB' };
@@ -122,8 +130,15 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
       });
 
       try {
+        // Create a new File with sanitized name to avoid backend errors
+        const originalFile = validFiles[i].file;
+        const sanitizedName = sanitizeFileName(originalFile.name);
+        const fileToUpload = sanitizedName !== originalFile.name
+          ? new File([originalFile], sanitizedName, { type: originalFile.type })
+          : originalFile;
+
         const response = await apiService.uploadDwgFile(
-          validFiles[i].file,
+          fileToUpload,
           pipelineVersion,
           toleranceOverrides
         );

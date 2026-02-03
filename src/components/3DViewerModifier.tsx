@@ -2743,6 +2743,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Apply floor remapping to data if needed
     let workingLocationData = locationData;
     let workingExtractedFiles = extractedFiles;
+    let workingSpawnPoints = spawnPoints;
+    let workingFloorNames = floorNames;
 
     if (floorMapping) {
       log('Applying floor remapping to export data');
@@ -2757,6 +2759,26 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
         return file;
       });
+
+      // Remap spawn points to new floor indices
+      workingSpawnPoints = new Map<number, [number, number, number]>();
+      spawnPoints.forEach((value, oldIndex) => {
+        const newIndex = floorMapping.get(oldIndex);
+        if (newIndex !== undefined) {
+          workingSpawnPoints.set(newIndex, value);
+        }
+      });
+      log('Remapped spawn points:', Object.fromEntries(workingSpawnPoints));
+
+      // Remap floor names to new floor indices
+      workingFloorNames = new Map<number, string>();
+      floorNames.forEach((value, oldIndex) => {
+        const newIndex = floorMapping.get(oldIndex);
+        if (newIndex !== undefined) {
+          workingFloorNames.set(newIndex, value);
+        }
+      });
+      log('Remapped floor names:', Object.fromEntries(workingFloorNames));
     }
 
     log('Extracted files:', workingExtractedFiles.map(f => f.name));
@@ -2804,7 +2826,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     // Generate and add store config JSON (without architectural elements)
     try {
       log('Creating store config JSON...');
-      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, spawnPoints, floorNames);
+      const configJson = await createStoreConfigJSON(workingLocationData, workingExtractedFiles, workingSpawnPoints, workingFloorNames);
       zip.file('store-config.json', configJson);
       log('Added store-config.json to ZIP');
     } catch (error) {
@@ -3989,7 +4011,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         setFixturesLoaded(false);
         const resp = await fetch(zipUrl);
         if (!resp.ok) throw new Error(`Failed to fetch ZIP (${resp.status})`);
-        const zipBlob = await resp.blob();
+        let zipBlob = await resp.blob();
+
+        // Migrate brand names in location-master.csv on store open
+        console.log('[3DViewerModifier] Starting brand migration on store open (URL)...');
+        const migrationResult = await migrateBrandsInZip(zipBlob, '02');
+        zipBlob = migrationResult.zipBlob;
+        if (migrationResult.migratedCount > 0) {
+          console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names on open`);
+        }
+
         const extracted = await extractZipFiles(zipBlob);
         setExtractedFiles(extracted);
 
@@ -4046,7 +4077,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
 
         const bucket = bucketParam || DEFAULT_BUCKET;
-        const blob = await downloadZip(zipPath, bucket);
+        let blob = await downloadZip(zipPath, bucket);
+
+        // Migrate brand names in location-master.csv on store open
+        console.log('[3DViewerModifier] Starting brand migration on store open (Supabase)...');
+        const migrationResult = await migrateBrandsInZip(blob, '02');
+        blob = migrationResult.zipBlob;
+        if (migrationResult.migratedCount > 0) {
+          console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names on open`);
+        }
+
         const extracted = await extractZipFiles(blob);
         setExtractedFiles(extracted);
 
