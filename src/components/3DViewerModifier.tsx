@@ -4168,13 +4168,13 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       try {
         const allTypes = await apiService.getAllFixtureTypes();
         // Filter out architectural object types
-        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY'];
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY', 'MID-WALL-BAY'];
         const fixtureOnlyTypes = allTypes.filter(type => !architecturalTypes.includes(type));
         setFixtureTypes(fixtureOnlyTypes);
       } catch (error) {
         console.warn('Failed to load fixture types from API:', error);
         // Fallback to hardcoded types from mapping
-        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY'];
+        const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY', 'MID-WALL-BAY'];
         const fixtureOnlyTypes = Object.values(FIXTURE_TYPE_MAPPING).filter(type => !architecturalTypes.includes(type));
         setFixtureTypes(fixtureOnlyTypes);
       }

@@ -622,6 +622,8 @@ export const apiService = {
     sort?: 'createdAt' | 'updatedAt';
     order?: 'asc' | 'desc';
     allUsers?: boolean;
+    filename?: string;
+    user?: string;
   }): Promise<JobListResponse> {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
@@ -637,6 +639,8 @@ export const apiService = {
     if (params?.sort) queryParams.append('sort', params.sort);
     if (params?.order) queryParams.append('order', params.order);
     if (params?.allUsers) queryParams.append('allUsers', 'true');
+    if (params?.filename) queryParams.append('filename', params.filename);
+    if (params?.user) queryParams.append('user', params.user);
 
     const url = `${FASTIFY_API_BASE_URL}/api/jobs${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
 

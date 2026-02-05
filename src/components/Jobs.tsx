@@ -22,12 +22,18 @@ export function Jobs() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // Column filters
+  // Column filters (live typing state)
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({
     filename: '',
     user: '',
   });
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+
+  // Applied filters (committed values used for API calls)
+  const [appliedFilters, setAppliedFilters] = useState<Record<string, string>>({
+    filename: '',
+    user: '',
+  });
 
   // Original filter values (stored when filter opens, used to revert on cancel)
   const [originalFilters, setOriginalFilters] = useState<Record<string, string>>({
@@ -55,6 +61,14 @@ export function Jobs() {
         params.status = statusFilter;
       }
 
+      if (appliedFilters.filename) {
+        params.filename = appliedFilters.filename;
+      }
+
+      if (appliedFilters.user) {
+        params.user = appliedFilters.user;
+      }
+
       const response = await apiService.listJobs(params);
       setJobs(response.data.jobs);
       setTotalPages(response.data.pagination.pages);
@@ -68,7 +82,7 @@ export function Jobs() {
 
   useEffect(() => {
     fetchJobs();
-  }, [page, statusFilter]);
+  }, [page, statusFilter, appliedFilters]);
 
   // Auto-refresh for active jobs
   useEffect(() => {
@@ -85,7 +99,7 @@ export function Jobs() {
     }, 10000); // Refresh every 10 seconds
 
     return () => clearInterval(interval);
-  }, [jobs, autoRefresh, page, statusFilter]);
+  }, [jobs, autoRefresh, page, statusFilter, appliedFilters]);
 
   // Handle click outside and Escape key for filters
   useEffect(() => {
@@ -96,12 +110,19 @@ export function Jobs() {
         if (activeFilter === 'status') {
           // Status filter: clicking outside cancels (reverts)
           setStatusFilter(originalFilters.status as JobStatus | 'all');
-        } else {
+        } else if (activeFilter) {
           // Filename/User filters: clicking outside keeps the value (commit)
+          const newValue = columnFilters[activeFilter] || '';
           setOriginalFilters(prev => ({
             ...prev,
-            [activeFilter]: columnFilters[activeFilter] || '',
+            [activeFilter]: newValue,
           }));
+          // Commit the filter and trigger re-fetch
+          setAppliedFilters(prev => ({
+            ...prev,
+            [activeFilter]: newValue,
+          }));
+          setPage(1);
         }
         setActiveFilter(null);
       }
@@ -119,10 +140,17 @@ export function Jobs() {
         setActiveFilter(null);
       } else if (event.key === 'Enter' && (activeFilter === 'filename' || activeFilter === 'user')) {
         // Enter commits the value for text filters
+        const newValue = columnFilters[activeFilter] || '';
         setOriginalFilters(prev => ({
           ...prev,
-          [activeFilter]: columnFilters[activeFilter] || '',
+          [activeFilter]: newValue,
         }));
+        // Commit the filter and trigger re-fetch
+        setAppliedFilters(prev => ({
+          ...prev,
+          [activeFilter]: newValue,
+        }));
+        setPage(1);
         setActiveFilter(null);
       }
     };
@@ -156,27 +184,8 @@ export function Jobs() {
     }
   }, [activeFilter]);
 
-  // Check if any filter is active
-  const hasActiveFilters = statusFilter !== 'all' || columnFilters.filename || columnFilters.user;
-
-  // Filter jobs based on column filters (status is server-side, others are client-side)
-  const filteredJobs = jobs.filter((job) => {
-    // Filename filter
-    const filenameFilter = columnFilters.filename.toLowerCase();
-    if (filenameFilter) {
-      const filename = (job.filename || job.id).toLowerCase();
-      if (!filename.includes(filenameFilter)) return false;
-    }
-
-    // User filter
-    const userFilter = columnFilters.user.toLowerCase();
-    if (userFilter) {
-      const user = (job.username || job.user_id).toLowerCase();
-      if (!user.includes(userFilter)) return false;
-    }
-
-    return true;
-  });
+  // Check if any filter is active (use appliedFilters for filename/user since those are what's sent to API)
+  const hasActiveFilters = statusFilter !== 'all' || appliedFilters.filename || appliedFilters.user;
 
   const handleFilterChange = (column: string, value: string) => {
     if (column === 'status') {
@@ -193,6 +202,9 @@ export function Jobs() {
       setPage(1);
     } else {
       setColumnFilters(prev => ({ ...prev, [column]: '' }));
+      // Commit the cleared filter and trigger re-fetch
+      setAppliedFilters(prev => ({ ...prev, [column]: '' }));
+      setPage(1);
     }
     // Update original so closing doesn't revert
     setOriginalFilters(prev => ({ ...prev, [column]: column === 'status' ? 'all' : '' }));
@@ -204,10 +216,14 @@ export function Jobs() {
       // Closing normally (not cancel) - keep current values
       setActiveFilter(null);
     } else {
-      // Opening - store current values as original (for cancel/revert)
+      // Opening - sync columnFilters with appliedFilters and store as original (for cancel/revert)
+      setColumnFilters({
+        filename: appliedFilters.filename,
+        user: appliedFilters.user,
+      });
       setOriginalFilters({
-        filename: columnFilters.filename,
-        user: columnFilters.user,
+        filename: appliedFilters.filename,
+        user: appliedFilters.user,
         status: statusFilter,
       });
       setActiveFilter(column);
@@ -472,7 +488,7 @@ export function Jobs() {
                         <span>Filename</span>
                         <button
                           onClick={() => toggleFilter('filename')}
-                          className={`p-1 hover:bg-muted rounded ${columnFilters.filename ? 'text-primary' : ''}`}
+                          className={`p-1 hover:bg-muted rounded ${appliedFilters.filename ? 'text-primary' : ''}`}
                         >
                           <Filter className="h-3 w-3" />
                         </button>
@@ -511,7 +527,7 @@ export function Jobs() {
                         <span>User</span>
                         <button
                           onClick={() => toggleFilter('user')}
-                          className={`p-1 hover:bg-muted rounded ${columnFilters.user ? 'text-primary' : ''}`}
+                          className={`p-1 hover:bg-muted rounded ${appliedFilters.user ? 'text-primary' : ''}`}
                         >
                           <Filter className="h-3 w-3" />
                         </button>
@@ -559,7 +575,7 @@ export function Jobs() {
                 </tr>
               </thead>
               <tbody className="bg-background divide-y divide-border">
-                {filteredJobs.length === 0 ? (
+                {jobs.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-4 py-12">
                       <div className="text-center">
@@ -570,8 +586,10 @@ export function Jobs() {
                           size="sm"
                           onClick={() => {
                             setColumnFilters({ filename: '', user: '' });
+                            setAppliedFilters({ filename: '', user: '' });
                             setStatusFilter('all');
                             setActiveFilter(null);
+                            setPage(1);
                           }}
                           className="mt-2"
                         >
@@ -581,7 +599,7 @@ export function Jobs() {
                     </td>
                   </tr>
                 ) : (
-                  filteredJobs.map((job) => (
+                  jobs.map((job) => (
                     <tr
                       key={job.id}
                       className="hover:bg-muted/50 transition-colors cursor-pointer"
