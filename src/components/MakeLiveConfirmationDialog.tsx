@@ -25,6 +25,7 @@ interface MakeLiveConfirmationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  onCancel: () => void;
   stats: MakeLiveStats | null;
   storeName: string;
   isProcessing: boolean;
@@ -34,6 +35,7 @@ export function MakeLiveConfirmationDialog({
   open,
   onOpenChange,
   onConfirm,
+  onCancel,
   stats,
   storeName,
   isProcessing,
@@ -53,14 +55,20 @@ export function MakeLiveConfirmationDialog({
   const showFloorChangeWarning = !stats.isFirstTime && floorChangePercentage >= 50;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(newOpen) => {
+      if (!newOpen) {
+        onCancel();
+      } else {
+        onOpenChange(newOpen);
+      }
+    }}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <div className="flex items-center justify-between w-full">
             <DialogTitle>
               {stats.isFirstTime ? 'Make Store Live' : 'Update Live Store'}
             </DialogTitle>
-            <DialogClose onClick={() => onOpenChange(false)} />
+            <DialogClose onClick={onCancel} />
           </div>
         </DialogHeader>
 
@@ -172,7 +180,7 @@ export function MakeLiveConfirmationDialog({
           <div className="flex justify-end gap-3 pt-4 border-t">
             <Button
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={onCancel}
               disabled={isProcessing}
             >
               Cancel

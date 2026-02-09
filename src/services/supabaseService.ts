@@ -488,13 +488,12 @@ export const useSupabaseService = () => {
         return data[0] as StoreSaveRow;
       },
 
-      async listDeployedStores(storeId?: string, limit: number = 100) {
+      async listDeployedStores(storeId?: string) {
         let query = supabase
           .from('store_saves')
           .select('*')
           .not('deployed_at', 'is', null) // Only get records that have been deployed
-          .order('deployed_at', { ascending: false })
-          .limit(limit);
+          .order('deployed_at', { ascending: false });
 
         if (storeId) {
           query = query.eq('store_id', storeId);

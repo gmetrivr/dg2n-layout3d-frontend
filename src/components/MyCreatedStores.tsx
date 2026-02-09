@@ -348,6 +348,9 @@ export function MyCreatedStores() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [confirmStats, setConfirmStats] = useState<MakeLiveStats | null>(null);
   const [pendingMakeLiveRow, setPendingMakeLiveRow] = useState<StoreSaveRow | null>(null);
+  const [pendingMakeLiveZip, setPendingMakeLiveZip] = useState<Blob | null>(null);
+  const [pendingMigrationCount, setPendingMigrationCount] = useState(0);
+  const [pendingFilterCount, setPendingFilterCount] = useState(0);
   const navigate = useNavigate();
   const {
     listStoreRecords,
@@ -516,8 +519,17 @@ export function MyCreatedStores() {
       const migrationResult = await migrateBrandsInZip(zipBlob, '02');
       zipBlob = migrationResult.zipBlob;
 
+      // Filter out excluded fixture types (stairs, toilets, trial rooms, etc.)
+      const filterResult = await filterExcludedFixturesInZip(zipBlob);
+      zipBlob = filterResult.zipBlob;
+
       // Ensure store-config.json exists
       zipBlob = await ensureStoreConfigInZip(zipBlob);
+
+      // Store the processed ZIP and counts for reuse in handleConfirmMakeLive
+      setPendingMakeLiveZip(zipBlob);
+      setPendingMigrationCount(migrationResult.migratedCount);
+      setPendingFilterCount(filterResult.removedCount);
 
       // Parse ZIP to extract fixture data
       const zip = await JSZip.loadAsync(zipBlob);
@@ -693,35 +705,18 @@ export function MyCreatedStores() {
   }
 
   const handleConfirmMakeLive = async () => {
-    if (!pendingMakeLiveRow) return;
+    if (!pendingMakeLiveRow || !pendingMakeLiveZip) return;
 
     const r = pendingMakeLiveRow;
+    const zipBlob = pendingMakeLiveZip;
     setShowConfirmDialog(false);
 
     try {
       setMakingLiveId(r.id);
 
-      // Download the ZIP file first
-      let zipBlob = await downloadZip(r.zip_path, DEFAULT_BUCKET);
-
-      // Migrate brand names in location-master.csv
-      console.log('[MyCreatedStores] Starting brand migration...');
-      const migrationResult = await migrateBrandsInZip(zipBlob, '02');
-      zipBlob = migrationResult.zipBlob;
-      if (migrationResult.migratedCount > 0) {
-        console.log(`[MyCreatedStores] Successfully migrated ${migrationResult.migratedCount} brand names`);
-      }
-
-      // Filter out excluded fixture types (stairs, toilets, trial rooms, etc.)
-      console.log('[MyCreatedStores] Filtering excluded fixture types...');
-      const filterResult = await filterExcludedFixturesInZip(zipBlob);
-      zipBlob = filterResult.zipBlob;
-      if (filterResult.removedCount > 0) {
-        console.log(`[MyCreatedStores] Removed ${filterResult.removedCount} excluded fixtures`);
-      }
-
-      // Ensure store-config.json exists in the ZIP
-      zipBlob = await ensureStoreConfigInZip(zipBlob);
+      // Reuse the already processed ZIP from handleMakeLiveClick
+      // (brand migration, fixture filtering, and store-config already applied)
+      console.log('[MyCreatedStores] Using pre-processed ZIP from preview step');
 
       // Process ZIP to assign fixture IDs
       const zip = await JSZip.loadAsync(zipBlob);
@@ -926,11 +921,19 @@ export function MyCreatedStores() {
 
       // Make the store live using the API with the FILTERED live ZIP (baked models only)
       console.log('[MyCreatedStores] Making store live with filtered ZIP containing only baked models...');
+      // Derive entity from formatType: "Trends Small Town" → "tst", everything else → "trends"
+      const formatType = (storeInfo?.formatType || '').toLowerCase().trim();
+      const derivedEntity = formatType === 'trends small town' ? 'tst' : 'trends';
+      const storedEntity = (r.entity || 'trends').toLowerCase();
+      if (storedEntity !== derivedEntity) {
+        console.log(`[MyCreatedStores] Entity corrected: "${storedEntity}" -> "${derivedEntity}" (formatType="${storeInfo?.formatType || ''}")`);
+      }
+
       await makeStoreLive(
         r.store_id,
         r.store_name,
         liveZipBlob, // Use filtered live ZIP instead of full ZIP
-        (r.entity || 'trends').toLowerCase(),
+        derivedEntity,
         '0,0,0',
         {
           nocName: storeInfo?.nocName || undefined,
@@ -943,21 +946,22 @@ export function MyCreatedStores() {
         }
       );
 
-      // Update store record with deployment status
+      // Update store record with deployment status and corrected entity
       console.log('[MyCreatedStores] Updating store record with deployment status...');
       await updateStoreDeploymentStatus(r.id, 'deploying', {
         deployed_at: new Date().toISOString(),
+        entity: derivedEntity,
       });
       console.log('[MyCreatedStores] Store record updated with deployment status successfully');
 
       // Refresh the store list to get the latest record from backend
       await fetchRows(search);
 
-      const migrationMessage = migrationResult.migratedCount > 0
-        ? ` (${migrationResult.migratedCount} brand names were automatically updated to the latest format)`
+      const migrationMessage = pendingMigrationCount > 0
+        ? ` (${pendingMigrationCount} brand names were automatically updated to the latest format)`
         : '';
-      const filterMessage = filterResult.removedCount > 0
-        ? ` (${filterResult.removedCount} non-retail fixtures were excluded)`
+      const filterMessage = pendingFilterCount > 0
+        ? ` (${pendingFilterCount} non-retail fixtures were excluded)`
         : '';
       alert(`Store "${r.store_name}" is now live with ${finalFixtures.length} fixtures!${migrationMessage}${filterMessage}`);
     } catch (error) {
@@ -981,7 +985,19 @@ export function MyCreatedStores() {
     } finally {
       setMakingLiveId(null);
       setPendingMakeLiveRow(null);
+      setPendingMakeLiveZip(null);
+      setPendingMigrationCount(0);
+      setPendingFilterCount(0);
     }
+  };
+
+  const handleCancelMakeLive = () => {
+    // Clear pending data when dialog is cancelled
+    setShowConfirmDialog(false);
+    setPendingMakeLiveRow(null);
+    setPendingMakeLiveZip(null);
+    setPendingMigrationCount(0);
+    setPendingFilterCount(0);
   };
 
   return (
@@ -1211,6 +1227,7 @@ export function MyCreatedStores() {
             open={showConfirmDialog}
             onOpenChange={setShowConfirmDialog}
             onConfirm={handleConfirmMakeLive}
+            onCancel={handleCancelMakeLive}
             stats={confirmStats}
             storeName={pendingMakeLiveRow?.store_name || ''}
             isProcessing={makingLiveId !== null}

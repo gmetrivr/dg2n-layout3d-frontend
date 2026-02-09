@@ -19,7 +19,7 @@ export default function LiveStatusTab() {
       if (showLoading) setLoading(true);
       setError(null);
 
-      const data = await supabaseService.listDeployedStores(undefined, 100);
+      const data = await supabaseService.listDeployedStores();
 
       // Filter to show only latest deployment per store_id
       const latestByStore = new Map<string, StoreSaveRow>();
@@ -74,7 +74,7 @@ export default function LiveStatusTab() {
     if (updates.length > 0) {
       await Promise.all(updates);
       // Refresh the list after updates
-      const updatedData = await supabaseService.listDeployedStores(undefined, 100);
+      const updatedData = await supabaseService.listDeployedStores();
       setDeployments(updatedData);
     }
   };
