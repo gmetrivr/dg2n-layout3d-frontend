@@ -1778,6 +1778,7 @@ interface Canvas3DProps {
   onPointerMissed: () => void;
   setIsTransforming: (transforming: boolean) => void;
   onOrbitTargetUpdate?: (target: [number, number, number]) => void;
+  pipelineVersion?: string;
 }
 
 export function Canvas3D({
@@ -1834,7 +1835,8 @@ export function Canvas3D({
   onFloorPlateClick,
   onPointerMissed,
   setIsTransforming,
-  onOrbitTargetUpdate
+  onOrbitTargetUpdate,
+  pipelineVersion = '02'
 }: Canvas3DProps) {
   const orbitControlsRef = useRef<any>(null);
   const lastTargetRef = useRef<[number, number, number]>(orbitTarget);
@@ -1852,7 +1854,7 @@ export function Canvas3D({
   useEffect(() => {
     const fetchBrandCategoryMapping = async () => {
       try {
-        const response = await apiService.getBrandCategoryMapping();
+        const response = await apiService.getBrandCategoryMapping(pipelineVersion);
         setBrandCategoryMapping(response.brand_category_mapping);
       } catch (error) {
         console.error('Failed to fetch brand category mapping:', error);
@@ -1861,7 +1863,7 @@ export function Canvas3D({
     };
 
     fetchBrandCategoryMapping();
-  }, []);
+  }, [pipelineVersion]);
 
   // Track right-click drag for hierarchy mode and add object cancel
   const rightClickStartPos = useRef<{ x: number; y: number } | null>(null);

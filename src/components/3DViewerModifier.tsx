@@ -225,6 +225,7 @@ export function ThreeDViewerModifier() {
   const zipPath = searchParams.get('zipPath');
   const bucketParam = searchParams.get('bucket');
   const [, setJob] = useState<JobStatus | null>(null);
+  const [pipelineVersion, setPipelineVersion] = useState<string>('02');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [extractedFiles, setExtractedFiles] = useState<ExtractedFile[]>([]);
@@ -628,7 +629,7 @@ export function ThreeDViewerModifier() {
     }
 
     try {
-      const fixtureBlocks = await apiService.getFixtureBlocks(uncachedBlocks);
+      const fixtureBlocks = await apiService.getFixtureBlocks(uncachedBlocks, pipelineVersion);
 
       // Update cache and build URL map, also store fixture types
       fixtureBlocks.forEach(block => {
@@ -655,7 +656,7 @@ export function ThreeDViewerModifier() {
       console.warn('Failed to load fixture GLBs:', error);
       return urlMap;
     }
-  }, []); // No dependencies needed since refs are stable
+  }, [pipelineVersion]);
 
   const handleBoundsCalculated = useCallback((center: [number, number, number], size: [number, number, number]) => {
     // Position camera to view the entire model
@@ -708,9 +709,9 @@ export function ThreeDViewerModifier() {
     
     try {
       // Get new GLB URL for the fixture type
-      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType);
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
       const newGlbUrl = fixtureTypeInfo.glb_url;
-      
+
       // Clear the old GLB from Three.js cache to ensure fresh loading
       if (selectedLocation.glbUrl) {
         // Clear old GLB from cache
@@ -718,12 +719,12 @@ export function ThreeDViewerModifier() {
       }
       // Preload new GLB
       useGLTF.preload(newGlbUrl);
-      
+
       // Small delay to ensure cache clearing takes effect
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Get the proper block name from the backend API
-      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType);
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType, pipelineVersion);
 
       // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
       if (!mappedBlockName) {
@@ -783,7 +784,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to change fixture type:', error);
       // Could add error toast here
     }
-  }, [selectedLocation]);
+  }, [selectedLocation, pipelineVersion]);
 
   // Helper function to check if a fixture type requires variant selection
   const fixtureTypeRequiresVariantSelection = (fixtureType: string): boolean => {
@@ -806,11 +807,11 @@ export function ThreeDViewerModifier() {
       const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
 
       // Get the GLB URL for the fixture type
-      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(fixtureType);
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(fixtureType, pipelineVersion);
       const glbUrl = fixtureTypeInfo.glb_url;
 
       // Get the proper block name from the backend API
-      let mappedBlockName = await apiService.getBlockNameForFixtureType(fixtureType);
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(fixtureType, pipelineVersion);
 
       // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
       if (!mappedBlockName) {
@@ -910,7 +911,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to add fixture:', error);
       alert('Failed to add fixture. Please try again.');
     }
-  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
+  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, pipelineVersion]);
 
   // Handler for variant selection for regular fixtures
   const handleFixtureVariantSelect = useCallback(async (variant: { id: string; name: string; url: string; description?: string }) => {
@@ -926,7 +927,7 @@ export function ThreeDViewerModifier() {
       const glbUrl = variant.url;
 
       // Get the proper block name from the backend API
-      let mappedBlockName = await apiService.getBlockNameForFixtureType(pendingFixtureType);
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(pendingFixtureType, pipelineVersion);
 
       // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
       if (!mappedBlockName) {
@@ -1031,7 +1032,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to add fixture with variant:', error);
       alert('Failed to add fixture. Please try again.');
     }
-  }, [pendingFixtureType, selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations]);
+  }, [pendingFixtureType, selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, pipelineVersion]);
 
   // Mapping from architectural object types to fixture types for API calls
   // These must match the fixture types defined in the backend config.py
@@ -2545,7 +2546,7 @@ const createStoreConfigJSON = useCallback(async (
   try {
     if (uniqueBlockNames.length > 0) {
       log(`Fetching fixture types for ${uniqueBlockNames.length} block names...`);
-      const fixtureBlocks = await apiService.getFixtureBlocks(uniqueBlockNames);
+      const fixtureBlocks = await apiService.getFixtureBlocks(uniqueBlockNames, pipelineVersion);
       fixtureBlocks.forEach(block => {
         if (block.block_name && block.fixture_type) {
           blockFixtureTypes[block.block_name] = block.fixture_type;
@@ -2568,7 +2569,7 @@ const createStoreConfigJSON = useCallback(async (
       log(`Fetching GLB URLs for ${uniqueFixtureTypes.length} fixture types...`);
       const urlPromises = uniqueFixtureTypes.map(async (fixtureType) => {
         try {
-          const typeInfo = await apiService.getFixtureTypeUrl(fixtureType);
+          const typeInfo = await apiService.getFixtureTypeUrl(fixtureType, pipelineVersion);
           return { fixtureType, url: typeInfo.glb_url };
         } catch (error) {
           console.error(`Failed to fetch URL for fixture type ${fixtureType}:`, error);
@@ -2593,7 +2594,7 @@ const createStoreConfigJSON = useCallback(async (
   let directRenderTypes: string[] = [];
   try {
     log('Fetching direct render fixture types...');
-    const directRenderData = await apiService.getDirectRenderTypes('02');
+    const directRenderData = await apiService.getDirectRenderTypes(pipelineVersion);
     directRenderTypes = directRenderData.direct_render_fixture_types;
     log(`Found ${directRenderTypes.length} direct render fixture types`);
   } catch (error) {
@@ -2603,6 +2604,7 @@ const createStoreConfigJSON = useCallback(async (
 
   // 7. Build the config object (architectural elements now stored in separate file)
   const config = {
+    pipeline_version: pipelineVersion,
     floor: floors,
     block_fixture_types: blockFixtureTypes,
     fixture_type_glb_urls: fixtureTypeGlbUrls,
@@ -2611,7 +2613,7 @@ const createStoreConfigJSON = useCallback(async (
 
   log('Store config generated with', floors.length, 'floors');
   return JSON.stringify(config, null, 2);
-}, []);
+}, [pipelineVersion]);
 
 const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const zip = new JSZip();
@@ -2779,7 +2781,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
       // Migrate brand names in location-master.csv
       console.log('[3DViewerModifier] Starting brand migration for download...');
-      const migrationResult = await migrateBrandsInZip(blob, '02');
+      const migrationResult = await migrateBrandsInZip(blob, pipelineVersion);
       blob = migrationResult.zipBlob;
       if (migrationResult.migratedCount > 0) {
         console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names`);
@@ -2801,7 +2803,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } finally {
       setIsExportingZip(false);
     }
-  }, [createModifiedZipBlob, isExportingZip, jobId]);
+  }, [createModifiedZipBlob, isExportingZip, jobId, pipelineVersion]);
 
   const handleDownloadSpaceTracker = useCallback(() => {
     try {
@@ -2901,7 +2903,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
 
       // Migrate brand names in location-master.csv
       console.log('[3DViewerModifier] Starting brand migration for save...');
-      const migrationResult = await migrateBrandsInZip(blob, '02');
+      const migrationResult = await migrateBrandsInZip(blob, pipelineVersion);
       blob = migrationResult.zipBlob;
       if (migrationResult.migratedCount > 0) {
         console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names`);
@@ -2940,7 +2942,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     } finally {
       setIsSavingStore(false);
     }
-  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord, storeData]);
+  }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord, storeData, pipelineVersion]);
 
   // Handle store selection and auto-populate store name and entity
   const handleStoreSelection = useCallback((selectedStoreCode: string) => {
@@ -3842,6 +3844,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         }
         setJob(jobData);
 
+        // Extract pipeline version from job config
+        if (jobData.config?.pipeline_version) {
+          setPipelineVersion(jobData.config.pipeline_version);
+        }
+
         setExtracting(true);
         setFixturesLoaded(false);
         const zipBlob = await apiService.fetchJobFilesAsZip(jobId);
@@ -3894,9 +3901,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         if (!resp.ok) throw new Error(`Failed to fetch ZIP (${resp.status})`);
         let zipBlob = await resp.blob();
 
+        // Read pipeline version from store-config.json in ZIP before brand migration
+        let detectedPipelineVersion = '02'; // fallback for older stores
+        const preZip = await JSZip.loadAsync(zipBlob);
+        const preConfigFile = preZip.file('store-config.json');
+        if (preConfigFile) {
+          try {
+            const configText = await preConfigFile.async('text');
+            const preConfig = JSON.parse(configText);
+            if (preConfig.pipeline_version) {
+              detectedPipelineVersion = preConfig.pipeline_version;
+            }
+          } catch (e) { /* use fallback */ }
+        }
+        setPipelineVersion(detectedPipelineVersion);
+
         // Migrate brand names in location-master.csv on store open
         console.log('[3DViewerModifier] Starting brand migration on store open (URL)...');
-        const migrationResult = await migrateBrandsInZip(zipBlob, '02');
+        const migrationResult = await migrateBrandsInZip(zipBlob, detectedPipelineVersion);
         zipBlob = migrationResult.zipBlob;
         if (migrationResult.migratedCount > 0) {
           console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names on open`);
@@ -3960,9 +3982,24 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         const bucket = bucketParam || DEFAULT_BUCKET;
         let blob = await downloadZip(zipPath, bucket);
 
+        // Read pipeline version from store-config.json in ZIP before brand migration
+        let detectedPipelineVersion = '02'; // fallback for older stores
+        const preZip = await JSZip.loadAsync(blob);
+        const preConfigFile = preZip.file('store-config.json');
+        if (preConfigFile) {
+          try {
+            const configText = await preConfigFile.async('text');
+            const preConfig = JSON.parse(configText);
+            if (preConfig.pipeline_version) {
+              detectedPipelineVersion = preConfig.pipeline_version;
+            }
+          } catch (e) { /* use fallback */ }
+        }
+        setPipelineVersion(detectedPipelineVersion);
+
         // Migrate brand names in location-master.csv on store open
         console.log('[3DViewerModifier] Starting brand migration on store open (Supabase)...');
-        const migrationResult = await migrateBrandsInZip(blob, '02');
+        const migrationResult = await migrateBrandsInZip(blob, detectedPipelineVersion);
         blob = migrationResult.zipBlob;
         if (migrationResult.migratedCount > 0) {
           console.log(`[3DViewerModifier] Successfully migrated ${migrationResult.migratedCount} brand names on open`);
@@ -4030,7 +4067,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const fetchBrandCategories = async () => {
       if (isUnmountingRef.current) return; // Skip if unmounting
       try {
-        const categories = await apiService.getBrandCategories();
+        const categories = await apiService.getBrandCategories(pipelineVersion);
         setBrandCategories(categories);
       } catch (error) {
         console.warn('Failed to fetch brand categories:', error);
@@ -4039,14 +4076,14 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     };
 
     fetchBrandCategories();
-  }, []);
+  }, [pipelineVersion]);
 
   // Load all available fixture types from API
   useEffect(() => {
     const loadAllFixtureTypes = async () => {
       if (isUnmountingRef.current) return; // Skip if unmounting
       try {
-        const allTypes = await apiService.getAllFixtureTypes();
+        const allTypes = await apiService.getAllFixtureTypes(pipelineVersion);
         // Filter out architectural object types
         const architecturalTypes = ['ENTRANCE', 'FIRE-EXIT', 'DOOR', 'STAIRCASE', 'TOILET', 'TRIAL-ROOM', 'BOH', 'CASH-TILL', 'WINDOW-DISPLAY', 'MID-WALL-BAY'];
         const fixtureOnlyTypes = allTypes.filter(type => !architecturalTypes.includes(type));
@@ -4061,7 +4098,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     };
 
     loadAllFixtureTypes();
-  }, []); // Only run once on component mount
+  }, [pipelineVersion]);
 
   // Load store master data
   useEffect(() => {
@@ -4120,6 +4157,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             try {
               const response = await fetch(storeConfigFile.url);
               const config = await response.json();
+
+              // Extract pipeline version (fallback to '02' for older stores)
+              if (config.pipeline_version) {
+                setPipelineVersion(config.pipeline_version);
+              }
 
               if (config.floor && Array.isArray(config.floor)) {
                 config.floor.forEach((floor: any) => {
@@ -4850,6 +4892,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onPointerMissed={handlePointerMissed}
           setIsTransforming={handleSetIsTransforming}
           onOrbitTargetUpdate={handleOrbitTargetUpdate}
+          pipelineVersion={pipelineVersion}
         />
         
         {/* Show MultiRightInfoPanel when multiple fixtures are selected */}
@@ -5182,7 +5225,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           fixtureType={getFixtureTypeForArchObject(pendingArchObjectType)}
           currentVariant=""
           onVariantSelect={handleArchObjectVariantSelect}
-          pipelineVersion="02"
+          pipelineVersion={pipelineVersion}
           onBack={() => {
             // Close variant modal and go back to object selection
             setArchObjectVariantModalOpen(false);
@@ -5200,7 +5243,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           fixtureType={pendingFixtureType}
           currentVariant=""
           onVariantSelect={handleFixtureVariantSelect}
-          pipelineVersion="02"
+          pipelineVersion={pipelineVersion}
           onBack={() => {
             // Close variant modal and go back to fixture type selection
             setFixtureVariantModalOpen(false);

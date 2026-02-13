@@ -17,6 +17,7 @@ export interface JobStatus {
   total_files: number;
   output_dir?: string;
   error_message?: string;
+  config?: Record<string, any>;
   created_at: string;
   started_at?: string;
   completed_at?: string;
@@ -515,8 +516,8 @@ export const apiService = {
     return response.json();
   },
 
-  async getAllFixtureTypes(): Promise<string[]> {
-    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/types?pipeline_version=02`);
+  async getAllFixtureTypes(pipelineVersion: string = '02'): Promise<string[]> {
+    const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/types?pipeline_version=${pipelineVersion}`);
 
     if (!response.ok) {
       throw new Error(`Failed to get all fixture types: ${response.status} ${response.statusText}`);
