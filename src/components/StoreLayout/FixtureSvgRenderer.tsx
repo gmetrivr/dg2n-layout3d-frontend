@@ -10,6 +10,7 @@ interface FixtureSvgRendererProps {
   svgY: number;  // world Y (already negated)
   zoom: number;
   isSelected: boolean;
+  isHighlighted?: boolean;
   brandCategoryMapping: Record<string, string>;
   onClick: (location: LocationData, e: React.MouseEvent) => void;
 }
@@ -21,6 +22,7 @@ export const FixtureSvgRenderer = memo(function FixtureSvgRenderer({
   svgY,
   zoom,
   isSelected,
+  isHighlighted,
   brandCategoryMapping,
   onClick,
 }: FixtureSvgRendererProps) {
@@ -89,6 +91,34 @@ export const FixtureSvgRenderer = memo(function FixtureSvgRenderer({
           </g>
         );
       })}
+
+      {/* QR highlight — pulsing yellow double-border */}
+      {isHighlighted && (
+        <>
+          <rect
+            x={-totalHalfWidth - borderWidth * 2.5}
+            y={-halfH - borderWidth * 2.5}
+            width={totalWidth + borderWidth * 5}
+            height={h + borderWidth * 5}
+            rx={4 / zoom}
+            fill="none"
+            stroke="#facc15"
+            strokeWidth={borderWidth * 1.5}
+          >
+            <animate attributeName="opacity" values="1;0.3;1" dur="1.5s" repeatCount="indefinite" />
+          </rect>
+          <rect
+            x={-totalHalfWidth - borderWidth}
+            y={-halfH - borderWidth}
+            width={totalWidth + borderWidth * 2}
+            height={h + borderWidth * 2}
+            rx={3 / zoom}
+            fill="none"
+            stroke="#facc15"
+            strokeWidth={borderWidth}
+          />
+        </>
+      )}
 
       {/* Selection highlight — covers entire stack */}
       {isSelected && (

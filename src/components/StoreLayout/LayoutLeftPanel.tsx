@@ -18,6 +18,7 @@ interface LayoutLeftPanelProps {
   isSaving: boolean;
   onSave: () => void;
   storeName: string;
+  isViewOnly?: boolean;
 }
 
 export function LayoutLeftPanel({
@@ -34,6 +35,7 @@ export function LayoutLeftPanel({
   isSaving,
   onSave,
   storeName,
+  isViewOnly,
 }: LayoutLeftPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -55,27 +57,31 @@ export function LayoutLeftPanel({
 
       {!collapsed && (
         <div className="flex flex-col gap-4 p-4 pt-0">
-          {/* Save Button */}
-          <Button
-            size="sm"
-            onClick={onSave}
-            disabled={!hasChanges || isSaving}
-            className="w-full"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 mr-2" />
-                Save Store
-              </>
-            )}
-          </Button>
+          {/* Save Button — hidden in view-only mode */}
+          {!isViewOnly && (
+            <>
+              <Button
+                size="sm"
+                onClick={onSave}
+                disabled={!hasChanges || isSaving}
+                className="w-full"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Store
+                  </>
+                )}
+              </Button>
 
-          <div className="border-t border-border" />
+              <div className="border-t border-border" />
+            </>
+          )}
 
           {/* Floor Selector */}
           <div className="flex flex-col gap-2">

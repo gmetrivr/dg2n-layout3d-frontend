@@ -9,6 +9,7 @@ interface LayoutRightPanelProps {
   onEditBrand: () => void;
   onEditFixtureType: () => void;
   onReset: () => void;
+  isViewOnly?: boolean;
 }
 
 export function LayoutRightPanel({
@@ -18,6 +19,7 @@ export function LayoutRightPanel({
   onEditBrand,
   onEditFixtureType,
   onReset,
+  isViewOnly,
 }: LayoutRightPanelProps) {
   const isModified = location.wasBrandChanged || location.wasTypeChanged;
 
@@ -46,9 +48,11 @@ export function LayoutRightPanel({
             ) : (
               <span className="font-medium">{fixtureType}</span>
             )}
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEditFixtureType}>
-              <Pencil className="h-3 w-3" />
-            </Button>
+            {!isViewOnly && (
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEditFixtureType}>
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -66,9 +70,11 @@ export function LayoutRightPanel({
             ) : (
               <span className="font-medium">{location.brand}</span>
             )}
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEditBrand}>
-              <Pencil className="h-3 w-3" />
-            </Button>
+            {!isViewOnly && (
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEditBrand}>
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -107,7 +113,7 @@ export function LayoutRightPanel({
         )}
 
         {/* Reset button */}
-        {isModified && (
+        {isModified && !isViewOnly && (
           <>
             <div className="border-t border-border my-2" />
             <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={onReset}>

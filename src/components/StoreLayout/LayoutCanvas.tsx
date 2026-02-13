@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo } from 'react';
 import { FloorOutlineRenderer } from './FloorOutlineRenderer';
 import { FixtureSvgRenderer } from './FixtureSvgRenderer';
 import { useLayoutViewport } from '../../hooks/useLayoutViewport';
+import { getFixtureSize } from '../../utils/fixtureSvgConfig';
 import type { FloorOutline } from '../../utils/floorOutlineExtractor';
 import type { LocationData } from '../../hooks/useFixtureSelection';
 import { generateFixtureUID } from '../../hooks/useFixtureSelection';
@@ -16,6 +17,7 @@ interface LayoutCanvasProps {
   brandCategoryMapping: Record<string, string>;
   selectedLocation: LocationData | null;
   onSelectLocation: (location: LocationData | null) => void;
+  highlightedLocation?: LocationData | null;
 }
 
 export function LayoutCanvas({
@@ -28,6 +30,7 @@ export function LayoutCanvas({
   brandCategoryMapping,
   selectedLocation,
   onSelectLocation,
+  highlightedLocation,
 }: LayoutCanvasProps) {
   const {
     viewport,
@@ -52,6 +55,27 @@ export function LayoutCanvas({
   useEffect(() => {
     hasFitted.current = false;
   }, [selectedFloor]);
+
+  // Auto-center on highlighted fixture (from QR scan)
+  useEffect(() => {
+    if (!highlightedLocation || !svgRef.current) return;
+    const ft = fixtureTypeMap.get(highlightedLocation.blockName) || highlightedLocation.blockName;
+    const [w, h] = getFixtureSize(ft);
+    const count = highlightedLocation.count || 1;
+    const totalW = w * count;
+    const cx = highlightedLocation.posX;
+    const cy = -highlightedLocation.posY;
+    const padding = Math.max(totalW, h) * 3; // some breathing room
+    const bounds = {
+      minX: cx - padding,
+      maxX: cx + padding,
+      minY: cy - padding,
+      maxY: cy + padding,
+    };
+    const rect = svgRef.current.getBoundingClientRect();
+    fitToBounds(bounds, rect.width, rect.height);
+    hasFitted.current = true;
+  }, [highlightedLocation, fixtureTypeMap, fitToBounds, svgRef]);
 
   // Filter visible fixtures (memoized — only changes when data/filters change, NOT on pan/zoom)
   const showAllTypes = visibleFixtureTypes.length === 0 || visibleFixtureTypes.includes('all');
@@ -107,6 +131,9 @@ export function LayoutCanvas({
           const isSelected = selectedLocation
             ? generateFixtureUID(selectedLocation) === uid
             : false;
+          const isHighlighted = highlightedLocation
+            ? loc.fixtureId === highlightedLocation.fixtureId
+            : false;
 
           return (
             <FixtureSvgRenderer
@@ -117,6 +144,7 @@ export function LayoutCanvas({
               svgY={-loc.posY}
               zoom={viewport.zoom}
               isSelected={isSelected}
+              isHighlighted={isHighlighted}
               brandCategoryMapping={brandCategoryMapping}
               onClick={(location) => onSelectLocation(location)}
             />

@@ -27,6 +27,13 @@ const StoreLayout = lazy(() =>
   }))
 );
 
+// Lazy load QR fixture redirect
+const QrFixtureRedirect = lazy(() =>
+  import('./components/QrFixtureRedirect').then(module => ({
+    default: module.QrFixtureRedirect
+  }))
+);
+
 function LoadingFallback() {
   return (
     <div className="h-screen flex items-center justify-center">
@@ -57,6 +64,8 @@ function App() {
                 <Route path="/my-stores" element={<MyCreatedStores />} />
                 <Route path="/jobs" element={<Jobs />} />
                 <Route path="/layout/:store_id" element={<StoreLayout />} />
+                <Route path="/layout/:store_id/view" element={<StoreLayout />} />
+                <Route path="/qr/:payload" element={<QrFixtureRedirect />} />
               </Routes>
             </Suspense>
 

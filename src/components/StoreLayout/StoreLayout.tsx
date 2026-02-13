@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { useParams, useLocation, useSearchParams } from 'react-router-dom';
+import { Loader2, Eye } from 'lucide-react';
 import JSZip from 'jszip';
 import { useStoreLayoutData } from '../../hooks/useStoreLayoutData';
 import { useSupabaseService } from '../../services/supabaseService';
@@ -16,7 +16,13 @@ import { FixtureTypeSelectionModal } from '../FixtureTypeSelectionModal';
 
 export function StoreLayout() {
   const { store_id } = useParams<{ store_id: string }>();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const supabase = useSupabaseService();
+
+  // View-only mode detection
+  const isViewOnly = location.pathname.endsWith('/view');
+  const qrFixtureId = searchParams.get('fixture_id');
 
   const {
     locationData,
@@ -40,6 +46,10 @@ export function StoreLayout() {
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // QR highlight state
+  const [highlightedLocation, setHighlightedLocation] = useState<LocationData | null>(null);
+  const [fixtureNotFound, setFixtureNotFound] = useState(false);
 
   // Floor outlines
   const [floorOutlines, setFloorOutlines] = useState<Record<number, FloorOutline>>({});
@@ -75,6 +85,24 @@ export function StoreLayout() {
 
     loadOutlines();
   }, [floorFiles]);
+
+  // Find and highlight fixture from QR code
+  useEffect(() => {
+    if (!isViewOnly || !qrFixtureId || locationData.length === 0) return;
+
+    const found = locationData.find(
+      (loc) => loc.fixtureId === qrFixtureId && !loc.forDelete
+    );
+
+    if (found) {
+      setHighlightedLocation(found);
+      setSelectedFloor(found.floorIndex);
+      setFixtureNotFound(false);
+    } else {
+      setHighlightedLocation(null);
+      setFixtureNotFound(true);
+    }
+  }, [isViewOnly, qrFixtureId, locationData]);
 
   // Check if there are any changes
   const hasChanges = useMemo(() => {
@@ -283,6 +311,20 @@ export function StoreLayout() {
     );
   }
 
+  // Fixture not found in view-only mode
+  if (isViewOnly && fixtureNotFound) {
+    return (
+      <div className="h-[calc(100vh-6rem)] flex items-center justify-center">
+        <div className="text-center max-w-md">
+          <p className="text-destructive font-medium mb-2">Fixture Not Found</p>
+          <p className="text-sm text-muted-foreground">
+            Fixture ID "{qrFixtureId}" was not found in this store layout.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const currentOutline = floorOutlines[selectedFloor] || null;
 
   return (
@@ -298,6 +340,7 @@ export function StoreLayout() {
         brandCategoryMapping={brandCategoryMapping}
         selectedLocation={selectedLocation}
         onSelectLocation={setSelectedLocation}
+        highlightedLocation={highlightedLocation}
       />
 
       {/* Left Panel */}
@@ -315,6 +358,7 @@ export function StoreLayout() {
         isSaving={isSaving}
         onSave={handleSave}
         storeName={storeRecord?.store_name || store_id || ''}
+        isViewOnly={isViewOnly}
       />
 
       {/* Right Panel */}
@@ -326,25 +370,38 @@ export function StoreLayout() {
           onEditBrand={() => setBrandModalOpen(true)}
           onEditFixtureType={() => setFixtureTypeModalOpen(true)}
           onReset={handleReset}
+          isViewOnly={isViewOnly}
         />
       )}
 
-      {/* Brand Selection Modal */}
-      <BrandSelectionModal
-        open={brandModalOpen}
-        onOpenChange={setBrandModalOpen}
-        currentBrand={selectedLocation?.brand || ''}
-        onBrandSelect={handleBrandSelect}
-      />
+      {/* Brand Selection Modal — hidden in view-only */}
+      {!isViewOnly && (
+        <BrandSelectionModal
+          open={brandModalOpen}
+          onOpenChange={setBrandModalOpen}
+          currentBrand={selectedLocation?.brand || ''}
+          onBrandSelect={handleBrandSelect}
+        />
+      )}
 
-      {/* Fixture Type Selection Modal */}
-      <FixtureTypeSelectionModal
-        open={fixtureTypeModalOpen}
-        onOpenChange={setFixtureTypeModalOpen}
-        currentType={selectedFixtureType}
-        availableTypes={fixtureTypes}
-        onTypeSelect={handleFixtureTypeSelect}
-      />
+      {/* Fixture Type Selection Modal — hidden in view-only */}
+      {!isViewOnly && (
+        <FixtureTypeSelectionModal
+          open={fixtureTypeModalOpen}
+          onOpenChange={setFixtureTypeModalOpen}
+          currentType={selectedFixtureType}
+          availableTypes={fixtureTypes}
+          onTypeSelect={handleFixtureTypeSelect}
+        />
+      )}
+
+      {/* View-only banner */}
+      {isViewOnly && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 bg-background/90 backdrop-blur-sm border border-border rounded-lg shadow-lg px-4 py-2 flex items-center gap-2">
+          <Eye className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">View Only Mode</span>
+        </div>
+      )}
     </div>
   );
 }
