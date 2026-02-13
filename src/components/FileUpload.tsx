@@ -379,6 +379,7 @@ export function FileUpload({ onUploadSuccess }: FileUploadProps) {
               disabled={isUploading}
             >
               <option value="04">04 - Latest (Experimental)</option>
+              <option value="05">05 - Fashion Factory</option>
               <option value="02">02 - High Precision</option>
               <option value="01">01 - Default</option>
             </select>

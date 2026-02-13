@@ -20,6 +20,13 @@ const ThreeDViewerModifier = lazy(() =>
   }))
 );
 
+// Lazy load the 2D store layout page
+const StoreLayout = lazy(() =>
+  import('./components/StoreLayout/StoreLayout').then(module => ({
+    default: module.StoreLayout
+  }))
+);
+
 function LoadingFallback() {
   return (
     <div className="h-screen flex items-center justify-center">
@@ -49,6 +56,7 @@ function App() {
                 <Route path="/3d-viewer-modifier" element={<ThreeDViewerModifier />} />
                 <Route path="/my-stores" element={<MyCreatedStores />} />
                 <Route path="/jobs" element={<Jobs />} />
+                <Route path="/layout/:store_id" element={<StoreLayout />} />
               </Routes>
             </Suspense>
 

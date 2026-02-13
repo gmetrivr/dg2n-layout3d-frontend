@@ -35,6 +35,7 @@ import { MultiObjectInfoPanel } from './MultiObjectInfoPanel';
 import { PasteConfirmationDialog } from './PasteConfirmationDialog';
 import { ValidationErrorDialog } from './ValidationErrorDialog';
 import { ClipboardNotification } from './ClipboardNotification';
+import { migrateBrandsInZip } from '../utils/brandMigration';
 
 // Fixture type mapping
 const FIXTURE_TYPE_MAPPING: Record<string, string> = {
@@ -45,127 +46,6 @@ const FIXTURE_TYPE_MAPPING: Record<string, string> = {
   "TJR-NT": "GLASS-TABLE",
   "RTL-WPS-M-3Bays": "WALL-BAY"
 };
-
-// Helper to migrate brand names in location-master.csv within a ZIP
-async function migrateBrandsInZip(zipBlob: Blob, pipelineVersion: string = '02'): Promise<{ zipBlob: Blob; migratedCount: number }> {
-  const zip = await JSZip.loadAsync(zipBlob);
-
-  // Find location-master.csv
-  const locationCsvFile = zip.file(/location[-_]master\.csv/i)[0];
-  if (!locationCsvFile) {
-    console.log('[3DViewerModifier] No location-master.csv found, skipping brand migration');
-    return { zipBlob, migratedCount: 0 };
-  }
-
-  console.log('[3DViewerModifier] Found location-master.csv, extracting brand names...');
-  const locationCsvText = await locationCsvFile.async('text');
-  const locationLines = locationCsvText.split(/\r?\n/); // Split by both CRLF and LF
-
-  // Parse CSV header to find Brand column index
-  const headerLine = locationLines[0];
-  const headers = headerLine.split(',').map(h => h.trim());
-  const brandColumnIndex = headers.findIndex(h => h.toLowerCase() === 'brand');
-
-  if (brandColumnIndex === -1) {
-    console.warn('[3DViewerModifier] Brand column not found in CSV, skipping migration');
-    return { zipBlob, migratedCount: 0 };
-  }
-
-  // Extract unique brand names from CSV (skip header)
-  const uniqueBrands = new Set<string>();
-  for (let i = 1; i < locationLines.length; i++) {
-    const line = locationLines[i].trim();
-    if (!line) continue;
-
-    const values = line.split(',');
-    if (values.length > brandColumnIndex) {
-      const brand = values[brandColumnIndex].trim();
-      if (brand) {
-        uniqueBrands.add(brand);
-      }
-    }
-  }
-
-  if (uniqueBrands.size === 0) {
-    console.log('[3DViewerModifier] No brands found in CSV, skipping migration');
-    return { zipBlob, migratedCount: 0 };
-  }
-
-  console.log(`[3DViewerModifier] Found ${uniqueBrands.size} unique brands, calling migration API...`);
-
-  // Call migration API
-  let migrationResults;
-  try {
-    const migrationResponse = await apiService.migrateBrandNames(Array.from(uniqueBrands), pipelineVersion);
-    migrationResults = migrationResponse.migrations;
-    console.log(`[3DViewerModifier] Migration API returned ${migrationResponse.total_changed} changes`);
-  } catch (error) {
-    console.error('[3DViewerModifier] Failed to call migration API:', error);
-    return { zipBlob, migratedCount: 0 };
-  }
-
-  // Build brand mapping
-  const brandMap = new Map<string, string>();
-  let changedCount = 0;
-  for (const result of migrationResults) {
-    brandMap.set(result.old_name.toLowerCase(), result.new_name);
-    if (result.changed) {
-      changedCount++;
-      console.log(`[3DViewerModifier] Brand migration: "${result.old_name}" -> "${result.new_name}"`);
-    }
-  }
-
-  if (changedCount === 0) {
-    console.log('[3DViewerModifier] No brand names needed migration');
-    return { zipBlob, migratedCount: 0 };
-  }
-
-  // Apply migrations to CSV
-  // Ensure header has "Fixture ID" column (15th column)
-  let updatedHeaderLine = locationLines[0].trim(); // Trim to remove any trailing newlines
-  const updatedHeaderColumns = updatedHeaderLine.split(',').map(col => col.trim()); // Trim each column
-  console.log(`[migrateBrandsInZip] Original header columns: ${updatedHeaderColumns.length}`, updatedHeaderColumns);
-  if (updatedHeaderColumns.length < 15 || !updatedHeaderColumns[14]) {
-    // Add or replace the 15th column header with "Fixture ID"
-    console.log(`[migrateBrandsInZip] Adding Fixture ID header (was ${updatedHeaderColumns.length} columns)`);
-    while (updatedHeaderColumns.length < 14) {
-      updatedHeaderColumns.push('');
-    }
-    updatedHeaderColumns[14] = 'Fixture ID';
-    console.log('[migrateBrandsInZip] New header columns:', updatedHeaderColumns);
-  } else {
-    console.log('[migrateBrandsInZip] Header already has Fixture ID:', updatedHeaderColumns[14]);
-  }
-  updatedHeaderLine = updatedHeaderColumns.join(',');
-  const updatedLines = [updatedHeaderLine]; // Keep header with Fixture ID
-  for (let i = 1; i < locationLines.length; i++) {
-    const line = locationLines[i].trim();
-    if (!line) {
-      updatedLines.push(line);
-      continue;
-    }
-
-    const values = line.split(',');
-    if (values.length > brandColumnIndex) {
-      const oldBrand = values[brandColumnIndex].trim();
-      const newBrand = brandMap.get(oldBrand.toLowerCase());
-      if (newBrand && newBrand !== oldBrand) {
-        values[brandColumnIndex] = newBrand;
-      }
-    }
-
-    updatedLines.push(values.join(','));
-  }
-
-  // Update CSV in ZIP
-  const updatedCsvText = updatedLines.join('\n');
-  zip.file(locationCsvFile.name, updatedCsvText);
-  console.log(`[3DViewerModifier] Updated location-master.csv with ${changedCount} brand migrations`);
-
-  // Generate updated ZIP blob
-  const updatedZipBlob = await zip.generateAsync({ type: 'blob' });
-  return { zipBlob: updatedZipBlob, migratedCount: changedCount };
-}
 
 // Helper function to get brand category
 function getBrandCategory(brand: string): 'pvl' | 'ext' | 'gen' | 'arx' | 'oth' | 'legacy' {
