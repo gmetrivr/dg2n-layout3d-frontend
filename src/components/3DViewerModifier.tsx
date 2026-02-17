@@ -239,7 +239,7 @@ export function ThreeDViewerModifier() {
   //const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [cameraPosition, setCameraPosition] = useState<[number, number, number]>([10, 10, 10]);
   const [orbitTarget, setOrbitTarget] = useState<[number, number, number]>([0, 0, 0]);
-  const [currentOrbitTarget, setCurrentOrbitTarget] = useState<[number, number, number]>([0, 0, 0]); // Separate state for add fixture position
+  const [, setCurrentOrbitTarget] = useState<[number, number, number]>([0, 0, 0]); // Kept for handleOrbitTargetUpdate callback
   const [cameraMode, setCameraMode] = useState<'perspective' | 'orthographic'>('perspective');
   const [orthoZoom] = useState<number>(50); // Orthographic zoom level
   const [failedGLBs, setFailedGLBs] = useState<Set<string>>(new Set());
@@ -313,6 +313,7 @@ export function ThreeDViewerModifier() {
   const justFinishedTransformRef = useRef<boolean>(false); // Track if we just finished transforming
   const isMouseDownOnTransformRef = useRef<boolean>(false); // Track if mouse is down on transform controls
   const selectedVariantRef = useRef<{ block_name: string; glb_url: string } | null>(null); // Store selected variant for arch objects
+  const pendingFixtureRef = useRef<{ blockName: string; glbUrl: string; fixtureType: string; variant?: string } | null>(null); // Store pending fixture data for click-to-place
   const [isDragging, setIsDragging] = useState(false); // Track drag state for file upload
   const floorNamesInitializedRef = useRef<boolean>(false); // Track if floor names have been extracted
   const isUnmountingRef = useRef(false); // Track unmounting state to prevent operations during unmount
@@ -801,11 +802,6 @@ export function ThreeDViewerModifier() {
     }
 
     try {
-      // Get the current floor index from the selected floor file
-      const fileForFloorExtraction = selectedFloorFile || selectedFile;
-      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
-      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
-
       // Get the GLB URL for the fixture type
       const fixtureTypeInfo = await apiService.getFixtureTypeUrl(fixtureType, pipelineVersion);
       const glbUrl = fixtureTypeInfo.glb_url;
@@ -829,100 +825,23 @@ export function ThreeDViewerModifier() {
       // Update the fixture type map
       fixtureTypeMap.current.set(mappedBlockName, fixtureType);
 
-      // Calculate position at screen center (currentOrbitTarget) with y=0
-      // Note: currentOrbitTarget is [x, y, z] in world space
-      // LocationData uses [posX, posY, posZ] where posY is actually the -Z world axis
-      const posX = currentOrbitTarget[0];
-      const posY = -currentOrbitTarget[2]; // World Z maps to -posY
-      const posZ = 0; // Always 0 (floor level)
-
-      // Calculate hierarchy as max+1 from current floor fixtures
-      const currentFloorFixtures = locationData.filter(loc => loc.floorIndex === currentFloor);
-      const maxHierarchy = currentFloorFixtures.length > 0
-        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
-        : 0;
-      const newHierarchy = maxHierarchy + 1;
-
-      // Get origin values from current floor
-      const floorOriginFixture = currentFloorFixtures[0];
-      const originX = floorOriginFixture?.originX ?? 0;
-      const originY = floorOriginFixture?.originY ?? 0;
-
-      // Default brand is "unassigned"
-      const defaultBrand = "unassigned";
-
-      // Default count is 1
-      const defaultCount = 1;
-
-      // Create new fixture location data
-      const newFixture: LocationData = {
-        blockName: mappedBlockName,
-        floorIndex: currentFloor,
-        originX: originX,
-        originY: originY,
-        posX: posX,
-        posY: posY,
-        posZ: posZ,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        brand: defaultBrand,
-        count: defaultCount,
-        hierarchy: newHierarchy,
-        glbUrl: glbUrl,
-
-        // Set original values (same as current for new fixtures)
-        originalBlockName: mappedBlockName,
-        originalPosX: posX,
-        originalPosY: posY,
-        originalPosZ: posZ,
-        originalRotationX: 0,
-        originalRotationY: 0,
-        originalRotationZ: 0,
-        originalBrand: defaultBrand,
-        originalCount: defaultCount,
-        originalHierarchy: newHierarchy,
-        originalGlbUrl: glbUrl,
-
-        // Mark as new fixture
-        wasDuplicated: true, // Reuse this flag to indicate it's a newly added fixture
-        wasMoved: false,
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-
-        // Generate unique timestamps
-        _updateTimestamp: Date.now() + Math.random() * 1000,
-        _ingestionTimestamp: Date.now() + Math.random() * 1000,
-      };
-
-      // Add to location data
-      setLocationData(prev => [...prev, newFixture]);
-
-      // Select the newly added fixture
-      setSelectedLocation(newFixture);
-      setSelectedLocations([newFixture]);
-      setSelectedObject(null);
-      setSelectedObjects([]);
+      // Store pending fixture data and enter click-to-place mode
+      pendingFixtureRef.current = { blockName: mappedBlockName, glbUrl, fixtureType };
+      setIsAddingObject(true);
+      setCurrentObjectType(null);
+      setObjectPlacementPoint(null);
 
     } catch (error) {
       console.error('Failed to add fixture:', error);
       alert('Failed to add fixture. Please try again.');
     }
-  }, [selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, pipelineVersion]);
+  }, [pipelineVersion]);
 
   // Handler for variant selection for regular fixtures
   const handleFixtureVariantSelect = useCallback(async (variant: { id: string; name: string; url: string; description?: string }) => {
     if (!pendingFixtureType) return;
 
     try {
-      // Get the current floor index from the selected floor file
-      const fileForFloorExtraction = selectedFloorFile || selectedFile;
-      const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
-      const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
-
       // Use the variant's GLB URL
       const glbUrl = variant.url;
 
@@ -945,82 +864,11 @@ export function ThreeDViewerModifier() {
       // Update the fixture type map
       fixtureTypeMap.current.set(mappedBlockName, pendingFixtureType);
 
-      // Calculate position at screen center (currentOrbitTarget) with y=0
-      const posX = currentOrbitTarget[0];
-      const posY = -currentOrbitTarget[2]; // World Z maps to -posY
-      const posZ = 0; // Always 0 (floor level)
-
-      // Calculate hierarchy as max+1 from current floor fixtures
-      const currentFloorFixtures = locationData.filter(loc => loc.floorIndex === currentFloor);
-      const maxHierarchy = currentFloorFixtures.length > 0
-        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
-        : 0;
-      const newHierarchy = maxHierarchy + 1;
-
-      // Get origin values from current floor
-      const floorOriginFixture = currentFloorFixtures[0];
-      const originX = floorOriginFixture?.originX ?? 0;
-      const originY = floorOriginFixture?.originY ?? 0;
-
-      // Default brand is "unassigned"
-      const defaultBrand = "unassigned";
-
-      // Default count is 1
-      const defaultCount = 1;
-
-      // Create new fixture location data
-      const newFixture: LocationData = {
-        blockName: mappedBlockName,
-        floorIndex: currentFloor,
-        originX: originX,
-        originY: originY,
-        posX: posX,
-        posY: posY,
-        posZ: posZ,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        brand: defaultBrand,
-        count: defaultCount,
-        hierarchy: newHierarchy,
-        glbUrl: glbUrl,
-        variant: variant.name, // Store the variant name
-
-        // Set original values (same as current for new fixtures)
-        originalBlockName: mappedBlockName,
-        originalPosX: posX,
-        originalPosY: posY,
-        originalPosZ: posZ,
-        originalRotationX: 0,
-        originalRotationY: 0,
-        originalRotationZ: 0,
-        originalBrand: defaultBrand,
-        originalCount: defaultCount,
-        originalHierarchy: newHierarchy,
-        originalGlbUrl: glbUrl,
-
-        // Mark as new fixture
-        wasDuplicated: true, // Reuse this flag to indicate it's a newly added fixture
-        wasMoved: false,
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-
-        // Generate unique timestamps
-        _updateTimestamp: Date.now() + Math.random() * 1000,
-        _ingestionTimestamp: Date.now() + Math.random() * 1000,
-      };
-
-      // Add to location data
-      setLocationData(prev => [...prev, newFixture]);
-
-      // Select the newly added fixture
-      setSelectedLocation(newFixture);
-      setSelectedLocations([newFixture]);
-      setSelectedObject(null);
-      setSelectedObjects([]);
+      // Store pending fixture data and enter click-to-place mode
+      pendingFixtureRef.current = { blockName: mappedBlockName, glbUrl, fixtureType: pendingFixtureType, variant: variant.name };
+      setIsAddingObject(true);
+      setCurrentObjectType(null);
+      setObjectPlacementPoint(null);
 
       // Clear pending state
       setPendingFixtureType(null);
@@ -1032,7 +880,7 @@ export function ThreeDViewerModifier() {
       console.error('Failed to add fixture with variant:', error);
       alert('Failed to add fixture. Please try again.');
     }
-  }, [pendingFixtureType, selectedFloorFile, selectedFile, currentOrbitTarget, locationData, setLocationData, setSelectedLocation, setSelectedLocations, pipelineVersion]);
+  }, [pendingFixtureType, pipelineVersion]);
 
   // Mapping from architectural object types to fixture types for API calls
   // These must match the fixture types defined in the backend config.py
@@ -1110,13 +958,98 @@ export function ThreeDViewerModifier() {
     setArchObjectVariantModalOpen(false);
   }, [pendingArchObjectType]);
 
-  // Handler for floor click during object placement
+  // Handler for floor click during object placement (also handles fixture click-to-place)
   const handleFloorClickForObjectPlacement = useCallback((point: [number, number, number]) => {
-    if (!isAddingObject || !currentObjectType) return;
+    if (!isAddingObject) return;
 
     const fileForFloorExtraction = selectedFloorFile || selectedFile;
     const floorMatch = fileForFloorExtraction?.name.match(/floor[_-]?(\d+)/i) || fileForFloorExtraction?.name.match(/(\d+)/i);
     const currentFloor = floorMatch ? parseInt(floorMatch[1]) : 0;
+
+    // Handle fixture click-to-place
+    if (pendingFixtureRef.current) {
+      const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
+      const { blockName, glbUrl, variant } = pendingFixtureRef.current;
+
+      // Coordinate mapping: posX = world X, posY = -world Z, posZ = 0
+      const posX = groundLevelPoint[0];
+      const posY = -groundLevelPoint[2];
+      const posZ = 0;
+
+      // Calculate hierarchy as max+1 from current floor fixtures
+      const currentFloorFixtures = locationData.filter(loc => loc.floorIndex === currentFloor);
+      const maxHierarchy = currentFloorFixtures.length > 0
+        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+        : 0;
+      const newHierarchy = maxHierarchy + 1;
+
+      // Get origin values from current floor
+      const floorOriginFixture = currentFloorFixtures[0];
+      const originX = floorOriginFixture?.originX ?? 0;
+      const originY = floorOriginFixture?.originY ?? 0;
+
+      const newFixture: LocationData = {
+        blockName,
+        floorIndex: currentFloor,
+        originX,
+        originY,
+        posX,
+        posY,
+        posZ,
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
+        brand: "unassigned",
+        count: 1,
+        hierarchy: newHierarchy,
+        glbUrl,
+        ...(variant ? { variant } : {}),
+
+        originalBlockName: blockName,
+        originalPosX: posX,
+        originalPosY: posY,
+        originalPosZ: posZ,
+        originalRotationX: 0,
+        originalRotationY: 0,
+        originalRotationZ: 0,
+        originalBrand: "unassigned",
+        originalCount: 1,
+        originalHierarchy: newHierarchy,
+        originalGlbUrl: glbUrl,
+
+        wasDuplicated: true,
+        wasMoved: false,
+        wasRotated: false,
+        wasTypeChanged: false,
+        wasBrandChanged: false,
+        wasCountChanged: false,
+        wasHierarchyChanged: false,
+
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000,
+      };
+
+      setLocationData(prev => [...prev, newFixture]);
+
+      justCreatedObjectRef.current = true;
+      setTimeout(() => {
+        setSelectedLocation(newFixture);
+        setSelectedLocations([newFixture]);
+        setSelectedObject(null);
+        setSelectedObjects([]);
+        setTimeout(() => { justCreatedObjectRef.current = false; }, 100);
+      }, 0);
+
+      // Reset placement state
+      pendingFixtureRef.current = null;
+      setIsAddingObject(false);
+      setCurrentObjectType(null);
+      setObjectPlacementPoint(null);
+      return;
+    }
+
+    // Arch object placement requires a currentObjectType
+    if (!currentObjectType) return;
 
     // Force placement at ground level (y = 0)
     const groundLevelPoint: [number, number, number] = [point[0], 0, point[2]];
@@ -1287,7 +1220,7 @@ export function ThreeDViewerModifier() {
         setObjectPlacementPoint(null);
       }
     }
-  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations]);
+  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations, locationData, setLocationData]);
 
   // Handler for floor click during measurement
   const handleFloorClickForMeasurement = useCallback((point: [number, number, number]) => {
@@ -3274,11 +3207,12 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setHierarchySequence([]);
   }, []);
 
-  // Cancel adding architectural object (called on right-click)
+  // Cancel adding architectural object or fixture (called on right-click)
   const handleCancelAddObject = useCallback(() => {
     setIsAddingObject(false);
     setCurrentObjectType(null);
     setObjectPlacementPoint(null);
+    pendingFixtureRef.current = null;
   }, []);
 
   const handleEditModeChangeOriginal = useCallback((mode: 'off' | 'fixtures' | 'floorplates') => {
