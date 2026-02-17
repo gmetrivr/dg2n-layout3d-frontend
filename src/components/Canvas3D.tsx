@@ -1,4 +1,4 @@
-import { useState, useEffect, Suspense, Component, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, Suspense, Component, useRef, useMemo, memo, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Environment, Grid, Text, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -222,6 +222,172 @@ function LocationSphere({ location, color = "#ff6b6b", onClick, isSelected }: Lo
   );
 }
 
+// Y-axis rotation handle - renders an arc on the XZ plane between the X and Z translate handles
+// Dynamically scales and rotates to match TransformControls gizmo handles
+interface YRotationHandleProps {
+  object: THREE.Object3D;
+  transformSpace: 'world' | 'local';
+  onRotationChange: (deltaAngle: number) => void;
+  onRotationStart?: () => void;
+  onRotationEnd?: () => void;
+}
+
+function YRotationHandle({ object, transformSpace, onRotationChange, onRotationStart, onRotationEnd }: YRotationHandleProps) {
+  const { gl, camera, controls } = useThree();
+  const groupRef = useRef<THREE.Group>(null);
+  const isDragging = useRef(false);
+  const startAngle = useRef(0);
+  const [hovered, setHovered] = useState(false);
+
+  // Create arc geometry with unit radius - quarter arc from X+ to Z+ on XZ plane
+  const arcGeometry = useMemo(() => {
+    const curve = new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI / 2, false, 0);
+    const points2D = curve.getPoints(32);
+    const points3D = points2D.map(p => new THREE.Vector3(p.x, 0, p.y));
+    const path = new THREE.CatmullRomCurve3(points3D);
+    return new THREE.TubeGeometry(path, 32, 0.02, 8, false);
+  }, []);
+
+  // Invisible wider tube for easier pointer interaction
+  const hitGeometry = useMemo(() => {
+    const curve = new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI / 2, false, 0);
+    const points2D = curve.getPoints(32);
+    const points3D = points2D.map(p => new THREE.Vector3(p.x, 0, p.y));
+    const path = new THREE.CatmullRomCurve3(points3D);
+    return new THREE.TubeGeometry(path, 32, 0.08, 8, false);
+  }, []);
+
+  const getAngleFromPointer = useCallback((event: PointerEvent) => {
+    const worldPos = new THREE.Vector3();
+    object.getWorldPosition(worldPos);
+
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPos.y);
+
+    const rect = gl.domElement.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersection = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, intersection);
+
+    if (intersection) {
+      const dx = intersection.x - worldPos.x;
+      const dz = intersection.z - worldPos.z;
+      return Math.atan2(dz, dx);
+    }
+    return 0;
+  }, [object, gl, camera]);
+
+  const handlePointerDown = useCallback((event: any) => {
+    event.stopPropagation();
+    isDragging.current = true;
+    startAngle.current = getAngleFromPointer(event.nativeEvent || event);
+
+    // Imperatively disable OrbitControls to prevent viewport rotation during drag
+    if (controls) (controls as any).enabled = false;
+
+    onRotationStart?.();
+    gl.domElement.style.cursor = 'grabbing';
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDragging.current) return;
+      const currentAngle = getAngleFromPointer(e);
+      let delta = currentAngle - startAngle.current;
+      if (delta > Math.PI) delta -= 2 * Math.PI;
+      if (delta < -Math.PI) delta += 2 * Math.PI;
+      startAngle.current = currentAngle;
+      // Negate: atan2 convention is opposite to Three.js euler.y rotation direction
+      onRotationChange(-delta);
+    };
+
+    const handlePointerUp = () => {
+      isDragging.current = false;
+      // Re-enable OrbitControls
+      if (controls) (controls as any).enabled = true;
+      onRotationEnd?.();
+      gl.domElement.style.cursor = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  }, [getAngleFromPointer, onRotationChange, onRotationStart, onRotationEnd, gl, controls]);
+
+  // Match TransformControls gizmo position, scale, and rotation each frame
+  useFrame(() => {
+    if (!groupRef.current) return;
+
+    const worldPos = new THREE.Vector3();
+    object.getWorldPosition(worldPos);
+    groupRef.current.position.copy(worldPos);
+
+    // Compute scale factor matching TransformControls (from Three.js source)
+    let factor: number;
+    const perspCam = camera as THREE.PerspectiveCamera;
+    const orthoCam = camera as THREE.OrthographicCamera;
+    if (orthoCam.isOrthographicCamera) {
+      factor = (orthoCam.top - orthoCam.bottom) / orthoCam.zoom;
+    } else {
+      const cameraPos = new THREE.Vector3();
+      camera.getWorldPosition(cameraPos);
+      factor = worldPos.distanceTo(cameraPos) * Math.min(
+        1.9 * Math.tan(Math.PI * perspCam.fov / 360) / perspCam.zoom, 7
+      );
+    }
+    const baseScale = factor / 10; // TransformControls uses size=1, divides by 4
+
+    // Match rotation to transform space — same as TransformControls handle quaternion
+    if (transformSpace === 'local') {
+      const worldQuat = new THREE.Quaternion();
+      object.getWorldQuaternion(worldQuat);
+      groupRef.current.quaternion.copy(worldQuat);
+    } else {
+      groupRef.current.quaternion.identity();
+    }
+
+    // Flip arc quadrant to face the camera — compute eye direction in gizmo-local space
+    const cameraWorldPos = new THREE.Vector3();
+    camera.getWorldPosition(cameraWorldPos);
+    const eye = cameraWorldPos.sub(worldPos); // world-space eye direction
+    // Transform eye into the gizmo's local space (inverse of the gizmo's quaternion)
+    const invQuat = groupRef.current.quaternion.clone().invert();
+    eye.applyQuaternion(invQuat);
+    // Flip scale on X/Z so the arc is in the quadrant facing the camera
+    const sx = eye.x >= 0 ? 1 : -1;
+    const sz = eye.z >= 0 ? 1 : -1;
+    groupRef.current.scale.set(sx * baseScale, baseScale, sz * baseScale);
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Visible arc */}
+      <mesh geometry={arcGeometry} renderOrder={999}>
+        <meshBasicMaterial
+          color={hovered ? '#ffff00' : '#f5c542'}
+          transparent
+          opacity={hovered ? 1 : 0.8}
+          depthTest={false}
+        />
+      </mesh>
+      {/* Wider invisible hit area */}
+      <mesh
+        geometry={hitGeometry}
+        onPointerDown={handlePointerDown}
+        onPointerEnter={() => { setHovered(true); gl.domElement.style.cursor = 'grab'; }}
+        onPointerLeave={() => { if (!isDragging.current) { setHovered(false); gl.domElement.style.cursor = ''; } }}
+      >
+        <meshBasicMaterial visible={false} />
+      </mesh>
+    </group>
+  );
+}
+
 interface LocationGLBProps {
   location: LocationData;
   onError?: (blockName: string, url: string) => void;
@@ -231,6 +397,7 @@ interface LocationGLBProps {
   transformSpace?: 'world' | 'local';
   isSingleSelection?: boolean;
   onPositionChange?: (location: LocationData, newPosition: [number, number, number]) => void;
+  onRotationChange?: (location: LocationData, newRotation: [number, number, number]) => void;
   onTransformStart?: () => void;
   onTransformEnd?: () => void;
   isTransforming?: boolean;
@@ -243,7 +410,7 @@ interface LocationGLBProps {
   hierarchySequencePosition?: number;
 }
 
-const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType, brandCategoryMapping = {}, hierarchyDefMode = false, hierarchySequencePosition }: LocationGLBProps) {
+const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, editMode = false, transformSpace = 'world', isSingleSelection = false, onPositionChange, onRotationChange, onTransformStart, onTransformEnd, isTransforming = false, showFixtureLabels = true, pendingMultiDelta = null, showFixtureArea = false, fixtureType, brandCategoryMapping = {}, hierarchyDefMode = false, hierarchySequencePosition }: LocationGLBProps) {
   // This component should only be called when location.glbUrl exists
   // Calculate bounding box once when GLB loads
   const [boundingBox, setBoundingBox] = useState({ size: [1, 1, 1], center: [0, 0.5, 0] });
@@ -364,6 +531,35 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
       onTransformEnd?.();
     }, 0);
   };
+
+  // Accumulate rotation delta during drag, apply on end
+  const pendingRotationDelta = useRef(0);
+
+  const handleYRotationChange = useCallback((deltaAngle: number) => {
+    pendingRotationDelta.current += deltaAngle;
+    // Visually rotate the group during drag
+    if (groupRef.current) {
+      groupRef.current.rotation.y += deltaAngle;
+    }
+  }, []);
+
+  const handleYRotationEnd = useCallback(() => {
+    if (onRotationChange && pendingRotationDelta.current !== 0) {
+      // Convert delta from radians to degrees and apply to rotationZ
+      // (Three.js euler.y maps to data rotationZ due to rotation order [rotX, rotZ, rotY])
+      const deltaDegrees = (pendingRotationDelta.current * 180) / Math.PI;
+      onRotationChange(location, [
+        location.rotationX,
+        location.rotationY,
+        location.rotationZ + deltaDegrees,
+      ]);
+    }
+    pendingRotationDelta.current = 0;
+
+    setTimeout(() => {
+      onTransformEnd?.();
+    }, 0);
+  }, [location, onRotationChange, onTransformEnd]);
 
   const count = location.count || 1;
 
@@ -494,15 +690,26 @@ ${location.hierarchy}`}
 
       {/* Transform controls for editing mode - only show for single selection */}
       {editMode && isSelected && groupRef.current && isSingleSelection && (
-        <TransformControls
-          object={groupRef.current}
-          mode="translate"
-          space={transformSpace}
-          showY={false}
-          onObjectChange={handleTransformChange}
-          onMouseDown={onTransformStart}
-          onMouseUp={handleTransformEnd}
-        />
+        <>
+          <TransformControls
+            object={groupRef.current}
+            mode="translate"
+            space={transformSpace}
+            showY={false}
+            onObjectChange={handleTransformChange}
+            onMouseDown={onTransformStart}
+            onMouseUp={handleTransformEnd}
+          />
+          {onRotationChange && (
+            <YRotationHandle
+              object={groupRef.current}
+              transformSpace={transformSpace}
+              onRotationChange={handleYRotationChange}
+              onRotationStart={onTransformStart}
+              onRotationEnd={handleYRotationEnd}
+            />
+          )}
+        </>
       )}
     </>
   );
@@ -1773,6 +1980,7 @@ interface Canvas3DProps {
   onFixtureClick: (location: LocationData, event?: any) => void;
   isLocationSelected: (location: LocationData) => boolean;
   onPositionChange: (location: LocationData, newPosition: [number, number, number]) => void;
+  onRotationChange?: (location: LocationData, newRotation: [number, number, number]) => void;
   onMultiPositionChange?: (delta: [number, number, number]) => void;
   onFloorPlateClick: (plateData: any) => void;
   onPointerMissed: () => void;
@@ -1831,6 +2039,7 @@ export function Canvas3D({
   onFixtureClick,
   isLocationSelected,
   onPositionChange,
+  onRotationChange,
   onMultiPositionChange,
   onFloorPlateClick,
   onPointerMissed,
@@ -2048,6 +2257,7 @@ export function Canvas3D({
                 hierarchyDefMode={hierarchyDefMode}
                 hierarchySequencePosition={hierarchyPos}
                 onPositionChange={editMode ? onPositionChange : undefined}
+                onRotationChange={editMode ? onRotationChange : undefined}
                 pendingMultiDelta={pendingMultiDelta}
                 {...(editMode && {
                   onTransformStart: () => {

@@ -3098,6 +3098,57 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     });
   }, []);
 
+  const handleGizmoRotationChange = useCallback((location: LocationData, newRotation: [number, number, number]) => {
+    const key = generateFixtureUID(location);
+    setLocationData(prev => prev.map(loc => {
+      if (generateFixtureUID(loc) === key) {
+        return {
+          ...loc,
+          rotationX: newRotation[0],
+          rotationY: newRotation[1],
+          rotationZ: newRotation[2],
+          wasRotated: true,
+          originalRotationX: loc.originalRotationX ?? loc.rotationX,
+          originalRotationY: loc.originalRotationY ?? loc.rotationY,
+          originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
+        };
+      }
+      return loc;
+    }));
+
+    setSelectedLocation(prev => {
+      if (prev && generateFixtureUID(prev) === key) {
+        return {
+          ...prev,
+          rotationX: newRotation[0],
+          rotationY: newRotation[1],
+          rotationZ: newRotation[2],
+          wasRotated: true,
+          originalRotationX: prev.originalRotationX ?? prev.rotationX,
+          originalRotationY: prev.originalRotationY ?? prev.rotationY,
+          originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
+        };
+      }
+      return prev;
+    });
+
+    setSelectedLocations(prev => prev.map(loc => {
+      if (generateFixtureUID(loc) === key) {
+        return {
+          ...loc,
+          rotationX: newRotation[0],
+          rotationY: newRotation[1],
+          rotationZ: newRotation[2],
+          wasRotated: true,
+          originalRotationX: loc.originalRotationX ?? loc.rotationX,
+          originalRotationY: loc.originalRotationY ?? loc.rotationY,
+          originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
+        };
+      }
+      return loc;
+    }));
+  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+
   const handleFloorPlateClick = useCallback((plateData: any) => {
     setSelectedFloorPlate(plateData);
   }, []);
@@ -4821,6 +4872,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           onFixtureClick={handleFixtureClickWithObjectClear}
           isLocationSelected={isLocationSelected}
           onPositionChange={handlePositionChange}
+          onRotationChange={handleGizmoRotationChange}
           onMultiPositionChange={handleMultiPositionChange}
           onFloorPlateClick={handleFloorPlateClick}
           onPointerMissed={handlePointerMissed}
