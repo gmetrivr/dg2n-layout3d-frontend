@@ -20,6 +20,7 @@ const FIXTURE_BLOCKS_API = `${API_BASE_URL}/api/fixtures/block-types`;
 
 // Cache to avoid repeated API calls
 let blockTypeMappingCache: Map<string, string> | null = null;
+const allValidBlockNamesCache = new Map<string, Set<string>>(); // keyed by pipeline_version
 
 /**
  * Fetch block name to fixture type mapping from backend
@@ -92,8 +93,59 @@ export function getFixtureType(blockName: string, mapping: Map<string, string>):
 }
 
 /**
+ * Fetch all valid block names from backend API.
+ * Used to prune the location-master.csv before live deployment.
+ * @returns Set of all valid block names, or null if the call fails
+ */
+export async function fetchAllValidBlockNames(pipelineVersion: string = '02'): Promise<Set<string> | null> {
+  if (allValidBlockNamesCache.has(pipelineVersion)) {
+    return allValidBlockNamesCache.get(pipelineVersion)!;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/fixtures/blocks/all?pipeline_version=${pipelineVersion}`);
+
+    if (!response.ok) {
+      console.warn(`Failed to fetch all fixture block names: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const blockNames = new Set<string>();
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (typeof item === 'string') blockNames.add(item);
+        else if (item.block_name) blockNames.add(item.block_name);
+        else if (item.blockName) blockNames.add(item.blockName);
+      }
+    } else if (data.blocks && Array.isArray(data.blocks)) {
+      for (const item of data.blocks) {
+        if (typeof item === 'string') blockNames.add(item);
+        else if (item.block_name) blockNames.add(item.block_name);
+        else if (item.blockName) blockNames.add(item.blockName);
+      }
+    } else if (data.block_names && Array.isArray(data.block_names)) {
+      for (const name of data.block_names) blockNames.add(name);
+    } else if (data.all_block_names && Array.isArray(data.all_block_names)) {
+      for (const name of data.all_block_names) blockNames.add(name);
+    } else if (data.block_fixture_types && typeof data.block_fixture_types === 'object') {
+      for (const name of Object.keys(data.block_fixture_types)) blockNames.add(name);
+    }
+
+    allValidBlockNamesCache.set(pipelineVersion, blockNames);
+    console.log(`Loaded ${blockNames.size} valid block names from /api/fixtures/blocks/all (pipeline=${pipelineVersion})`);
+    return blockNames;
+  } catch (error) {
+    console.warn('Failed to fetch all valid block names:', error);
+    return null;
+  }
+}
+
+/**
  * Clear the cache (useful for testing or forced refresh)
  */
 export function clearBlockTypeMappingCache(): void {
   blockTypeMappingCache = null;
+  allValidBlockNamesCache.clear();
 }

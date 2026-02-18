@@ -9,7 +9,7 @@ import { loadStoreMasterData, type StoreData } from '../utils/csvUtils';
 import { apiService } from '../services/api';
 import { isFloorFile, isShatteredFloorPlateFile } from '../utils/zipUtils';
 import { assignFixtureIdsNewStore, assignFixtureIdsUpdateStore, type CurrentFixture } from '../services/fixtureIdAssignment';
-import { fetchBlockTypeMapping } from '../services/fixtureTypeMapping';
+import { fetchBlockTypeMapping, fetchAllValidBlockNames } from '../services/fixtureTypeMapping';
 import { MakeLiveConfirmationDialog, type MakeLiveStats } from './MakeLiveConfirmationDialog';
 import LiveStatusTab from './LiveStatusTab';
 
@@ -824,6 +824,40 @@ export function MyCreatedStores() {
       await uploadStoreZip(r.zip_path, updatedZipBlob, { bucket: DEFAULT_BUCKET });
       console.log(`Updated FULL ZIP uploaded to storage: ${r.zip_path}`);
 
+      // Build a pruned CSV for the live ZIP (only fixtures whose block name is in api/fixtures/blocks/all)
+      // The full CSV (with all fixtures) has already been saved to Supabase storage above — do not modify that.
+
+      // Determine effective pipeline version: store-config takes precedence, then fall back to '02'
+      let effectivePipelineVersion = '02';
+      const storeConfigForPipeline = Object.keys(zip.files).find(n => n.toLowerCase() === 'store-config.json');
+      if (storeConfigForPipeline) {
+        try {
+          const cfgText = await zip.files[storeConfigForPipeline].async('text');
+          const cfgData = JSON.parse(cfgText);
+          if (cfgData.pipeline_version) {
+            effectivePipelineVersion = String(cfgData.pipeline_version);
+            console.log(`[MyCreatedStores] Using pipeline_version from store-config.json: ${effectivePipelineVersion}`);
+          }
+        } catch (_) { /* ignore parse errors, keep default */ }
+      }
+
+      console.log('[MyCreatedStores] Fetching valid block names for live CSV pruning...');
+      const validBlockNames = await fetchAllValidBlockNames(effectivePipelineVersion);
+      let liveCsvContent: string;
+      if (validBlockNames && validBlockNames.size > 0) {
+        const prunedLines = updatedLines.filter((line, idx) => {
+          if (idx === 0) return true; // keep header
+          const blockName = line.split(',')[0]?.trim();
+          return blockName ? validBlockNames.has(blockName) : false;
+        });
+        const prunedCount = (updatedLines.length - 1) - (prunedLines.length - 1);
+        console.log(`[MyCreatedStores] Live CSV: kept ${prunedLines.length - 1} fixture(s), pruned ${prunedCount} not in blocks/all`);
+        liveCsvContent = prunedLines.join('\n');
+      } else {
+        console.warn('[MyCreatedStores] Could not fetch valid block names — using full CSV for live ZIP');
+        liveCsvContent = updatedCSV;
+      }
+
       // Create a FILTERED ZIP for live deployment
       // This contains ONLY what's needed for live deployment:
       // - Baked GLB files (floor1_baked.glb, floor2_baked.glb, etc.) with architectural elements merged
@@ -850,13 +884,9 @@ export function MyCreatedStores() {
         throw new Error('No baked GLB files found in ZIP. Cannot create live deployment without baked models.');
       }
 
-      // Add location-master.csv
-      if (!zip.files[locationMasterFile]) {
-        throw new Error('location-master.csv not found in ZIP. Cannot create live deployment.');
-      }
-      const csvContent = await zip.files[locationMasterFile].async('blob');
-      liveZip.file(locationMasterFile, csvContent);
-      console.log(`[MyCreatedStores] Added location-master.csv to live ZIP`);
+      // Add pruned location-master.csv (fixtures not in blocks/all are excluded from live deployment)
+      liveZip.file(locationMasterFile, liveCsvContent);
+      console.log(`[MyCreatedStores] Added pruned location-master.csv to live ZIP`);
 
       // Add store-config.json with updated glb_file_name references (pointing to baked files)
       const storeConfigFile = Object.keys(zip.files).find(

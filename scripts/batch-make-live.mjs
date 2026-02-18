@@ -33,8 +33,9 @@
  *   8.  Fetch existing fixtures from store_fixture_ids table
  *   9.  Assign fixture IDs (new store = generate all; update = reuse/reassign/generate)
  *   10. Update location-master.csv with fixture IDs (column 15)
- *   11. Upload full updated ZIP back to Supabase storage
- *   12. Create filtered "live" ZIP (baked GLBs + CSV + updated store-config.json only)
+ *   11. Upload full updated ZIP back to Supabase storage (CSV unchanged — all fixtures retained)
+ *  11.5 Fetch valid block names from /api/fixtures/blocks/all and prune CSV for live ZIP
+ *   12. Create filtered "live" ZIP (baked GLBs + pruned CSV + updated store-config.json only)
  *   13. Insert fixture records into store_fixture_ids table
  *   14. Move leftover TEMP fixtures to STORAGE brand
  *   15. Look up store metadata from storemaster.csv
@@ -307,6 +308,39 @@ async function fetchBlockTypeMapping() {
   }
 
   return mapping;
+}
+
+async function fetchAllValidBlockNames(pipelineVersion = '02') {
+  const response = await fetch(`${FASTIFY_API_BASE_URL}/api/fixtures/blocks/all?pipeline_version=${pipelineVersion}`);
+  if (!response.ok) {
+    console.warn(`  Warning: Failed to fetch all fixture block names: ${response.status}`);
+    return null;
+  }
+
+  const data = await response.json();
+  const blockNames = new Set();
+
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      if (typeof item === 'string') blockNames.add(item);
+      else if (item.block_name) blockNames.add(item.block_name);
+      else if (item.blockName) blockNames.add(item.blockName);
+    }
+  } else if (data.blocks && Array.isArray(data.blocks)) {
+    for (const item of data.blocks) {
+      if (typeof item === 'string') blockNames.add(item);
+      else if (item.block_name) blockNames.add(item.block_name);
+      else if (item.blockName) blockNames.add(item.blockName);
+    }
+  } else if (data.block_names && Array.isArray(data.block_names)) {
+    for (const name of data.block_names) blockNames.add(name);
+  } else if (data.all_block_names && Array.isArray(data.all_block_names)) {
+    for (const name of data.all_block_names) blockNames.add(name);
+  } else if (data.block_fixture_types && typeof data.block_fixture_types === 'object') {
+    for (const name of Object.keys(data.block_fixture_types)) blockNames.add(name);
+  }
+
+  return blockNames;
 }
 
 async function migrateBrandNames(brandNames, pipelineVersion) {
@@ -867,6 +901,20 @@ async function makeLiveForStore(supabase, bucket, storeCode, pipelineVersion, dr
   console.log(`${prefix}Step 5: Ensuring store-config.json exists ...`);
   zip = await ensureStoreConfigInZip(zip);
 
+  // Read pipeline_version from store-config.json (takes precedence over CLI --pipeline arg)
+  const storeConfigForPipeline = zip.file('store-config.json');
+  let effectivePipelineVersion = pipelineVersion; // fallback: CLI arg (default '02')
+  if (storeConfigForPipeline) {
+    try {
+      const storeConfigText = await storeConfigForPipeline.async('text');
+      const storeConfigData = JSON.parse(storeConfigText);
+      if (storeConfigData.pipeline_version) {
+        effectivePipelineVersion = String(storeConfigData.pipeline_version);
+        console.log(`${prefix}  Using pipeline_version from store-config.json: ${effectivePipelineVersion}`);
+      }
+    } catch (_) { /* ignore parse errors, keep CLI default */ }
+  }
+
   // Step 6: Parse location-master.csv
   console.log(`${prefix}Step 6: Parsing location-master.csv ...`);
   const locationMasterFile = Object.keys(zip.files).find(
@@ -974,6 +1022,27 @@ async function makeLiveForStore(supabase, bucket, storeCode, pipelineVersion, dr
   if (uploadError) throw new Error(`Failed to upload ZIP: ${uploadError.message}`);
   console.log(`  Uploaded full ZIP to: ${r.zip_path}`);
 
+  // Step 11.5: Build pruned CSV for live ZIP (only fixtures in api/fixtures/blocks/all)
+  // The full CSV has already been saved to Supabase storage above — do not modify that.
+  console.log(`Step 11.5: Fetching valid block names and pruning live CSV ...`);
+  const validBlockNames = await fetchAllValidBlockNames(effectivePipelineVersion);
+  let liveCsvContent;
+  if (validBlockNames && validBlockNames.size > 0) {
+    const prunedLines = updatedLines.filter((line, idx) => {
+      if (idx === 0) return true; // keep header
+      const blockName = line.split(',')[0]?.trim();
+      return blockName ? validBlockNames.has(blockName) : false;
+    });
+    const prunedCount = (updatedLines.length - 1) - (prunedLines.length - 1);
+    console.log(`  Loaded ${validBlockNames.size} valid block name(s): kept ${prunedLines.length - 1} fixture(s), pruned ${prunedCount}`);
+    writeLog(`  Live CSV pruned: ${prunedLines.length - 1} fixture(s) kept, ${prunedCount} removed (not in blocks/all)`);
+    liveCsvContent = prunedLines.join('\n');
+  } else {
+    console.warn(`  Warning: Could not fetch valid block names — using full CSV for live ZIP`);
+    writeLog(`  Live CSV pruning skipped: could not fetch blocks/all`);
+    liveCsvContent = updatedLines.join('\n');
+  }
+
   // Step 12: Create filtered live ZIP (baked GLBs only)
   console.log(`Step 12: Creating filtered live ZIP (baked GLBs only) ...`);
   const liveZip = new JSZip();
@@ -990,9 +1059,8 @@ async function makeLiveForStore(supabase, bucket, storeCode, pipelineVersion, dr
 
   if (bakedGlbCount === 0) throw new Error('No baked GLB files found in ZIP');
 
-  // Add location-master.csv
-  const csvContent = await zip.files[locationMasterFile].async('nodebuffer');
-  liveZip.file(locationMasterFile, csvContent);
+  // Add pruned location-master.csv (fixtures not in blocks/all are excluded from live deployment)
+  liveZip.file(locationMasterFile, liveCsvContent);
 
   // Add store-config.json with baked GLB references
   const storeConfigFile = Object.keys(zip.files).find(n => n.toLowerCase() === 'store-config.json');

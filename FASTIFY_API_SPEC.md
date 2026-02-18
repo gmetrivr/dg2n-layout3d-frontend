@@ -161,7 +161,26 @@ This document describes the expected request/response formats for all API endpoi
 
 ## Fixture Endpoints
 
-### 6. Get Fixture Blocks (Bulk)
+### 6. Get All Fixture Block Names
+**Endpoint:** `GET /api/fixtures/blocks/all?pipeline_version={version}`
+
+**Request:**
+- Query Parameter: `pipeline_version` (string, default: "02")
+
+**Expected Response:**
+```json
+{
+  "blocks": ["RTL-4W", "RTL-SR", "RTL-WPS-M-6Bays", "..."]
+}
+```
+
+**Usage:** Called during the Make Live process to prune the `location-master.csv` included in the live deployment ZIP. Any fixture row whose `Block Name` (column 0) is **not** present in this list is excluded from the CSV sent to `processStore3DZip`. The full CSV (with all fixtures) is still saved to Supabase storage unchanged.
+
+> **NOTE (Feb 2026): This pruning step may need to be removed in the future** once the backend can handle unknown block names gracefully. To remove it, delete the `fetchAllValidBlockNames()` call and the `liveCsvContent` pruning logic in `MyCreatedStores.tsx` (`handleConfirmMakeLive`) and `scripts/batch-make-live.mjs` (step 11.5), and revert the live ZIP to use the full CSV directly from `zip.files[locationMasterFile]`. The `fetchAllValidBlockNames` function in `src/services/fixtureTypeMapping.ts` can be deleted too.
+
+---
+
+### 7. Get Fixture Blocks (Bulk)
 **Endpoint:** `POST /api/fixtures/blocks?pipeline_version={version}`
 
 **Request:**
@@ -190,7 +209,7 @@ This document describes the expected request/response formats for all API endpoi
 ]
 ```
 
-### 7. Get All Fixture Types
+### 8. Get All Fixture Types
 **Endpoint:** `GET /api/fixtures/types?pipeline_version={version}`
 
 **Request:**
@@ -203,7 +222,7 @@ This document describes the expected request/response formats for all API endpoi
 }
 ```
 
-### 8. Get Fixture Type URL
+### 9. Get Fixture Type URL
 **Endpoint:** `GET /api/fixtures/type/{fixture_type}/url?pipeline_version={version}`
 
 **Request:**
@@ -218,7 +237,7 @@ This document describes the expected request/response formats for all API endpoi
 }
 ```
 
-### 9. Get Block Name for Fixture Type (Reverse Lookup)
+### 10. Get Block Name for Fixture Type (Reverse Lookup)
 **Endpoint:** `GET /api/fixtures/type/{fixture_type}/block-name?pipeline_version={version}`
 
 **Request:**
@@ -236,7 +255,7 @@ This document describes the expected request/response formats for all API endpoi
 
 **Note:** If not found, return `404` status code
 
-### 10. Get Direct Render Fixture Types
+### 11. Get Direct Render Fixture Types
 **Endpoint:** `GET /api/fixtures/direct-render-types?pipeline_version={version}`
 
 **Request:**
@@ -251,7 +270,7 @@ This document describes the expected request/response formats for all API endpoi
 }
 ```
 
-### 11. Get Fixture Types with Variants
+### 12. Get Fixture Types with Variants
 **Endpoint:** `GET /api/fixtures/variants?pipeline_version={version}`
 
 **Request:**
@@ -266,7 +285,7 @@ This document describes the expected request/response formats for all API endpoi
 }
 ```
 
-### 12. Get Variants for Specific Fixture Type
+### 13. Get Variants for Specific Fixture Type
 **Endpoint:** `GET /api/fixtures/type/{fixture_type}/variants?pipeline_version={version}`
 
 **Request:**
@@ -297,7 +316,7 @@ This document describes the expected request/response formats for all API endpoi
 }
 ```
 
-### 13. Get Block Type Mapping
+### 14. Get Block Type Mapping
 **Endpoint:** `GET /api/fixtures/block-types?pipeline_version={version}`
 
 **Request:**
