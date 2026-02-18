@@ -265,6 +265,7 @@ export function ThreeDViewerModifier() {
   const [isExporting, setIsExporting] = useState(false);
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
+  const [isMultiTypeEdit, setIsMultiTypeEdit] = useState(false);
   const [addFixtureModalOpen, setAddFixtureModalOpen] = useState(false);
   const [isAddingFixture, setIsAddingFixture] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
@@ -634,13 +635,13 @@ export function ThreeDViewerModifier() {
 
       // Update cache and build URL map, also store fixture types
       fixtureBlocks.forEach(block => {
+        // Always store fixture type regardless of whether a GLB URL exists
+        if (block.fixture_type) {
+          fixtureTypeMap.current.set(block.block_name, block.fixture_type);
+        }
         if (block.glb_url) {
           fixtureCache.current.set(block.block_name, block.glb_url);
           urlMap.set(block.block_name, block.glb_url);
-          // Store the fixture type for filtering
-          if (block.fixture_type) {
-            fixtureTypeMap.current.set(block.block_name, block.fixture_type);
-          }
         }
       });
 
@@ -786,6 +787,65 @@ export function ThreeDViewerModifier() {
       // Could add error toast here
     }
   }, [selectedLocation, pipelineVersion]);
+
+  const handleMultiFixtureTypeChange = useCallback(async (newType: string) => {
+    if (selectedLocations.length === 0) return;
+
+    try {
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
+      const newGlbUrl = fixtureTypeInfo.glb_url;
+
+      // Clear old GLBs from cache
+      selectedLocations.forEach(loc => {
+        if (loc.glbUrl) useGLTF.clear(loc.glbUrl);
+      });
+      useGLTF.preload(newGlbUrl);
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType, pipelineVersion);
+      if (!mappedBlockName) {
+        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+          blockName => FIXTURE_TYPE_MAPPING[blockName] === newType
+        ) || newType;
+      }
+
+      fixtureCache.current.set(mappedBlockName, newGlbUrl);
+      fixtureTypeMap.current.set(mappedBlockName, newType);
+
+      const selectedUIDs = new Set(selectedLocations.map(loc => generateFixtureUID(loc)));
+
+      const newFixtures: LocationData[] = selectedLocations.map(loc => ({
+        ...loc,
+        blockName: mappedBlockName,
+        glbUrl: newGlbUrl,
+        wasTypeChanged: true,
+        wasMoved: loc.wasMoved || false,
+        originalBlockName: loc.originalBlockName || loc.blockName,
+        originalPosX: loc.originalPosX ?? loc.posX,
+        originalPosY: loc.originalPosY ?? loc.posY,
+        originalPosZ: loc.originalPosZ ?? loc.posZ,
+        originalGlbUrl: loc.originalGlbUrl || loc.glbUrl,
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000,
+      }));
+
+      setLocationData(prev => {
+        const withMarked = prev.map(loc => {
+          const uid = generateFixtureUID(loc);
+          return selectedUIDs.has(uid) ? { ...loc, forDelete: true } : loc;
+        });
+        return [...withMarked, ...newFixtures];
+      });
+
+      setSelectedLocations(newFixtures);
+      setSelectedLocation(newFixtures[0] ?? null);
+      setSelectedObject(null);
+      setSelectedObjects([]);
+    } catch (error) {
+      console.error('Failed to change fixture types:', error);
+    }
+  }, [selectedLocations, pipelineVersion]);
 
   // Helper function to check if a fixture type requires variant selection
   const fixtureTypeRequiresVariantSelection = (fixtureType: string): boolean => {
@@ -3757,6 +3817,19 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setError(null);
 
     try {
+      // Read pipeline version from store-config.json before extracting
+      const preZip = await JSZip.loadAsync(file);
+      const preConfigFile = preZip.file('store-config.json');
+      if (preConfigFile) {
+        try {
+          const configText = await preConfigFile.async('text');
+          const preConfig = JSON.parse(configText);
+          if (preConfig.pipeline_version) {
+            setPipelineVersion(preConfig.pipeline_version);
+          }
+        } catch (e) { /* use default */ }
+      }
+
       const files = await extractZipFiles(file);
       setExtractedFiles(files);
 
@@ -4146,6 +4219,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               // Extract pipeline version (fallback to '02' for older stores)
               if (config.pipeline_version) {
                 setPipelineVersion(config.pipeline_version);
+              }
+
+              // Seed fixtureTypeMap from stored block_fixture_types (covers blocks
+              // not in the backend's API database, e.g. store-specific block names)
+              if (config.block_fixture_types && typeof config.block_fixture_types === 'object') {
+                Object.entries(config.block_fixture_types).forEach(([blockName, fixtureType]) => {
+                  if (typeof fixtureType === 'string' && !fixtureTypeMap.current.has(blockName)) {
+                    fixtureTypeMap.current.set(blockName, fixtureType);
+                  }
+                });
               }
 
               if (config.floor && Array.isArray(config.floor)) {
@@ -4905,6 +4988,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             floorNames={floorNames}
             floorDisplayOrder={floorDisplayOrder}
             onAlignFixtures={handleAlignFixtures}
+            onOpenTypeModal={() => {
+              setIsMultiTypeEdit(true);
+              setFixtureTypeModalOpen(true);
+            }}
             onFloorChange={(locations, newFloorIndex, keepSamePosition = false) => {
               // Update floor index, origin values, and position for all selected locations
               const keys = locations.map(loc => generateFixtureUID(loc));
@@ -5150,9 +5237,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         onOpenChange={setBrandModalOpen}
         currentBrand={selectedFloorPlate?.brand || (selectedLocations.length > 1 ? (selectedLocations.every(loc => loc.brand === selectedLocations[0].brand) ? selectedLocations[0].brand : 'Multiple Values') : selectedLocation?.brand) || ''}
         onBrandSelect={selectedFloorPlate ? handleBrandChange : handleFixtureBrandChange}
+        pipelineVersion={pipelineVersion}
       />
       
-      {/* Fixture Type Selection Modal - used for both changing and adding fixtures */}
+      {/* Fixture Type Selection Modal - used for changing and adding fixtures */}
       <FixtureTypeSelectionModal
         open={fixtureTypeModalOpen || addFixtureModalOpen}
         onOpenChange={(open) => {
@@ -5160,13 +5248,21 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           setAddFixtureModalOpen(open);
           if (!open) {
             setIsAddingFixture(false);
+            setIsMultiTypeEdit(false);
           }
         }}
-        currentType={isAddingFixture ? '' : (selectedLocation ? (fixtureTypeMap.current.get(selectedLocation.blockName) || 'Unknown') : '')}
+        currentType={isAddingFixture ? '' : isMultiTypeEdit
+          ? (selectedLocations.every(loc => fixtureTypeMap.current.get(loc.blockName) === fixtureTypeMap.current.get(selectedLocations[0].blockName))
+              ? (fixtureTypeMap.current.get(selectedLocations[0].blockName) || '')
+              : '')
+          : (selectedLocation ? (fixtureTypeMap.current.get(selectedLocation.blockName) || 'Unknown') : '')
+        }
         availableTypes={fixtureTypes}
         onTypeSelect={(type) => {
           if (isAddingFixture) {
             handleAddFixture(type);
+          } else if (isMultiTypeEdit) {
+            handleMultiFixtureTypeChange(type);
           } else {
             handleFixtureTypeChange(type);
           }

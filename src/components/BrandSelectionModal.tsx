@@ -16,13 +16,15 @@ interface BrandSelectionModalProps {
   onOpenChange: (open: boolean) => void;
   currentBrand: string;
   onBrandSelect: (brand: string) => void;
+  pipelineVersion?: string;
 }
 
-export function BrandSelectionModal({ 
-  open, 
-  onOpenChange, 
+export function BrandSelectionModal({
+  open,
+  onOpenChange,
   currentBrand,
-  onBrandSelect
+  onBrandSelect,
+  pipelineVersion = '02'
 }: BrandSelectionModalProps) {
   const [brands, setBrands] = useState<string[]>([]);
   const [brandCategories, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
@@ -105,15 +107,15 @@ export function BrandSelectionModal({
         setLoading(true);
         setError(null);
         try {
-          const categoriesData = await apiService.getBrandCategories();
+          const categoriesData = await apiService.getBrandCategories(pipelineVersion);
           setBrandCategories(categoriesData);
           setBrands(categoriesData.brands || []);
         } catch (err) {
           console.warn('Failed to fetch brand categories, falling back to flat list:', err);
-          
+
           // Fallback to flat brands list
           try {
-            const brandsList = await apiService.getBrands();
+            const brandsList = await apiService.getBrands(pipelineVersion);
             setBrands(brandsList);
             setBrandCategories(null); // No categories available
           } catch (fallbackErr) {

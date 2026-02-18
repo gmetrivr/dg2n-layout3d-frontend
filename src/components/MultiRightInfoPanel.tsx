@@ -60,6 +60,7 @@ interface MultiRightInfoPanelProps {
   onCountChange?: (locations: LocationData[], newCount: number) => void;
   onFloorChange?: (locations: LocationData[], newFloorIndex: number, keepSamePosition?: boolean) => void;
   onAlignFixtures?: (locations: LocationData[], alignment: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom', transformSpace: 'world' | 'local') => void;
+  onOpenTypeModal?: () => void;
 }
 
 // Utility function to compare values and return common value or "Multiple Values"
@@ -96,6 +97,7 @@ export function MultiRightInfoPanel({
   onCountChange,
   onFloorChange,
   onAlignFixtures,
+  onOpenTypeModal,
 }: MultiRightInfoPanelProps) {
   const [isCustomRotationMode, setIsCustomRotationMode] = useState(false);
   const [customRotationValue, setCustomRotationValue] = useState('');
@@ -259,8 +261,17 @@ export function MultiRightInfoPanel({
       <div className="space-y-1 text-xs">
         <div><span className="font-medium">Block:</span> {commonBlockName === "Multiple Values" || commonBlockName === "N/A" ? commonBlockName : String(commonBlockName)}</div>
         
-        <div>
+        <div className="flex items-center justify-between">
           <span><span className="font-medium">Type:</span> {commonFixtureType === "Multiple Values" || commonFixtureType === "N/A" ? commonFixtureType : String(commonFixtureType)}</span>
+          {editMode && onOpenTypeModal && (
+            <button
+              onClick={onOpenTypeModal}
+              className="p-1 hover:bg-accent rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Change fixture type"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
         </div>
         
         <div className="flex items-center justify-between">
