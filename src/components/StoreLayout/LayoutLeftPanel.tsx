@@ -1,7 +1,7 @@
 import { Button } from '@/shadcn/components/ui/button';
 import { Select } from '../ui/select';
 import { MultiSelect } from '../ui/multi-select';
-import { Save, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Save, Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { useState } from 'react';
 
 interface LayoutLeftPanelProps {
@@ -21,6 +21,7 @@ interface LayoutLeftPanelProps {
   isViewOnly?: boolean;
   showFixtureId: boolean;
   onShowFixtureIdChange: (val: boolean) => void;
+  onDownloadPdf: () => void;
 }
 
 export function LayoutLeftPanel({
@@ -40,6 +41,7 @@ export function LayoutLeftPanel({
   isViewOnly,
   showFixtureId,
   onShowFixtureIdChange,
+  onDownloadPdf,
 }: LayoutLeftPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -152,6 +154,19 @@ export function LayoutLeftPanel({
               />
             </button>
           </div>
+
+          <div className="border-t border-border" />
+
+          {/* Download layout PDF */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onDownloadPdf}
+            className="w-full"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Download Layout PDF
+          </Button>
         </div>
       )}
     </div>

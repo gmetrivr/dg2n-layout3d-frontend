@@ -8,6 +8,7 @@ import { extractFloorOutline, type FloorOutline } from '../../utils/floorOutline
 import { serializeLocationDataToCsv } from '../../utils/layoutCsvSerializer';
 import { migrateBrandsInZip } from '../../utils/brandMigration';
 import { generateFixtureUID, type LocationData } from '../../hooks/useFixtureSelection';
+import { downloadLayoutPdf } from '../../services/layoutPdfService';
 import { LayoutCanvas } from './LayoutCanvas';
 import { LayoutLeftPanel } from './LayoutLeftPanel';
 import { LayoutRightPanel } from './LayoutRightPanel';
@@ -331,6 +332,19 @@ export function StoreLayout() {
     }
   }, [zipBlob, storeRecord, store_id, locationData, supabase]);
 
+  // Download layout as a printable HTML file (open in browser → print to PDF)
+  const handleDownloadPdf = useCallback(async () => {
+    await downloadLayoutPdf({
+      locationData,
+      floorOutlines,
+      floorIndices,
+      fixtureTypeMap,
+      brandCategoryMapping,
+      storeName: storeRecord?.store_name || store_id || '',
+      storeId: store_id || '',
+    });
+  }, [locationData, floorOutlines, floorIndices, fixtureTypeMap, brandCategoryMapping, storeRecord, store_id]);
+
   // Loading state
   if (loading) {
     return (
@@ -406,6 +420,7 @@ export function StoreLayout() {
         isViewOnly={isViewOnly}
         showFixtureId={showFixtureId}
         onShowFixtureIdChange={setShowFixtureId}
+        onDownloadPdf={handleDownloadPdf}
       />
 
       {/* Right Panel */}
