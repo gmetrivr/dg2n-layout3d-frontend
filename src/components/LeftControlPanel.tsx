@@ -65,6 +65,10 @@ interface LeftControlPanelProps {
   // Camera controls
   cameraMode?: 'perspective' | 'orthographic';
 
+  // Store config
+  floorHeight: string;
+  fixtureStyle: string;
+
   // Clipboard state
   clipboardState?: {
     hasData: boolean;
@@ -99,6 +103,8 @@ interface LeftControlPanelProps {
   onMeasuringChange?: (enabled: boolean) => void;
   onClearMeasurement?: () => void;
   onPaste?: () => void;
+  onFloorHeightChange: (value: string) => void;
+  onFixtureStyleChange: (value: string) => void;
 }
 
 export function LeftControlPanel({
@@ -162,6 +168,10 @@ export function LeftControlPanel({
   onMeasuringChange,
   onClearMeasurement,
   onPaste,
+  floorHeight,
+  fixtureStyle,
+  onFloorHeightChange,
+  onFixtureStyleChange,
 }: LeftControlPanelProps) {
   // Collapsible state
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -290,7 +300,7 @@ export function LeftControlPanel({
             <div className="flex flex-col gap-1">
               <button
                 onClick={onSaveStoreClick}
-                disabled={extractedFiles.length === 0 || !allFloorsHaveSpawnPoints()}
+                disabled={extractedFiles.length === 0 || !allFloorsHaveSpawnPoints() || !floorHeight || !fixtureStyle}
                 className="text-sm px-3 py-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Save Store
@@ -302,7 +312,39 @@ export function LeftControlPanel({
                 </p>
               )}
             </div>
-        
+
+            <div className="border-t border-border" />
+
+            {/* Floor Height */}
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">Floor Height:</label>
+              <Select
+                value={floorHeight}
+                onChange={(e) => onFloorHeightChange(e.target.value)}
+                className="w-48"
+              >
+                <option value="7ft">7 ft</option>
+                <option value="8ft">8 ft</option>
+                <option value="9ft">9 ft</option>
+                <option value="10ft">10 ft</option>
+              </Select>
+            </div>
+
+            {/* Fixture Style */}
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">Fixture Style:</label>
+              <Select
+                value={fixtureStyle}
+                onChange={(e) => onFixtureStyleChange(e.target.value)}
+                className="w-48"
+              >
+                <option value="3.0">3.0</option>
+                <option value="2.0">2.0</option>
+              </Select>
+            </div>
+
+            <div className="border-t border-border" />
+
         {/* Model Selector */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">

@@ -226,6 +226,8 @@ export function ThreeDViewerModifier() {
   const bucketParam = searchParams.get('bucket');
   const [, setJob] = useState<JobStatus | null>(null);
   const [pipelineVersion, setPipelineVersion] = useState<string>('02');
+  const [floorHeights, setFloorHeights] = useState<Map<number, string>>(new Map());
+  const [fixtureStyle, setFixtureStyle] = useState<string>('2.0');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [extractedFiles, setExtractedFiles] = useState<ExtractedFile[]>([]);
@@ -2523,7 +2525,8 @@ const createStoreConfigJSON = useCallback(async (
       name: floorName,
       glb_file_name: file.name,
       floor_index: floorIndex,
-      spawn_point: spawnPoint
+      spawn_point: spawnPoint,
+      floor_height: floorHeights.get(floorIndex) ?? '9ft'
     };
   }).sort((a, b) => a.floor_index - b.floor_index);
 
@@ -2598,6 +2601,7 @@ const createStoreConfigJSON = useCallback(async (
   // 7. Build the config object (architectural elements now stored in separate file)
   const config = {
     pipeline_version: pipelineVersion,
+    fixture_style: fixtureStyle,
     floor: floors,
     block_fixture_types: blockFixtureTypes,
     fixture_type_glb_urls: fixtureTypeGlbUrls,
@@ -2606,7 +2610,7 @@ const createStoreConfigJSON = useCallback(async (
 
   log('Store config generated with', floors.length, 'floors');
   return JSON.stringify(config, null, 2);
-}, [pipelineVersion]);
+}, [pipelineVersion, fixtureStyle, floorHeights]);
 
 const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     const zip = new JSZip();
@@ -3817,7 +3821,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     setError(null);
 
     try {
-      // Read pipeline version from store-config.json before extracting
+      // Read pipeline version, fixture style, and per-floor heights from store-config.json before extracting
       const preZip = await JSZip.loadAsync(file);
       const preConfigFile = preZip.file('store-config.json');
       if (preConfigFile) {
@@ -3826,6 +3830,18 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           const preConfig = JSON.parse(configText);
           if (preConfig.pipeline_version) {
             setPipelineVersion(preConfig.pipeline_version);
+          }
+          if (preConfig.fixture_style) {
+            setFixtureStyle(preConfig.fixture_style);
+          }
+          if (preConfig.floor && Array.isArray(preConfig.floor)) {
+            const heights = new Map<number, string>();
+            preConfig.floor.forEach((f: any) => {
+              if (f.floor_index !== undefined && f.floor_height) {
+                heights.set(Number(f.floor_index), f.floor_height);
+              }
+            });
+            if (heights.size > 0) setFloorHeights(heights);
           }
         } catch (e) { /* use default */ }
       }
@@ -3959,7 +3975,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         if (!resp.ok) throw new Error(`Failed to fetch ZIP (${resp.status})`);
         let zipBlob = await resp.blob();
 
-        // Read pipeline version from store-config.json in ZIP before brand migration
+        // Read pipeline version, fixture style, and per-floor heights from store-config.json in ZIP before brand migration
         let detectedPipelineVersion = '02'; // fallback for older stores
         const preZip = await JSZip.loadAsync(zipBlob);
         const preConfigFile = preZip.file('store-config.json');
@@ -3969,6 +3985,18 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const preConfig = JSON.parse(configText);
             if (preConfig.pipeline_version) {
               detectedPipelineVersion = preConfig.pipeline_version;
+            }
+            if (preConfig.fixture_style) {
+              setFixtureStyle(preConfig.fixture_style);
+            }
+            if (preConfig.floor && Array.isArray(preConfig.floor)) {
+              const heights = new Map<number, string>();
+              preConfig.floor.forEach((f: any) => {
+                if (f.floor_index !== undefined && f.floor_height) {
+                  heights.set(Number(f.floor_index), f.floor_height);
+                }
+              });
+              if (heights.size > 0) setFloorHeights(heights);
             }
           } catch (e) { /* use fallback */ }
         }
@@ -4040,7 +4068,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
         const bucket = bucketParam || DEFAULT_BUCKET;
         let blob = await downloadZip(zipPath, bucket);
 
-        // Read pipeline version from store-config.json in ZIP before brand migration
+        // Read pipeline version, fixture style, and per-floor heights from store-config.json in ZIP before brand migration
         let detectedPipelineVersion = '02'; // fallback for older stores
         const preZip = await JSZip.loadAsync(blob);
         const preConfigFile = preZip.file('store-config.json');
@@ -4050,6 +4078,18 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const preConfig = JSON.parse(configText);
             if (preConfig.pipeline_version) {
               detectedPipelineVersion = preConfig.pipeline_version;
+            }
+            if (preConfig.fixture_style) {
+              setFixtureStyle(preConfig.fixture_style);
+            }
+            if (preConfig.floor && Array.isArray(preConfig.floor)) {
+              const heights = new Map<number, string>();
+              preConfig.floor.forEach((f: any) => {
+                if (f.floor_index !== undefined && f.floor_height) {
+                  heights.set(Number(f.floor_index), f.floor_height);
+                }
+              });
+              if (heights.size > 0) setFloorHeights(heights);
             }
           } catch (e) { /* use fallback */ }
         }
@@ -4205,6 +4245,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           if (isUnmountingRef.current) return; // Skip if unmounting
           const namesMap = new Map<number, string>();
           const spawnPointsMap = new Map<number, [number, number, number]>();
+          const floorHeightsMap = new Map<number, string>();
 
           // Check if store-config.json exists
           const storeConfigFile = extractedFiles.find(file =>
@@ -4219,6 +4260,11 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               // Extract pipeline version (fallback to '02' for older stores)
               if (config.pipeline_version) {
                 setPipelineVersion(config.pipeline_version);
+              }
+
+              // Extract fixture style
+              if (config.fixture_style) {
+                setFixtureStyle(config.fixture_style);
               }
 
               // Seed fixtureTypeMap from stored block_fixture_types (covers blocks
@@ -4253,7 +4299,16 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   if (floor.floor_index !== undefined && floor.spawn_point && Array.isArray(floor.spawn_point)) {
                     spawnPointsMap.set(floor.floor_index, floor.spawn_point as [number, number, number]);
                   }
+
+                  // Extract floor height if it exists
+                  if (floor.floor_index !== undefined && floor.floor_height) {
+                    floorHeightsMap.set(Number(floor.floor_index), floor.floor_height);
+                  }
                 });
+
+                if (floorHeightsMap.size > 0) {
+                  setFloorHeights(floorHeightsMap);
+                }
               }
             } catch (error) {
               console.warn('Failed to parse store-config.json for floor names and spawn points:', error);
@@ -4904,6 +4959,19 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           }}
           onAddObjectsClick={() => setAddObjectModalOpen(true)}
           onPaste={handlePaste}
+          floorHeight={(() => {
+            const f = selectedFloorFile || selectedFile;
+            const m = f?.name.match(/floor[_-]?(\d+)/i) || f?.name.match(/(\d+)/i);
+            return floorHeights.get(m ? parseInt(m[1]) : 0) ?? '9ft';
+          })()}
+          fixtureStyle={fixtureStyle}
+          onFloorHeightChange={(v) => {
+            const f = selectedFloorFile || selectedFile;
+            const m = f?.name.match(/floor[_-]?(\d+)/i) || f?.name.match(/(\d+)/i);
+            const idx = m ? parseInt(m[1]) : 0;
+            setFloorHeights(prev => { const next = new Map(prev); next.set(idx, v); return next; });
+          }}
+          onFixtureStyleChange={setFixtureStyle}
         />
         <Canvas3D
           cameraPosition={cameraPosition}
