@@ -18,6 +18,7 @@ interface LayoutCanvasProps {
   selectedLocation: LocationData | null;
   onSelectLocation: (location: LocationData | null) => void;
   highlightedLocation?: LocationData | null;
+  showFixtureId?: boolean;
 }
 
 export function LayoutCanvas({
@@ -31,6 +32,7 @@ export function LayoutCanvas({
   selectedLocation,
   onSelectLocation,
   highlightedLocation,
+  showFixtureId = false,
 }: LayoutCanvasProps) {
   const {
     viewport,
@@ -147,6 +149,7 @@ export function LayoutCanvas({
               isHighlighted={isHighlighted}
               brandCategoryMapping={brandCategoryMapping}
               onClick={(location) => onSelectLocation(location)}
+              showFixtureId={showFixtureId}
             />
           );
         })}

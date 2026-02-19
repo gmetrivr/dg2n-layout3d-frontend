@@ -46,6 +46,7 @@ export function StoreLayout() {
   const [brandModalOpen, setBrandModalOpen] = useState(false);
   const [fixtureTypeModalOpen, setFixtureTypeModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showFixtureId, setShowFixtureId] = useState(false);
 
   // QR highlight state
   const [highlightedLocation, setHighlightedLocation] = useState<LocationData | null>(null);
@@ -384,6 +385,7 @@ export function StoreLayout() {
         selectedLocation={selectedLocation}
         onSelectLocation={setSelectedLocation}
         highlightedLocation={highlightedLocation}
+        showFixtureId={showFixtureId}
       />
 
       {/* Left Panel */}
@@ -402,6 +404,8 @@ export function StoreLayout() {
         onSave={handleSave}
         storeName={storeRecord?.store_name || store_id || ''}
         isViewOnly={isViewOnly}
+        showFixtureId={showFixtureId}
+        onShowFixtureIdChange={setShowFixtureId}
       />
 
       {/* Right Panel */}

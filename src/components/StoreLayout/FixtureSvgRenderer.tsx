@@ -13,6 +13,7 @@ interface FixtureSvgRendererProps {
   isHighlighted?: boolean;
   brandCategoryMapping: Record<string, string>;
   onClick: (location: LocationData, e: React.MouseEvent) => void;
+  showFixtureId?: boolean;
 }
 
 export const FixtureSvgRenderer = memo(function FixtureSvgRenderer({
@@ -25,6 +26,7 @@ export const FixtureSvgRenderer = memo(function FixtureSvgRenderer({
   isHighlighted,
   brandCategoryMapping,
   onClick,
+  showFixtureId = false,
 }: FixtureSvgRendererProps) {
   const svgPath = getFixtureSvgPath(fixtureType);
   const color = getBrandCategoryColor(brandCategoryMapping, location.brand);
@@ -155,7 +157,7 @@ export const FixtureSvgRenderer = memo(function FixtureSvgRenderer({
         opacity={zoom > 20 ? 1 : 0}
         pointerEvents="none"
       >
-        {location.brand.length > 12 ? location.brand.slice(0, 11) + '...' : location.brand}
+        {showFixtureId ? (location.fixtureId || location.blockName) : location.brand}
       </text>
 
       {/* DEBUG: uncomment to show fixtureType and resolved size
