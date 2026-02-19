@@ -107,7 +107,7 @@ export function StoreLayout() {
   // Check if there are any changes
   const hasChanges = useMemo(() => {
     return locationData.some(
-      (loc) => loc.wasBrandChanged || loc.wasTypeChanged
+      (loc) => loc.wasBrandChanged || loc.wasTypeChanged || loc.wasRotated
     );
   }, [locationData]);
 
@@ -202,6 +202,41 @@ export function StoreLayout() {
     [selectedLocation, fixtureTypeMap, setLocationData]
   );
 
+  // Handle rotation — applies a relative delta to rotationZ only
+  const handleRotateFixture = useCallback(
+    (delta: number) => {
+      if (!selectedLocation) return;
+
+      const uid = generateFixtureUID(selectedLocation);
+      setLocationData((prev) =>
+        prev.map((loc) => {
+          if (generateFixtureUID(loc) !== uid) return loc;
+          const origZ = loc.originalRotationZ ?? loc.rotationZ;
+          const newRotZ = ((loc.rotationZ + delta) % 360 + 360) % 360;
+          return {
+            ...loc,
+            rotationZ: newRotZ,
+            wasRotated: newRotZ !== origZ,
+            _updateTimestamp: Date.now(),
+          };
+        })
+      );
+
+      setSelectedLocation((prev) => {
+        if (!prev || generateFixtureUID(prev) !== uid) return prev;
+        const origZ = prev.originalRotationZ ?? prev.rotationZ;
+        const newRotZ = ((prev.rotationZ + delta) % 360 + 360) % 360;
+        return {
+          ...prev,
+          rotationZ: newRotZ,
+          wasRotated: newRotZ !== origZ,
+          _updateTimestamp: Date.now(),
+        };
+      });
+    },
+    [selectedLocation, setLocationData]
+  );
+
   // Handle reset
   const handleReset = useCallback(() => {
     if (!selectedLocation) return;
@@ -214,8 +249,12 @@ export function StoreLayout() {
           ...loc,
           blockName: loc.originalBlockName ?? loc.blockName,
           brand: loc.originalBrand ?? loc.brand,
+          rotationX: loc.originalRotationX ?? loc.rotationX,
+          rotationY: loc.originalRotationY ?? loc.rotationY,
+          rotationZ: loc.originalRotationZ ?? loc.rotationZ,
           wasBrandChanged: false,
           wasTypeChanged: false,
+          wasRotated: false,
           _updateTimestamp: Date.now(),
         };
       })
@@ -227,8 +266,12 @@ export function StoreLayout() {
         ...prev,
         blockName: prev.originalBlockName ?? prev.blockName,
         brand: prev.originalBrand ?? prev.brand,
+        rotationX: prev.originalRotationX ?? prev.rotationX,
+        rotationY: prev.originalRotationY ?? prev.rotationY,
+        rotationZ: prev.originalRotationZ ?? prev.rotationZ,
         wasBrandChanged: false,
         wasTypeChanged: false,
+        wasRotated: false,
         _updateTimestamp: Date.now(),
       };
     });
@@ -370,6 +413,7 @@ export function StoreLayout() {
           onEditBrand={() => setBrandModalOpen(true)}
           onEditFixtureType={() => setFixtureTypeModalOpen(true)}
           onReset={handleReset}
+          onRotateFixture={handleRotateFixture}
           isViewOnly={isViewOnly}
         />
       )}
