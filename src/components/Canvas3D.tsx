@@ -165,6 +165,13 @@ function FixtureAreaRectangle({
   );
 }
 
+// Pre-allocated temp objects for Billboard top-view rotation (avoid per-frame allocations)
+const _billboardTopViewQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const _billboardParentQuat = new THREE.Quaternion();
+const _billboardLocalQuat = new THREE.Quaternion();
+const _billboardMatrix = new THREE.Matrix4();
+const _billboardCameraDir = new THREE.Vector3();
+
 interface BillboardProps {
   children: React.ReactNode;
   position: [number, number, number];
@@ -176,7 +183,25 @@ function Billboard({ children, position }: BillboardProps) {
 
   useFrame(() => {
     if (ref.current) {
-      ref.current.lookAt(camera.position);
+      camera.getWorldDirection(_billboardCameraDir);
+      // In top view, camera points nearly straight down (cameraDir.y < -0.9).
+      // Keep labels flat on the XZ plane, aligned to the world X axis.
+      // Must compute the correct LOCAL quaternion to counter the parent's world rotation.
+      if (_billboardCameraDir.y < -0.9) {
+        const parent = ref.current.parent;
+        if (parent) {
+          parent.updateWorldMatrix(true, false);
+          _billboardMatrix.extractRotation(parent.matrixWorld);
+          _billboardParentQuat.setFromRotationMatrix(_billboardMatrix);
+          _billboardParentQuat.invert();
+          _billboardLocalQuat.multiplyQuaternions(_billboardParentQuat, _billboardTopViewQuat);
+          ref.current.quaternion.copy(_billboardLocalQuat);
+        } else {
+          ref.current.rotation.set(-Math.PI / 2, 0, 0);
+        }
+      } else {
+        ref.current.lookAt(camera.position);
+      }
     }
   });
 
@@ -618,34 +643,76 @@ const LocationGLB = memo(function LocationGLB({ location, onClick, isSelected, e
           />
         )}
 
-        {/* Fixture name label positioned 0.3m above bounding box */}
+        {/* Fixture label: brand (bold) + hierarchy */}
         {showFixtureLabels && (
           <Billboard position={[
             stackBoundingBox.center[0],
             stackBoundingBox.center[1] + stackBoundingBox.size[1] / 2 + 0.5,
             stackBoundingBox.center[2]
           ]}>
-            {/* Black background box */}
-            <mesh renderOrder={999}>
-              <planeGeometry args={[1.2, Math.max(0.3, ((Math.ceil((location.blockName.length) / 12) * 0.15) + (Math.ceil((location.brand.length) / 12) * 0.15)+ 0.15))]} />
-              <meshBasicMaterial color="black" transparent opacity={0.8} />
-            </mesh>
+            {(() => {
+              const bgWidth = 0.8;
+              const lineHeight = 0.11;
+              const padding = 0.05;
+              const brandLines = Math.ceil(location.brand.length / 10) || 1;
+              const hierLines = 1;
+              const bgHeight = Math.max(0.18, (brandLines + hierLines) * lineHeight + padding * 2);
 
-            {/* Text with wrapping */}
-            <Text
-              position={[0, 0, 0.001]}
-              fontSize={0.1}
-              color="white"
-              anchorX="center"
-              anchorY="middle"
-              maxWidth={1.1}
-              textAlign="center"
-              renderOrder={1000}
-            >
-              {`*${location.brand}*
-${location.blockName}
-${location.hierarchy}`}
-            </Text>
+              // Rounded rectangle shape
+              const w = bgWidth / 2, h = bgHeight / 2, r = 0.04;
+              const shape = new THREE.Shape();
+              shape.moveTo(-w + r, -h);
+              shape.lineTo(w - r, -h);
+              shape.quadraticCurveTo(w, -h, w, -h + r);
+              shape.lineTo(w, h - r);
+              shape.quadraticCurveTo(w, h, w - r, h);
+              shape.lineTo(-w + r, h);
+              shape.quadraticCurveTo(-w, h, -w, h - r);
+              shape.lineTo(-w, -h + r);
+              shape.quadraticCurveTo(-w, -h, -w + r, -h);
+
+              const brandY = (hierLines * lineHeight) / 2;
+              const hierY = -(brandLines * lineHeight) / 2;
+
+              return (
+                <>
+                  {/* Rounded background */}
+                  <mesh renderOrder={999}>
+                    <shapeGeometry args={[shape]} />
+                    <meshBasicMaterial color="black" transparent opacity={0.8} />
+                  </mesh>
+
+                  {/* Brand – bold */}
+                  <Text
+                    position={[0, brandY, 0.001]}
+                    fontSize={0.075}
+                    fontWeight={700}
+                    color="white"
+                    anchorX="center"
+                    anchorY="middle"
+                    maxWidth={0.72}
+                    textAlign="center"
+                    renderOrder={1000}
+                  >
+                    {location.brand}
+                  </Text>
+
+                  {/* Hierarchy */}
+                  <Text
+                    position={[0, hierY, 0.001]}
+                    fontSize={0.075}
+                    color="white"
+                    anchorX="center"
+                    anchorY="middle"
+                    maxWidth={0.72}
+                    textAlign="center"
+                    renderOrder={1000}
+                  >
+                    {location.hierarchy}
+                  </Text>
+                </>
+              );
+            })()}
           </Billboard>
         )}
 
