@@ -951,9 +951,9 @@ export function MyCreatedStores() {
 
       // Make the store live using the API with the FILTERED live ZIP (baked models only)
       console.log('[MyCreatedStores] Making store live with filtered ZIP containing only baked models...');
-      // Derive entity from formatType: "Trends Small Town" → "tst", everything else → "trends"
+      // Derive entity from formatType: "Trends Small Town" → "tst", "Trends" → "trends", everything else → "trends-extension"
       const formatType = (storeInfo?.formatType || '').toLowerCase().trim();
-      const derivedEntity = formatType === 'trends small town' ? 'tst' : 'trends';
+      const derivedEntity = formatType === 'trends small town' ? 'tst' : formatType === 'trends' ? 'trends' : 'trends-extension';
       const storedEntity = (r.entity || 'trends').toLowerCase();
       if (storedEntity !== derivedEntity) {
         console.log(`[MyCreatedStores] Entity corrected: "${storedEntity}" -> "${derivedEntity}" (formatType="${storeInfo?.formatType || ''}")`);
