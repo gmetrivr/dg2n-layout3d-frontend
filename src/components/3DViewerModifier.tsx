@@ -273,7 +273,7 @@ export function ThreeDViewerModifier() {
   const [isExportingZip, setIsExportingZip] = useState(false);
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [saveEntity, setSaveEntity] = useState('trends');
+  const [saveEntity, setSaveEntity] = useState('');
   const [saveStoreId, setSaveStoreId] = useState('');
   const [saveStoreName, setSaveStoreName] = useState('');
   const [brandCategories, setBrandCategories] = useState<BrandCategoriesResponse | null>(null);
@@ -286,6 +286,9 @@ export function ThreeDViewerModifier() {
   const [storeData, setStoreData] = useState<StoreData[]>([]);
   const [storeCodes, setStoreCodes] = useState<string[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(false);
+  const [storeSearch, setStoreSearch] = useState('');
+  const [showStoreDropdown, setShowStoreDropdown] = useState(false);
+  const storeDropdownRef = useRef<HTMLDivElement>(null);
   const [floorManagementModalOpen, setFloorManagementModalOpen] = useState(false);
   const [floorDisplayOrder, setFloorDisplayOrder] = useState<number[]>([]); // Maps display position to actual floor index
   const [initialFloorCount, setInitialFloorCount] = useState<number>(0); // Track initial floor count
@@ -2929,7 +2932,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       });
 
       setSaveDialogOpen(false);
-      setSaveEntity('trends');
+      setSaveEntity('');
       setSaveStoreId('');
       setSaveStoreName('');
       alert('Store saved successfully');
@@ -2941,26 +2944,49 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     }
   }, [createModifiedZipBlob, jobId, saveStoreId, saveStoreName, storeCodes, saveEntity, uploadStoreZip, insertStoreRecord, storeData, pipelineVersion]);
 
+  // Derive entity from formatType — consistent with Make Live logic
+  const deriveEntityFromFormatType = useCallback((formatType: string): string => {
+    const ft = (formatType || '').toLowerCase().trim();
+    if (ft === 'trends small town') return 'tst';
+    if (ft === 'trends') return 'trends';
+    return 'trends-extension';
+  }, []);
+
+  // Stores filtered by selected entity and search text
+  const filteredStores = useMemo(() => {
+    return storeData.filter(store => {
+      const ft = (store.formatType || '').toLowerCase().trim();
+      if (saveEntity === 'tst') {
+        if (ft !== 'trends small town') return false;
+      } else if (saveEntity === 'trends') {
+        if (ft !== 'trends') return false;
+      } else if (saveEntity === 'trends-extension') {
+        if (ft === 'trends' || ft === 'trends small town') return false;
+      }
+      // '' or 'demo' — no entity filter, show all stores
+      if (!storeSearch.trim()) return true;
+      const search = storeSearch.toLowerCase();
+      const displayName = (store.nocName || store.sapName || store.storeName || '').toLowerCase();
+      return store.storeCode.toLowerCase().includes(search) || displayName.includes(search);
+    });
+  }, [storeData, saveEntity, storeSearch]);
+
   // Handle store selection and auto-populate store name and entity
   const handleStoreSelection = useCallback((selectedStoreCode: string) => {
     setSaveStoreId(selectedStoreCode);
+    setStoreSearch(selectedStoreCode);
+    setShowStoreDropdown(false);
 
-    // Find the store data to auto-populate the store name and entity
     const selectedStore = storeData.find(store => store.storeCode === selectedStoreCode);
     if (selectedStore) {
       const displayName = selectedStore.nocName || selectedStore.sapName || selectedStore.storeName || '';
       setSaveStoreName(`${selectedStoreCode} - ${displayName}`);
-
-      // Set entity from formatType
-      // "Trends Small Town" maps to "tst", all others default to "trends"
-      const formatType = (selectedStore.formatType || '').toLowerCase().trim();
-      const entity = formatType === 'trends small town' ? 'tst' : 'trends';
-      setSaveEntity(entity);
+      setSaveEntity(deriveEntityFromFormatType(selectedStore.formatType));
     } else {
       setSaveStoreName('');
-      setSaveEntity('trends');
+      setSaveEntity('');
     }
-  }, [storeData]);
+  }, [storeData, deriveEntityFromFormatType]);
 
   // Floor management handlers
   const handleDeleteFloor = useCallback((floorFile: ExtractedFile) => {
@@ -4218,6 +4244,17 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     loadStores();
   }, []); // Only run once on component mount
 
+  // Close store search dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (storeDropdownRef.current && !storeDropdownRef.current.contains(e.target as Node)) {
+        setShowStoreDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Initialize floor display order and extract floor names from store-config.json
   useEffect(() => {
     if (glbFiles.length > 0) {
@@ -5418,11 +5455,19 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               <label className="text-sm font-medium">Entity</label>
               <select
                 value={saveEntity}
-                onChange={(e) => setSaveEntity(e.target.value)}
+                onChange={(e) => {
+                  setSaveEntity(e.target.value);
+                  // Reset store selection if current store doesn't match new entity
+                  setSaveStoreId('');
+                  setSaveStoreName('');
+                  setStoreSearch('');
+                }}
                 className="w-full px-3 py-2 rounded border border-border bg-background"
               >
+                <option value="" disabled>Select entity…</option>
                 <option value="trends">Trends</option>
                 <option value="tst">TST</option>
+                <option value="trends-extension">Trends Extension</option>
                 <option value="demo">Demo</option>
               </select>
             </div>
@@ -5433,18 +5478,42 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                   Loading stores...
                 </div>
               ) : (
-                <select
-                  value={saveStoreId}
-                  onChange={(e) => handleStoreSelection(e.target.value)}
-                  className="w-full px-3 py-2 rounded border border-border bg-background"
-                >
-                  <option value="">Select a Store ID</option>
-                  {storeCodes.map((code) => (
-                    <option key={code} value={code}>
-                      {code}
-                    </option>
-                  ))}
-                </select>
+                <div ref={storeDropdownRef} className="relative">
+                  <input
+                    type="text"
+                    value={storeSearch}
+                    onChange={(e) => {
+                      setStoreSearch(e.target.value);
+                      setSaveStoreId('');
+                      setShowStoreDropdown(true);
+                    }}
+                    onFocus={() => setShowStoreDropdown(true)}
+                    placeholder="Search store ID or name…"
+                    className="w-full px-3 py-2 rounded border border-border bg-background"
+                  />
+                  {showStoreDropdown && filteredStores.length > 0 && (
+                    <ul className="absolute z-50 mt-1 w-full max-h-48 overflow-y-auto rounded border border-border bg-background shadow-md text-sm">
+                      {filteredStores.map((store) => {
+                        const displayName = store.nocName || store.sapName || store.storeName || '';
+                        return (
+                          <li
+                            key={store.storeCode}
+                            onMouseDown={() => handleStoreSelection(store.storeCode)}
+                            className="px-3 py-2 cursor-pointer hover:bg-accent"
+                          >
+                            <span className="font-mono">{store.storeCode}</span>
+                            {displayName && <span className="ml-2 text-muted-foreground">{displayName}</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {showStoreDropdown && storeSearch.trim() && filteredStores.length === 0 && (
+                    <div className="absolute z-50 mt-1 w-full rounded border border-border bg-background shadow-md px-3 py-2 text-sm text-muted-foreground">
+                      No stores found
+                    </div>
+                  )}
+                </div>
               )}
             </div>
             <div className="space-y-2">
