@@ -2273,6 +2273,7 @@ export function Canvas3D({
       </ModelErrorBoundary>
 
       {/* Render location objects (GLBs or spheres) for currently selected floor */}
+      <Suspense fallback={null}>
       {showSpheres && (selectedFloorFile || selectedFile) && locationData.length > 0 && (() => {
         // Extract floor index from the logical floor selection (not the actual GLB being rendered)
         const fileForFloorExtraction = selectedFloorFile || selectedFile;
@@ -2307,7 +2308,7 @@ export function Canvas3D({
 
             return location.glbUrl ? (
               <LocationGLB
-                key={uid}
+                key={location._stableId || uid}
                 location={location}
                 onClick={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring) ? undefined : onFixtureClick}
                 isSelected={(editFloorplatesMode || setSpawnPointMode || isAddingObject || isMeasuring || hierarchyDefMode) ? false : isLocationSelected(location)}
@@ -2345,6 +2346,7 @@ export function Canvas3D({
             );
           });
       })()}
+      </Suspense>
 
       {/* Hierarchy sequence connection lines */}
       {hierarchyDefMode && hierarchySequence.length > 1 && (() => {

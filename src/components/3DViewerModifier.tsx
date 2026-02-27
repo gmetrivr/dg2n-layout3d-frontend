@@ -785,7 +785,8 @@ export function ThreeDViewerModifier() {
       const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
       const newGlbUrl = fixtureTypeInfo.glb_url;
 
-      if (selectedLocation.glbUrl) useGLTF.clear(selectedLocation.glbUrl);
+      // Don't clear old GLB cache — other fixtures of the same type may still reference it.
+      // Clearing would cause them to suspend (re-fetch) on next re-render, blanking the canvas.
       useGLTF.preload(newGlbUrl);
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -886,7 +887,7 @@ export function ThreeDViewerModifier() {
       const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
       const newGlbUrl = fixtureTypeInfo.glb_url;
 
-      selectedLocations.forEach(loc => { if (loc.glbUrl) useGLTF.clear(loc.glbUrl); });
+      // Don't clear old GLB cache — other fixtures of the same type may still reference it.
       useGLTF.preload(newGlbUrl);
       await new Promise(resolve => setTimeout(resolve, 100));
 
