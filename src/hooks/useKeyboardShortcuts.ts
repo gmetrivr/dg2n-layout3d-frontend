@@ -5,6 +5,7 @@ export interface KeyboardShortcutHandlers {
   onPaste?: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
+  onDelete?: () => void;
   enabled?: boolean;
 }
 
@@ -52,6 +53,12 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers) {
           e.preventDefault();
           handlers.onRedo();
         }
+      }
+
+      // Delete: Delete key (no modifier)
+      if (e.key === 'Delete' && !modKey && !e.shiftKey && !e.altKey && handlers.onDelete) {
+        e.preventDefault();
+        handlers.onDelete();
       }
     };
 

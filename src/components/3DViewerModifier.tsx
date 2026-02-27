@@ -655,12 +655,14 @@ export function ThreeDViewerModifier() {
     executePaste(clipboardData, { targetFloorIndex: currentFloor });
   }, [currentFloor, getClipboardData, validatePaste, executePaste, showNotification]);
 
-  // Keyboard shortcuts for copy/paste
+  // Keyboard shortcuts for copy/paste (delete shortcut added after handleObjectDelete is defined)
+  const handleDeleteSelectedRef = useRef<() => void>(() => {});
   useKeyboardShortcuts({
     onCopy: handleCopySelected,
     onPaste: handlePaste,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    onDelete: useCallback(() => handleDeleteSelectedRef.current(), []),
     enabled: editMode && !editFloorplatesMode && !hierarchyDefMode,
   });
 
@@ -1764,6 +1766,19 @@ export function ThreeDViewerModifier() {
       },
     });
   }, [selectedObjectId, selectedObjectIds, executeCommand]);
+
+  // Wire up delete shortcut now that handleObjectDelete is defined
+  useEffect(() => {
+    handleDeleteSelectedRef.current = () => {
+      if (selectedLocations.length > 0) {
+        handleDeleteFixtures(selectedLocations);
+      } else if (selectedLocation) {
+        handleDeleteFixture(selectedLocation);
+      } else if (selectedObject) {
+        handleObjectDelete(selectedObject);
+      }
+    };
+  }, [selectedLocations, selectedLocation, selectedObject, handleDeleteFixtures, handleDeleteFixture, handleObjectDelete]);
 
   // Handler for object reset
   const handleObjectReset = useCallback((object: ArchitecturalObject) => {
