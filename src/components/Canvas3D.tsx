@@ -2285,9 +2285,8 @@ export function Canvas3D({
             // Exclude forDelete fixtures (marked when split or type-changed)
             if (location.forDelete) return false;
 
-            // Exclude deleted fixtures
-            const key = generateFixtureUID(location);
-            return !deletedFixtures.has(key);
+            // Exclude deleted fixtures (deletedFixtures stores _stableId values)
+            return !deletedFixtures.has(location._stableId);
           })
           .filter(location => {
             // Apply fixture type filter if not "all"

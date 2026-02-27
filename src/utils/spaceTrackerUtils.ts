@@ -72,10 +72,9 @@ export function generateSpaceTrackerData(
   console.log(`[Space Tracker] Fixtures: ${locationData.length} total, ${deletedFixtures.size} deleted`);
   console.log(`[Space Tracker] Floors: ${floorNames.size} custom names`);
 
-  // Filter out deleted fixtures
+  // Filter out deleted fixtures (deletedFixtures stores _stableId values)
   const activeFixtures = locationData.filter(fixture => {
-    const uid = generateFixtureUID(fixture);
-    return !deletedFixtures.has(uid);
+    return !deletedFixtures.has(fixture._stableId);
   });
 
   // Group fixtures by brand and floor
@@ -229,14 +228,7 @@ function calculateTotalBrandArea(
   return Math.round(totalArea * 100) / 100; // Round to 2 decimal places
 }
 
-/**
- * Generate UID for a fixture (for deletion checking)
- */
-function generateFixtureUID(fixture: LocationData): string {
-  const pos = `${Math.round(fixture.posX * 100)},${Math.round(fixture.posY * 100)},${Math.round(fixture.posZ * 100)}`;
-  const timestamp = fixture._updateTimestamp || fixture._ingestionTimestamp || Date.now();
-  return `${fixture.blockName}_${pos}_${timestamp}`;
-}
+
 
 /**
  * Convert Space Tracker data to CSV string

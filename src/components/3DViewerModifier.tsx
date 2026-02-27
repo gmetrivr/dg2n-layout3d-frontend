@@ -20,6 +20,9 @@ import { FloorManagementModal } from './FloorManagementModal';
 import { Canvas3D } from './Canvas3D';
 import { useFixtureSelection, type LocationData, generateFixtureUID } from '../hooks/useFixtureSelection';
 import { useFixtureModifications } from '../hooks/useFixtureModifications';
+import { useUndoRedo } from '../hooks/useUndoRedo';
+import type { Command } from '../hooks/useUndoRedo';
+import { ensureStableId, findFixtureById, updateFixtureById, findObjectById, updateObjectById } from '../hooks/fixtureHelpers';
 import { useClipboard, transformFixturesForPaste, transformArchObjectsForPaste, type PasteOptions } from '../hooks/useClipboard';
 import { usePasteValidation, type ValidationResult, type ValidationError } from '../hooks/usePasteValidation';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
@@ -301,8 +304,9 @@ export function ThreeDViewerModifier() {
   const [currentObjectType, setCurrentObjectType] = useState<ArchitecturalObjectType | null>(null);
   const [objectPlacementPoint, setObjectPlacementPoint] = useState<[number, number, number] | null>(null); // First click point
   const [objectHeight] = useState<number>(4.5); // Default height in meters
-  const [selectedObject, setSelectedObject] = useState<ArchitecturalObject | null>(null);
-  const [selectedObjects, setSelectedObjects] = useState<ArchitecturalObject[]>([]);
+  // ID-based selection for architectural objects
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([]);
 
   // Variant selection for architectural objects
   const [archObjectVariantModalOpen, setArchObjectVariantModalOpen] = useState(false);
@@ -328,20 +332,49 @@ export function ThreeDViewerModifier() {
 
   // Use custom hooks for fixture selection and modifications
   const {
-    selectedLocation,
-    selectedLocations,
-    setSelectedLocation,
-    setSelectedLocations,
+    selectedLocationId,
+    selectedLocationIds,
+    setSelectedLocationId,
+    setSelectedLocationIds,
     handleFixtureClick,
     isLocationSelected,
     clearSelections: clearFixtureSelections,
   } = useFixtureSelection(editFloorplatesMode);
 
+  // Derived selectedLocation / selectedLocations from ID-based state
+  const selectedLocation = useMemo(
+    () => locationData.find(loc => loc._stableId === selectedLocationId) ?? null,
+    [locationData, selectedLocationId]
+  );
+  const selectedLocations = useMemo(
+    () => locationData.filter(loc => selectedLocationIds.includes(loc._stableId)),
+    [locationData, selectedLocationIds]
+  );
+
+  // Derived selectedObject / selectedObjects from ID-based state
+  const selectedObject = useMemo(
+    () => architecturalObjects.find(obj => obj.id === selectedObjectId) ?? null,
+    [architecturalObjects, selectedObjectId]
+  );
+  const selectedObjects = useMemo(
+    () => architecturalObjects.filter(obj => selectedObjectIds.includes(obj.id)),
+    [architecturalObjects, selectedObjectIds]
+  );
+
+  // State refs — used by undo/redo commands to get current arrays without stale closures
+  const locationDataRef = useRef<LocationData[]>(locationData);
+  useEffect(() => { locationDataRef.current = locationData; }, [locationData]);
+  const architecturalObjectsRef = useRef<ArchitecturalObject[]>(architecturalObjects);
+  useEffect(() => { architecturalObjectsRef.current = architecturalObjects; }, [architecturalObjects]);
+
+  // Undo/Redo
+  const { executeCommand, handleUndo, handleRedo, canUndo, canRedo } = useUndoRedo();
+
   // Enhanced clear selections that also clears architectural objects
   const clearSelections = useCallback(() => {
     clearFixtureSelections();
-    setSelectedObject(null);
-    setSelectedObjects([]);
+    setSelectedObjectId(null);
+    setSelectedObjectIds([]);
   }, [clearFixtureSelections]);
 
   const {
@@ -375,10 +408,12 @@ export function ThreeDViewerModifier() {
     selectedLocation,
     selectedLocations,
     selectedFloorPlate,
-    setSelectedLocation,
-    setSelectedLocations,
+    setSelectedLocationId,
+    setSelectedLocationIds,
     setLocationData,
-    setSelectedFloorPlate
+    setSelectedFloorPlate,
+    executeCommand,
+    locationDataRef
   );
 
   // Clipboard hooks
@@ -440,8 +475,8 @@ export function ThreeDViewerModifier() {
       return;
     }
 
-    setSelectedObject(null); // Clear selected architectural object
-    setSelectedObjects([]); // Clear selected architectural objects array
+    setSelectedObjectId(null); // Clear selected architectural object
+    setSelectedObjectIds([]); // Clear selected architectural objects array
     handleFixtureClickWrapper(clickedLocation, event);
   }, [handleFixtureClickWrapper]);
 
@@ -533,11 +568,14 @@ export function ThreeDViewerModifier() {
     clipboardData: any,
     options: PasteOptions
   ) => {
-    // Transform fixtures
-    const newFixtures = transformFixturesForPaste(
+    // Transform fixtures — assign _stableId at creation site
+    const rawFixtures = transformFixturesForPaste(
       clipboardData.fixtures,
       options,
       locationData
+    );
+    const newFixtures = rawFixtures.map((f: LocationData) =>
+      f._stableId ? f : { ...f, _stableId: (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`) }
     );
 
     // Transform arch objects
@@ -546,22 +584,40 @@ export function ThreeDViewerModifier() {
       options
     );
 
-    // Add to state
-    setLocationData(prev => [...prev, ...newFixtures]);
-    setArchitecturalObjects(prev => [...prev, ...newArchObjects]);
+    const newFixtureStableIds = newFixtures.map((f: LocationData) => f._stableId);
+    const newObjectIds = newArchObjects.map((o: ArchitecturalObject) => o.id);
 
-    // Select pasted items (mutually exclusive - prefer fixtures if both types pasted)
-    if (newFixtures.length > 0) {
-      setSelectedLocations(newFixtures);
-      setSelectedLocation(newFixtures[0]);
-      setSelectedObject(null);
-      setSelectedObjects([]);
-    } else if (newArchObjects.length > 0) {
-      setSelectedObjects(newArchObjects);
-      setSelectedObject(newArchObjects[0]);
-      setSelectedLocation(null);
-      setSelectedLocations([]);
-    }
+    const pasteCmd: Command = {
+      commandName: 'Paste',
+      do() {
+        setLocationData(prev => [...prev, ...newFixtures]);
+        setArchitecturalObjects(prev => [...prev, ...newArchObjects]);
+
+        // Select pasted items (mutually exclusive - prefer fixtures if both types pasted)
+        if (newFixtureStableIds.length > 0) {
+          setSelectedLocationIds(newFixtureStableIds);
+          setSelectedLocationId(newFixtureStableIds[0]);
+          setSelectedObjectId(null);
+          setSelectedObjectIds([]);
+        } else if (newObjectIds.length > 0) {
+          setSelectedObjectIds(newObjectIds);
+          setSelectedObjectId(newObjectIds[0]);
+          setSelectedLocationId(null);
+          setSelectedLocationIds([]);
+        }
+      },
+      undo() {
+        setLocationData(prev => prev.filter(f => !newFixtureStableIds.includes(f._stableId)));
+        setArchitecturalObjects(prev => prev.filter(o => !newObjectIds.includes(o.id)));
+        // Rule 3 — clear selection only if it still points at pasted items
+        setSelectedLocationId(cur => newFixtureStableIds.includes(cur ?? '') ? null : cur);
+        setSelectedLocationIds(cur => cur.filter(id => !newFixtureStableIds.includes(id)));
+        setSelectedObjectId(cur => newObjectIds.includes(cur ?? '') ? null : cur);
+        setSelectedObjectIds(cur => cur.filter(id => !newObjectIds.includes(id)));
+      },
+    };
+
+    executeCommand(pasteCmd);
 
     // Show notification
     const totalItems = newFixtures.length + newArchObjects.length;
@@ -569,7 +625,7 @@ export function ThreeDViewerModifier() {
 
     // Close dialog
     setShowPasteConfirmDialog(false);
-  }, [locationData, setLocationData, setArchitecturalObjects, setSelectedLocation, setSelectedLocations, showNotification]);
+  }, [locationData, setLocationData, setArchitecturalObjects, setSelectedLocationId, setSelectedLocationIds, setSelectedObjectId, setSelectedObjectIds, executeCommand, showNotification]);
 
   const handlePaste = useCallback(() => {
     const clipboardData = getClipboardData();
@@ -603,6 +659,8 @@ export function ThreeDViewerModifier() {
   useKeyboardShortcuts({
     onCopy: handleCopySelected,
     onPaste: handlePaste,
+    onUndo: handleUndo,
+    onRedo: handleRedo,
     enabled: editMode && !editFloorplatesMode && !hierarchyDefMode,
   });
 
@@ -710,102 +768,25 @@ export function ThreeDViewerModifier() {
   };
 
   const handleFixtureTypeChange = useCallback(async (newType: string) => {
-    // For now, only support single selection for fixture type changes
-    // Multi-selection fixture type changes could be complex due to different GLB URLs
     if (!selectedLocation || selectedLocations.length > 1) return;
-    
-    try {
-      // Get new GLB URL for the fixture type
-      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
-      const newGlbUrl = fixtureTypeInfo.glb_url;
 
-      // Clear the old GLB from Three.js cache to ensure fresh loading
-      if (selectedLocation.glbUrl) {
-        // Clear old GLB from cache
-        useGLTF.clear(selectedLocation.glbUrl);
-      }
-      // Preload new GLB
-      useGLTF.preload(newGlbUrl);
-
-      // Small delay to ensure cache clearing takes effect
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Get the proper block name from the backend API
-      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType, pipelineVersion);
-
-      // If API doesn't return a block name, try reverse lookup in FIXTURE_TYPE_MAPPING
-      if (!mappedBlockName) {
-        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
-          blockName => FIXTURE_TYPE_MAPPING[blockName] === newType
-        ) || newType; // fallback to newType if not found in mapping
-      }
-
-      // Update the fixture cache with new GLB URL
-      fixtureCache.current.set(mappedBlockName, newGlbUrl);
-
-      // Update the fixture type map
-      fixtureTypeMap.current.set(mappedBlockName, newType);
-      
-      // Mark the original fixture for deletion and create a new one with the new type
-      const selectedUID = generateFixtureUID(selectedLocation);
-
-      // Create a new fixture with the new type
-      const newFixture: LocationData = {
-        ...selectedLocation,
-        blockName: mappedBlockName,
-        glbUrl: newGlbUrl,
-        wasTypeChanged: true,
-        wasMoved: selectedLocation.wasMoved || false,
-        // Preserve original state
-        originalBlockName: selectedLocation.originalBlockName || selectedLocation.blockName,
-        originalPosX: selectedLocation.originalPosX ?? selectedLocation.posX,
-        originalPosY: selectedLocation.originalPosY ?? selectedLocation.posY,
-        originalPosZ: selectedLocation.originalPosZ ?? selectedLocation.posZ,
-        originalGlbUrl: selectedLocation.originalGlbUrl || selectedLocation.glbUrl,
-        // Generate new unique timestamp
-        _updateTimestamp: Date.now() + Math.random() * 1000,
-        _ingestionTimestamp: Date.now() + Math.random() * 1000
-      };
-
-      setLocationData(prev => {
-        // Mark the original fixture as forDelete
-        const withMarkedOriginal = prev.map(loc => {
-          const locUID = generateFixtureUID(loc);
-          if (locUID === selectedUID) {
-            return { ...loc, forDelete: true };
-          }
-          return loc;
-        });
-
-        // Add the new fixture with changed type
-        return [...withMarkedOriginal, newFixture];
-      });
-      
-      // Update selected location to point to the new fixture
-      setSelectedLocation(newFixture);
-      setSelectedLocations([newFixture]);
-      setSelectedObject(null);
-      setSelectedObjects([]);
-
-    } catch (error) {
-      console.error('Failed to change fixture type:', error);
-      // Could add error toast here
-    }
-  }, [selectedLocation, pipelineVersion]);
-
-  const handleMultiFixtureTypeChange = useCallback(async (newType: string) => {
-    if (selectedLocations.length === 0) return;
+    // Capture before await
+    const prevStableId = selectedLocation._stableId;
+    const prevBlockName = selectedLocation.blockName;
+    const prevGlbUrl = selectedLocation.glbUrl;
+    const prevWasTypeChanged = selectedLocation.wasTypeChanged;
+    const prevOriginalBlockName = selectedLocation.originalBlockName;
+    const prevOriginalGlbUrl = selectedLocation.originalGlbUrl;
+    const prevSelectedLocationId = selectedLocationId;
+    const prevSelectedLocationIds = [...selectedLocationIds];
+    const newStableId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     try {
       const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
       const newGlbUrl = fixtureTypeInfo.glb_url;
 
-      // Clear old GLBs from cache
-      selectedLocations.forEach(loc => {
-        if (loc.glbUrl) useGLTF.clear(loc.glbUrl);
-      });
+      if (selectedLocation.glbUrl) useGLTF.clear(selectedLocation.glbUrl);
       useGLTF.preload(newGlbUrl);
-
       await new Promise(resolve => setTimeout(resolve, 100));
 
       let mappedBlockName = await apiService.getBlockNameForFixtureType(newType, pipelineVersion);
@@ -818,39 +799,174 @@ export function ThreeDViewerModifier() {
       fixtureCache.current.set(mappedBlockName, newGlbUrl);
       fixtureTypeMap.current.set(mappedBlockName, newType);
 
-      const selectedUIDs = new Set(selectedLocations.map(loc => generateFixtureUID(loc)));
+      // Captured after await
+      const newBlockName = mappedBlockName;
 
-      const newFixtures: LocationData[] = selectedLocations.map(loc => ({
-        ...loc,
-        blockName: mappedBlockName,
+      const newFixture: LocationData = {
+        ...selectedLocation,
+        _stableId: newStableId,
+        blockName: newBlockName,
         glbUrl: newGlbUrl,
         wasTypeChanged: true,
-        wasMoved: loc.wasMoved || false,
-        originalBlockName: loc.originalBlockName || loc.blockName,
-        originalPosX: loc.originalPosX ?? loc.posX,
-        originalPosY: loc.originalPosY ?? loc.posY,
-        originalPosZ: loc.originalPosZ ?? loc.posZ,
-        originalGlbUrl: loc.originalGlbUrl || loc.glbUrl,
+        wasMoved: selectedLocation.wasMoved || false,
+        originalBlockName: selectedLocation.originalBlockName || selectedLocation.blockName,
+        originalPosX: selectedLocation.originalPosX ?? selectedLocation.posX,
+        originalPosY: selectedLocation.originalPosY ?? selectedLocation.posY,
+        originalPosZ: selectedLocation.originalPosZ ?? selectedLocation.posZ,
+        originalGlbUrl: selectedLocation.originalGlbUrl || selectedLocation.glbUrl,
+        _updateTimestamp: Date.now() + Math.random() * 1000,
+        _ingestionTimestamp: Date.now() + Math.random() * 1000,
+      };
+
+      executeCommand({
+        commandName: 'ChangeFixtureType',
+        do() {
+          setLocationData(prev => {
+            // Idempotent: if new fixture already exists, just mark original forDelete
+            const newExists = prev.some(loc => loc._stableId === newStableId);
+            const withMarked = prev.map(loc =>
+              loc._stableId === prevStableId ? { ...loc, forDelete: true } : loc
+            );
+            if (newExists) return withMarked;
+            return [...withMarked, newFixture];
+          });
+          setSelectedLocationId(newStableId);
+          setSelectedLocationIds([newStableId]);
+          setSelectedObjectId(null);
+          setSelectedObjectIds([]);
+        },
+        undo() {
+          setLocationData(prev => {
+            const withoutNew = prev.filter(loc => loc._stableId !== newStableId);
+            return withoutNew.map(loc => {
+              if (loc._stableId !== prevStableId) return loc;
+              return {
+                ...loc,
+                forDelete: false,
+                blockName: prevBlockName,
+                glbUrl: prevGlbUrl,
+                wasTypeChanged: prevWasTypeChanged,
+                originalBlockName: prevOriginalBlockName,
+                originalGlbUrl: prevOriginalGlbUrl,
+              };
+            });
+          });
+          // Restore selection filtered to existing
+          const restoredIds = prevSelectedLocationIds.filter(id =>
+            locationDataRef.current.some(loc => loc._stableId === id)
+          );
+          setSelectedLocationId(
+            restoredIds.includes(prevSelectedLocationId ?? '') ? prevSelectedLocationId : null
+          );
+          setSelectedLocationIds(restoredIds);
+        },
+      });
+
+    } catch (error) {
+      console.error('Failed to change fixture type:', error);
+      // No executeCommand call on error — no history entry
+    }
+  }, [selectedLocation, selectedLocations, selectedLocationId, selectedLocationIds, pipelineVersion, executeCommand, setLocationData, setSelectedLocationId, setSelectedLocationIds, setSelectedObjectId, setSelectedObjectIds, locationDataRef]);
+
+  const handleMultiFixtureTypeChange = useCallback(async (newType: string) => {
+    if (selectedLocations.length === 0) return;
+
+    // Capture per-fixture data before await
+    const perFixture = selectedLocations.map(loc => ({
+      prevStableId: loc._stableId,
+      prevBlockName: loc.blockName,
+      prevGlbUrl: loc.glbUrl,
+      prevWasTypeChanged: loc.wasTypeChanged,
+      prevOriginalBlockName: loc.originalBlockName,
+      prevOriginalGlbUrl: loc.originalGlbUrl,
+      newStableId: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    }));
+
+    try {
+      const fixtureTypeInfo = await apiService.getFixtureTypeUrl(newType, pipelineVersion);
+      const newGlbUrl = fixtureTypeInfo.glb_url;
+
+      selectedLocations.forEach(loc => { if (loc.glbUrl) useGLTF.clear(loc.glbUrl); });
+      useGLTF.preload(newGlbUrl);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      let mappedBlockName = await apiService.getBlockNameForFixtureType(newType, pipelineVersion);
+      if (!mappedBlockName) {
+        mappedBlockName = Object.keys(FIXTURE_TYPE_MAPPING).find(
+          blockName => FIXTURE_TYPE_MAPPING[blockName] === newType
+        ) || newType;
+      }
+
+      fixtureCache.current.set(mappedBlockName, newGlbUrl);
+      fixtureTypeMap.current.set(mappedBlockName, newType);
+
+      const newBlockName = mappedBlockName;
+      const newFixtures: LocationData[] = perFixture.map(({ newStableId }, i) => ({
+        ...selectedLocations[i],
+        _stableId: newStableId,
+        blockName: newBlockName,
+        glbUrl: newGlbUrl,
+        wasTypeChanged: true,
+        wasMoved: selectedLocations[i].wasMoved || false,
+        originalBlockName: selectedLocations[i].originalBlockName || selectedLocations[i].blockName,
+        originalPosX: selectedLocations[i].originalPosX ?? selectedLocations[i].posX,
+        originalPosY: selectedLocations[i].originalPosY ?? selectedLocations[i].posY,
+        originalPosZ: selectedLocations[i].originalPosZ ?? selectedLocations[i].posZ,
+        originalGlbUrl: selectedLocations[i].originalGlbUrl || selectedLocations[i].glbUrl,
         _updateTimestamp: Date.now() + Math.random() * 1000,
         _ingestionTimestamp: Date.now() + Math.random() * 1000,
       }));
 
-      setLocationData(prev => {
-        const withMarked = prev.map(loc => {
-          const uid = generateFixtureUID(loc);
-          return selectedUIDs.has(uid) ? { ...loc, forDelete: true } : loc;
-        });
-        return [...withMarked, ...newFixtures];
+      const newStableIds = perFixture.map(p => p.newStableId);
+      const prevStableIds = perFixture.map(p => p.prevStableId);
+
+      executeCommand({
+        commandName: 'ChangeFixtureTypeMulti',
+        do() {
+          setLocationData(prev => {
+            const prevSet = new Set<string>(prevStableIds);
+            const withMarked = prev.map(loc =>
+              prevSet.has(loc._stableId) ? { ...loc, forDelete: true } : loc
+            );
+            const newSet = new Set<string>(newStableIds);
+            const withoutExisting = withMarked.filter(loc => !newSet.has(loc._stableId));
+            return [...withoutExisting, ...newFixtures];
+          });
+          setSelectedLocationIds(newStableIds);
+          setSelectedLocationId(newStableIds[0] ?? null);
+          setSelectedObjectId(null);
+          setSelectedObjectIds([]);
+        },
+        undo() {
+          setLocationData(prev => {
+            const newSet = new Set<string>(newStableIds);
+            const withoutNew = prev.filter(loc => !newSet.has(loc._stableId));
+            return withoutNew.map(loc => {
+              const info = perFixture.find(p => p.prevStableId === loc._stableId);
+              if (!info) return loc;
+              return {
+                ...loc,
+                forDelete: false,
+                blockName: info.prevBlockName,
+                glbUrl: info.prevGlbUrl,
+                wasTypeChanged: info.prevWasTypeChanged,
+                originalBlockName: info.prevOriginalBlockName,
+                originalGlbUrl: info.prevOriginalGlbUrl,
+              };
+            });
+          });
+          const restoredIds = prevStableIds.filter(id =>
+            locationDataRef.current.some(loc => loc._stableId === id)
+          );
+          setSelectedLocationIds(restoredIds);
+          setSelectedLocationId(restoredIds[0] ?? null);
+        },
       });
 
-      setSelectedLocations(newFixtures);
-      setSelectedLocation(newFixtures[0] ?? null);
-      setSelectedObject(null);
-      setSelectedObjects([]);
     } catch (error) {
       console.error('Failed to change fixture types:', error);
     }
-  }, [selectedLocations, pipelineVersion]);
+  }, [selectedLocations, pipelineVersion, executeCommand, setLocationData, setSelectedLocationId, setSelectedLocationIds, setSelectedObjectId, setSelectedObjectIds, locationDataRef]);
 
   // Helper function to check if a fixture type requires variant selection
   const fixtureTypeRequiresVariantSelection = (fixtureType: string): boolean => {
@@ -1054,6 +1170,7 @@ export function ThreeDViewerModifier() {
       const originY = floorOriginFixture?.originY ?? 0;
 
       const newFixture: LocationData = {
+        _stableId: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         blockName,
         floorIndex: currentFloor,
         originX,
@@ -1094,16 +1211,28 @@ export function ThreeDViewerModifier() {
         _ingestionTimestamp: Date.now() + Math.random() * 1000,
       };
 
-      setLocationData(prev => [...prev, newFixture]);
-
       justCreatedObjectRef.current = true;
-      setTimeout(() => {
-        setSelectedLocation(newFixture);
-        setSelectedLocations([newFixture]);
-        setSelectedObject(null);
-        setSelectedObjects([]);
-        setTimeout(() => { justCreatedObjectRef.current = false; }, 100);
-      }, 0);
+      setTimeout(() => { justCreatedObjectRef.current = false; }, 100);
+
+      const newStableId = newFixture._stableId;
+      executeCommand({
+        commandName: 'CreateFixture',
+        do() {
+          setLocationData(prev => {
+            if (prev.some(loc => loc._stableId === newStableId)) return prev;
+            return [...prev, newFixture];
+          });
+          setSelectedLocationId(newStableId);
+          setSelectedLocationIds([newStableId]);
+          setSelectedObjectId(null);
+          setSelectedObjectIds([]);
+        },
+        undo() {
+          setLocationData(prev => prev.filter(loc => loc._stableId !== newStableId));
+          setSelectedLocationId(cur => cur === newStableId ? null : cur);
+          setSelectedLocationIds(cur => cur.length === 1 && cur[0] === newStableId ? [] : cur);
+        },
+      });
 
       // Reset placement state
       pendingFixtureRef.current = null;
@@ -1206,28 +1335,32 @@ export function ThreeDViewerModifier() {
         hasGlbUrl: !!variantGlbUrl
       });
 
-      // Add the object directly with the GLB URL from the variant
-      setArchitecturalObjects(prev => [...prev, newObject]);
-
       // Clear the selected variant ref for next use
       selectedVariantRef.current = null;
 
-      // Set flag to prevent onPointerMissed from clearing selection
+      const newObjectId = newObject.id;
       justCreatedObjectRef.current = true;
+      setTimeout(() => { justCreatedObjectRef.current = false; }, 100);
 
-      // Select the newly created object
-      setTimeout(() => {
-        console.log('Selecting newly created architectural object:', newObject.id, newObject.type);
-        setSelectedObject(newObject);
-        setSelectedObjects([newObject]);
-        setSelectedLocation(null);
-        setSelectedLocations([]);
-        setSelectedFloorPlate(null);
-
-        setTimeout(() => {
-          justCreatedObjectRef.current = false;
-        }, 100);
-      }, 0);
+      executeCommand({
+        commandName: 'CreateObject',
+        do() {
+          setArchitecturalObjects(prev => {
+            if (prev.some(obj => obj.id === newObjectId)) return prev;
+            return [...prev, newObject];
+          });
+          setSelectedObjectId(newObjectId);
+          setSelectedObjectIds([newObjectId]);
+          setSelectedLocationId(null);
+          setSelectedLocationIds([]);
+          setSelectedFloorPlate(null);
+        },
+        undo() {
+          setArchitecturalObjects(prev => prev.filter(obj => obj.id !== newObjectId));
+          setSelectedObjectId(cur => cur === newObjectId ? null : cur);
+          setSelectedObjectIds(cur => cur.length === 1 && cur[0] === newObjectId ? [] : cur);
+        },
+      });
 
       // Reset placement state immediately for single-point elements
       setIsAddingObject(false);
@@ -1259,25 +1392,29 @@ export function ThreeDViewerModifier() {
           wasHeightChanged: false
         };
 
-        // Add the new object to the list
-        setArchitecturalObjects(prev => [...prev, newObject]);
-
-        // Set flag to prevent onPointerMissed from clearing selection
+        const newObjectId = newObject.id;
         justCreatedObjectRef.current = true;
+        setTimeout(() => { justCreatedObjectRef.current = false; }, 100);
 
-        // Select the newly created object
-        setTimeout(() => {
-          console.log('Selecting newly created object:', newObject.id, newObject.type);
-          setSelectedObject(newObject);
-          setSelectedObjects([newObject]);
-          setSelectedLocation(null);
-          setSelectedLocations([]);
-          setSelectedFloorPlate(null);
-
-          setTimeout(() => {
-            justCreatedObjectRef.current = false;
-          }, 100);
-        }, 0);
+        executeCommand({
+          commandName: 'CreateObject',
+          do() {
+            setArchitecturalObjects(prev => {
+              if (prev.some(obj => obj.id === newObjectId)) return prev;
+              return [...prev, newObject];
+            });
+            setSelectedObjectId(newObjectId);
+            setSelectedObjectIds([newObjectId]);
+            setSelectedLocationId(null);
+            setSelectedLocationIds([]);
+            setSelectedFloorPlate(null);
+          },
+          undo() {
+            setArchitecturalObjects(prev => prev.filter(obj => obj.id !== newObjectId));
+            setSelectedObjectId(cur => cur === newObjectId ? null : cur);
+            setSelectedObjectIds(cur => cur.length === 1 && cur[0] === newObjectId ? [] : cur);
+          },
+        });
 
         // Reset placement state
         setIsAddingObject(false);
@@ -1285,7 +1422,7 @@ export function ThreeDViewerModifier() {
         setObjectPlacementPoint(null);
       }
     }
-  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, setSelectedLocation, setSelectedLocations, locationData, setLocationData]);
+  }, [isAddingObject, currentObjectType, objectPlacementPoint, objectHeight, selectedFloorFile, selectedFile, locationData, setLocationData, executeCommand]);
 
   // Handler for floor click during measurement
   const handleFloorClickForMeasurement = useCallback((point: [number, number, number]) => {
@@ -1336,7 +1473,6 @@ export function ThreeDViewerModifier() {
     if (!editMode || isAddingObject) return;
 
     // Don't process clicks if mouse was down on transform controls
-    // This prevents accidental selection when clicking transform controls that overlap other objects
     if (isMouseDownOnTransformRef.current) {
       return;
     }
@@ -1344,495 +1480,363 @@ export function ThreeDViewerModifier() {
     const isMultiSelect = event?.shiftKey || event?.metaKey || event?.ctrlKey;
 
     if (isMultiSelect) {
-      setSelectedObjects(prev => {
-        // Include current single selection if transitioning from single to multi
-        const currentSelections = prev.length === 0 && selectedObject ? [selectedObject] : prev;
-
-        const isAlreadySelected = currentSelections.some(obj => obj.id === object.id);
-
-        if (isAlreadySelected) {
-          // Remove from selection
-          return currentSelections.filter(obj => obj.id !== object.id);
+      setSelectedObjectIds(prev => {
+        const currentIds = prev.length === 0 && selectedObjectId ? [selectedObjectId] : prev;
+        if (currentIds.includes(object.id)) {
+          return currentIds.filter(id => id !== object.id);
         } else {
-          // Add to selection
-          return [...currentSelections, object];
+          return [...currentIds, object.id];
         }
       });
-
-      // Update selectedObject based on new selection state
-      setSelectedObject(null); // Will be managed by selectedObjects array
+      setSelectedObjectId(null);
     } else {
-      // Single select
-      setSelectedObjects([object]);
-      setSelectedObject(object);
+      setSelectedObjectId(object.id);
+      setSelectedObjectIds([object.id]);
     }
 
     // Clear fixture selections when selecting an object
-    setSelectedLocation(null);
-    setSelectedLocations([]);
+    setSelectedLocationId(null);
+    setSelectedLocationIds([]);
     setSelectedFloorPlate(null);
-  }, [editMode, isAddingObject, selectedObject]);
+  }, [editMode, isAddingObject, selectedObjectId]);
 
   // Handler for multi-object position change (when moving multiple objects together)
   const handleMultiObjectPositionChange = useCallback((delta: [number, number, number]) => {
-    const objectIds = selectedObjects.map(obj => obj.id);
-
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (!objectIds.includes(obj.id)) return obj;
-
-      // Handle single-point objects
-      if (obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined) {
+    // Capture prev positions from selectedObjects at call time
+    const prevSnapshots = selectedObjects.map(obj => {
+      const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+      if (isSinglePoint) {
         return {
-          ...obj,
-          posX: obj.posX + delta[0],
-          posY: obj.posY + delta[1],
-          posZ: obj.posZ + delta[2],
-          wasMoved: true,
-          originalPosX: obj.originalPosX ?? obj.posX,
-          originalPosY: obj.originalPosY ?? obj.posY,
-          originalPosZ: obj.originalPosZ ?? obj.posZ,
+          objectId: obj.id, isSinglePoint: true as const,
+          prevPosX: obj.posX!, prevPosY: obj.posY!, prevPosZ: obj.posZ!,
+          prevWasMoved: obj.wasMoved ?? false,
+          prevOrigPosX: obj.originalPosX, prevOrigPosY: obj.originalPosY, prevOrigPosZ: obj.originalPosZ,
+        };
+      } else {
+        return {
+          objectId: obj.id, isSinglePoint: false as const,
+          prevStartPoint: obj.startPoint ? [...obj.startPoint] as [number, number, number] : undefined,
+          prevEndPoint: obj.endPoint ? [...obj.endPoint] as [number, number, number] : undefined,
+          prevWasMoved: obj.wasMoved ?? false,
+          prevOrigStartPoint: obj.originalStartPoint ? [...obj.originalStartPoint] as [number, number, number] : undefined,
+          prevOrigEndPoint: obj.originalEndPoint ? [...obj.originalEndPoint] as [number, number, number] : undefined,
         };
       }
+    });
 
-      // Handle two-point objects
-      if (obj.startPoint && obj.endPoint) {
-        return {
-          ...obj,
-          startPoint: [
-            obj.startPoint[0] + delta[0],
-            obj.startPoint[1] + delta[1],
-            obj.startPoint[2] + delta[2]
-          ] as [number, number, number],
-          endPoint: [
-            obj.endPoint[0] + delta[0],
-            obj.endPoint[1] + delta[1],
-            obj.endPoint[2] + delta[2]
-          ] as [number, number, number],
-          wasMoved: true,
-          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
-          originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
-        };
-      }
-
-      return obj;
-    }));
-
-    // Update selected objects state
-    setSelectedObjects(prev => prev.map(obj => {
-      // Handle single-point objects
-      if (obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined) {
-        return {
-          ...obj,
-          posX: obj.posX + delta[0],
-          posY: obj.posY + delta[1],
-          posZ: obj.posZ + delta[2],
-          wasMoved: true,
-          originalPosX: obj.originalPosX ?? obj.posX,
-          originalPosY: obj.originalPosY ?? obj.posY,
-          originalPosZ: obj.originalPosZ ?? obj.posZ,
-        };
-      }
-
-      // Handle two-point objects
-      if (obj.startPoint && obj.endPoint) {
-        return {
-          ...obj,
-          startPoint: [
-            obj.startPoint[0] + delta[0],
-            obj.startPoint[1] + delta[1],
-            obj.startPoint[2] + delta[2]
-          ] as [number, number, number],
-          endPoint: [
-            obj.endPoint[0] + delta[0],
-            obj.endPoint[1] + delta[1],
-            obj.endPoint[2] + delta[2]
-          ] as [number, number, number],
-          wasMoved: true,
-          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
-          originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
-        };
-      }
-
-      return obj;
-    }));
-  }, [selectedObjects]);
+    executeCommand({
+      commandName: 'MoveObjects',
+      do() {
+        setArchitecturalObjects(prev => prev.map(obj => {
+          const snap = prevSnapshots.find(s => s.objectId === obj.id);
+          if (!snap) return obj;
+          if (snap.isSinglePoint) {
+            return {
+              ...obj,
+              posX: snap.prevPosX + delta[0],
+              posY: snap.prevPosY + delta[1],
+              posZ: snap.prevPosZ + delta[2],
+              wasMoved: true,
+              originalPosX: obj.originalPosX ?? obj.posX,
+              originalPosY: obj.originalPosY ?? obj.posY,
+              originalPosZ: obj.originalPosZ ?? obj.posZ,
+            };
+          } else if (snap.prevStartPoint && snap.prevEndPoint) {
+            return {
+              ...obj,
+              startPoint: [snap.prevStartPoint[0] + delta[0], snap.prevStartPoint[1] + delta[1], snap.prevStartPoint[2] + delta[2]] as [number, number, number],
+              endPoint: [snap.prevEndPoint[0] + delta[0], snap.prevEndPoint[1] + delta[1], snap.prevEndPoint[2] + delta[2]] as [number, number, number],
+              wasMoved: true,
+              originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
+              originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
+            };
+          }
+          return obj;
+        }));
+      },
+      undo() {
+        setArchitecturalObjects(prev => prev.map(obj => {
+          const snap = prevSnapshots.find(s => s.objectId === obj.id);
+          if (!snap) return obj;
+          if (snap.isSinglePoint) {
+            return { ...obj, posX: snap.prevPosX, posY: snap.prevPosY, posZ: snap.prevPosZ, wasMoved: snap.prevWasMoved, originalPosX: snap.prevOrigPosX, originalPosY: snap.prevOrigPosY, originalPosZ: snap.prevOrigPosZ };
+          } else {
+            return { ...obj, startPoint: snap.prevStartPoint, endPoint: snap.prevEndPoint, wasMoved: snap.prevWasMoved, originalStartPoint: snap.prevOrigStartPoint, originalEndPoint: snap.prevOrigEndPoint };
+          }
+        }));
+      },
+    });
+  }, [selectedObjects, executeCommand]);
 
   // Handler for object position change
   const handleObjectPositionChange = useCallback((object: ArchitecturalObject, newCenterPosition: [number, number, number]) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        // Check if this is a single-point element (doors)
-        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const isSinglePoint = current.posX !== undefined && current.posY !== undefined && current.posZ !== undefined;
 
-        if (isSinglePoint) {
-          // For single-point elements: Convert Three.js position to CSV coordinates
-          // Three.js: [x, y, z] where y is up
-          // CSV: posX=x, posY=-z, posZ=y
-          return {
-            ...obj,
-            posX: newCenterPosition[0],
-            posZ: newCenterPosition[1], // Three.js Y -> CSV Z
-            posY: -newCenterPosition[2], // Three.js Z -> CSV Y (negated)
-            wasMoved: true,
-            originalPosX: obj.originalPosX ?? obj.posX,
-            originalPosY: obj.originalPosY ?? obj.posY,
-            originalPosZ: obj.originalPosZ ?? obj.posZ
-          };
-        }
+    // Capture all prev values needed for undo
+    const prevWasMoved = current.wasMoved ?? false;
+    const prevPosX = current.posX; const prevPosY = current.posY; const prevPosZ = current.posZ;
+    const prevOrigPosX = current.originalPosX; const prevOrigPosY = current.originalPosY; const prevOrigPosZ = current.originalPosZ;
+    const prevStartPoint = current.startPoint ? [...current.startPoint] as [number, number, number] : undefined;
+    const prevEndPoint = current.endPoint ? [...current.endPoint] as [number, number, number] : undefined;
+    const prevOrigStartPoint = current.originalStartPoint ? [...current.originalStartPoint] as [number, number, number] : undefined;
+    const prevOrigEndPoint = current.originalEndPoint ? [...current.originalEndPoint] as [number, number, number] : undefined;
 
-        // For two-point elements: Calculate offset from original center
-        const originalCenter: [number, number, number] = [
-          (obj.startPoint![0] + obj.endPoint![0]) / 2,
-          obj.startPoint![1],  // Ground level (y coordinate of start/end points)
-          (obj.startPoint![2] + obj.endPoint![2]) / 2
-        ];
+    // Pre-calculate the new values
+    let newPosX: number | undefined, newPosY: number | undefined, newPosZ: number | undefined;
+    let newStartPoint: [number, number, number] | undefined, newEndPoint: [number, number, number] | undefined;
 
-        // Force Y to stay at ground level (0), only allow X and Z movement
-        const offset: [number, number, number] = [
-          newCenterPosition[0] - originalCenter[0],
-          0,  // No Y movement - keep at ground level
-          newCenterPosition[2] - originalCenter[2]
-        ];
-
-        // Apply offset to both start and end points (Y remains at 0)
-        const newStartPoint: [number, number, number] = [
-          obj.startPoint![0] + offset[0],
-          0,  // Force ground level
-          obj.startPoint![2] + offset[2]
-        ];
-
-        const newEndPoint: [number, number, number] = [
-          obj.endPoint![0] + offset[0],
-          0,  // Force ground level
-          obj.endPoint![2] + offset[2]
-        ];
-
-        return {
-          ...obj,
-          startPoint: newStartPoint,
-          endPoint: newEndPoint,
-          wasMoved: true,
-          originalStartPoint: obj.originalStartPoint || obj.startPoint,
-          originalEndPoint: obj.originalEndPoint || obj.endPoint
-        };
-      }
-      return obj;
-    }));
-
-    // Update selected object
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => {
-        if (!prev) return null;
-
-        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
-
-        if (isSinglePoint) {
-          // For single-point elements
-          return {
-            ...prev,
-            posX: newCenterPosition[0],
-            posZ: newCenterPosition[1],
-            posY: -newCenterPosition[2],
-            wasMoved: true,
-            originalPosX: prev.originalPosX ?? prev.posX,
-            originalPosY: prev.originalPosY ?? prev.posY,
-            originalPosZ: prev.originalPosZ ?? prev.posZ
-          };
-        }
-
-        // For two-point elements
-        const originalCenter: [number, number, number] = [
-          (prev.startPoint![0] + prev.endPoint![0]) / 2,
-          prev.startPoint![1],  // Ground level
-          (prev.startPoint![2] + prev.endPoint![2]) / 2
-        ];
-
-        const offset: [number, number, number] = [
-          newCenterPosition[0] - originalCenter[0],
-          newCenterPosition[1] - originalCenter[1],
-          newCenterPosition[2] - originalCenter[2]
-        ];
-
-        return {
-          ...prev,
-          startPoint: [
-            prev.startPoint![0] + offset[0],
-            prev.startPoint![1] + offset[1],
-            prev.startPoint![2] + offset[2]
-          ],
-          endPoint: [
-            prev.endPoint![0] + offset[0],
-            prev.endPoint![1] + offset[1],
-            prev.endPoint![2] + offset[2]
-          ],
-          wasMoved: true,
-          originalStartPoint: prev.originalStartPoint || prev.startPoint,
-          originalEndPoint: prev.originalEndPoint || prev.endPoint
-        };
-      });
+    if (isSinglePoint) {
+      newPosX = newCenterPosition[0];
+      newPosZ = newCenterPosition[1]; // Three.js Y -> CSV Z
+      newPosY = -newCenterPosition[2]; // Three.js Z -> CSV Y (negated)
+    } else {
+      const originalCenter: [number, number, number] = [
+        (current.startPoint![0] + current.endPoint![0]) / 2,
+        current.startPoint![1],
+        (current.startPoint![2] + current.endPoint![2]) / 2,
+      ];
+      const offset: [number, number, number] = [
+        newCenterPosition[0] - originalCenter[0],
+        0,
+        newCenterPosition[2] - originalCenter[2],
+      ];
+      newStartPoint = [current.startPoint![0] + offset[0], 0, current.startPoint![2] + offset[2]];
+      newEndPoint = [current.endPoint![0] + offset[0], 0, current.endPoint![2] + offset[2]];
     }
-  }, [selectedObject]);
+
+    executeCommand({
+      commandName: 'MoveObject',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => {
+          if (isSinglePoint) {
+            return { ...obj, posX: newPosX, posY: newPosY, posZ: newPosZ, wasMoved: true, originalPosX: obj.originalPosX ?? prevPosX, originalPosY: obj.originalPosY ?? prevPosY, originalPosZ: obj.originalPosZ ?? prevPosZ };
+          } else {
+            return { ...obj, startPoint: newStartPoint, endPoint: newEndPoint, wasMoved: true, originalStartPoint: obj.originalStartPoint ?? prevStartPoint, originalEndPoint: obj.originalEndPoint ?? prevEndPoint };
+          }
+        });
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => {
+          if (isSinglePoint) {
+            return { ...obj, posX: prevPosX, posY: prevPosY, posZ: prevPosZ, wasMoved: prevWasMoved, originalPosX: prevOrigPosX, originalPosY: prevOrigPosY, originalPosZ: prevOrigPosZ };
+          } else {
+            return { ...obj, startPoint: prevStartPoint, endPoint: prevEndPoint, wasMoved: prevWasMoved, originalStartPoint: prevOrigStartPoint, originalEndPoint: prevOrigEndPoint };
+          }
+        });
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for object rotation
   const handleObjectRotate = useCallback((object: ArchitecturalObject, angle: number) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        // Check if this is a single-point element (doors)
-        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const isSinglePoint = current.posX !== undefined && current.posY !== undefined && current.posZ !== undefined;
 
-        if (isSinglePoint) {
-          // For single-point elements: angle is in radians, convert to degrees and update rotationZ
-          // rotationZ in CSV corresponds to Three.js Y-axis (vertical/up axis)
-          const angleInDegrees = (angle * 180) / Math.PI;
-          return {
-            ...obj,
-            rotationZ: (obj.rotationZ || 0) + angleInDegrees,
-            wasRotated: true,
-            originalRotationZ: obj.originalRotationZ ?? (obj.rotationZ || 0)
-          };
-        } else {
-          // For two-point elements: update rotation (in radians)
-          return {
-            ...obj,
-            rotation: (obj.rotation || 0) + angle,
-            wasRotated: true,
-            originalRotation: obj.originalRotation ?? (obj.rotation || 0)
-          };
-        }
-      }
-      return obj;
-    }));
+    const prevWasRotated = current.wasRotated ?? false;
+    const prevRotationZ = current.rotationZ;
+    const prevOrigRotationZ = current.originalRotationZ;
+    const prevRotation = current.rotation;
+    const prevOrigRotation = current.originalRotation;
 
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => {
-        if (!prev) return null;
-
-        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
-
-        if (isSinglePoint) {
-          const angleInDegrees = (angle * 180) / Math.PI;
-          return {
-            ...prev,
-            rotationZ: (prev.rotationZ || 0) + angleInDegrees,
-            wasRotated: true,
-            originalRotationZ: prev.originalRotationZ ?? (prev.rotationZ || 0)
-          };
-        } else {
-          return {
-            ...prev,
-            rotation: (prev.rotation || 0) + angle,
-            wasRotated: true,
-            originalRotation: prev.originalRotation ?? (prev.rotation || 0)
-          };
-        }
-      });
-    }
-  }, [selectedObject]);
+    executeCommand({
+      commandName: 'RotateObject',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => {
+          if (isSinglePoint) {
+            const angleInDegrees = (angle * 180) / Math.PI;
+            return { ...obj, rotationZ: (obj.rotationZ || 0) + angleInDegrees, wasRotated: true, originalRotationZ: obj.originalRotationZ ?? (obj.rotationZ || 0) };
+          } else {
+            return { ...obj, rotation: (obj.rotation || 0) + angle, wasRotated: true, originalRotation: obj.originalRotation ?? (obj.rotation || 0) };
+          }
+        });
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => {
+          if (isSinglePoint) {
+            return { ...obj, rotationZ: prevRotationZ, wasRotated: prevWasRotated, originalRotationZ: prevOrigRotationZ };
+          } else {
+            return { ...obj, rotation: prevRotation, wasRotated: prevWasRotated, originalRotation: prevOrigRotation };
+          }
+        });
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for object height change
   const handleObjectHeightChange = useCallback((object: ArchitecturalObject, newHeight: number) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        return {
-          ...obj,
-          height: newHeight,
-          wasHeightChanged: true,
-          originalHeight: obj.originalHeight ?? obj.height
-        };
-      }
-      return obj;
-    }));
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const prevHeight = current.height;
+    const prevWasHeightChanged = current.wasHeightChanged ?? false;
+    const prevOriginalHeight = current.originalHeight;
 
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => prev ? {
-        ...prev,
-        height: newHeight,
-        wasHeightChanged: true,
-        originalHeight: prev.originalHeight ?? prev.height
-      } : null);
-    }
-  }, [selectedObject]);
+    executeCommand({
+      commandName: 'ObjectHeightChange',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, height: newHeight, wasHeightChanged: true, originalHeight: obj.originalHeight ?? obj.height,
+        }));
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, height: prevHeight, wasHeightChanged: prevWasHeightChanged, originalHeight: prevOriginalHeight,
+        }));
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for single-point position change (for doors, columns, etc.)
   const handleSinglePointPositionChange = useCallback((object: ArchitecturalObject, newPosX: number, newPosY: number, newPosZ: number) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        return {
-          ...obj,
-          posX: newPosX,
-          posY: newPosY,
-          posZ: newPosZ,
-          wasMoved: true,
-          originalPosX: obj.originalPosX ?? obj.posX,
-          originalPosY: obj.originalPosY ?? obj.posY,
-          originalPosZ: obj.originalPosZ ?? obj.posZ
-        };
-      }
-      return obj;
-    }));
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const prevPosX = current.posX; const prevPosY = current.posY; const prevPosZ = current.posZ;
+    const prevWasMoved = current.wasMoved ?? false;
+    const prevOrigPosX = current.originalPosX; const prevOrigPosY = current.originalPosY; const prevOrigPosZ = current.originalPosZ;
 
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => prev ? {
-        ...prev,
-        posX: newPosX,
-        posY: newPosY,
-        posZ: newPosZ,
-        wasMoved: true,
-        originalPosX: prev.originalPosX ?? prev.posX,
-        originalPosY: prev.originalPosY ?? prev.posY,
-        originalPosZ: prev.originalPosZ ?? prev.posZ
-      } : null);
-    }
-  }, [selectedObject]);
+    executeCommand({
+      commandName: 'MoveObject',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, posX: newPosX, posY: newPosY, posZ: newPosZ, wasMoved: true,
+          originalPosX: obj.originalPosX ?? obj.posX, originalPosY: obj.originalPosY ?? obj.posY, originalPosZ: obj.originalPosZ ?? obj.posZ,
+        }));
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, posX: prevPosX, posY: prevPosY, posZ: prevPosZ, wasMoved: prevWasMoved,
+          originalPosX: prevOrigPosX, originalPosY: prevOrigPosY, originalPosZ: prevOrigPosZ,
+        }));
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for object start/end points change (for length editing)
   const handleObjectPointsChange = useCallback((object: ArchitecturalObject, newStartPoint: [number, number, number], newEndPoint: [number, number, number]) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        return {
-          ...obj,
-          startPoint: newStartPoint,
-          endPoint: newEndPoint,
-          wasMoved: true,
-          originalStartPoint: obj.originalStartPoint ?? obj.startPoint,
-          originalEndPoint: obj.originalEndPoint ?? obj.endPoint
-        };
-      }
-      return obj;
-    }));
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const prevStartPoint = current.startPoint ? [...current.startPoint] as [number, number, number] : undefined;
+    const prevEndPoint = current.endPoint ? [...current.endPoint] as [number, number, number] : undefined;
+    const prevWasMoved = current.wasMoved ?? false;
+    const prevOrigStartPoint = current.originalStartPoint ? [...current.originalStartPoint] as [number, number, number] : undefined;
+    const prevOrigEndPoint = current.originalEndPoint ? [...current.originalEndPoint] as [number, number, number] : undefined;
 
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => prev ? {
-        ...prev,
-        startPoint: newStartPoint,
-        endPoint: newEndPoint,
-        wasMoved: true,
-        originalStartPoint: prev.originalStartPoint ?? prev.startPoint,
-        originalEndPoint: prev.originalEndPoint ?? prev.endPoint
-      } : null);
-    }
-  }, [selectedObject]);
+    executeCommand({
+      commandName: 'MoveObject',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, startPoint: newStartPoint, endPoint: newEndPoint, wasMoved: true,
+          originalStartPoint: obj.originalStartPoint ?? obj.startPoint, originalEndPoint: obj.originalEndPoint ?? obj.endPoint,
+        }));
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, startPoint: prevStartPoint, endPoint: prevEndPoint, wasMoved: prevWasMoved,
+          originalStartPoint: prevOrigStartPoint, originalEndPoint: prevOrigEndPoint,
+        }));
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for object deletion
   const handleObjectDelete = useCallback((object: ArchitecturalObject) => {
-    setArchitecturalObjects(prev => prev.filter(obj => obj.id !== object.id));
-    setSelectedObject(null);
-  }, []);
+    const prevSelectedObjectId = selectedObjectId;
+    const prevSelectedObjectIds = [...selectedObjectIds];
+    const frozenSnapshot = { ...object, customProperties: object.customProperties ? { ...object.customProperties } : undefined };
+
+    executeCommand({
+      commandName: 'DeleteObject',
+      do() {
+        setArchitecturalObjects(prev => prev.filter(obj => obj.id !== frozenSnapshot.id));
+        setSelectedObjectId(cur => cur === frozenSnapshot.id ? null : cur);
+        setSelectedObjectIds(cur => cur.filter(id => id !== frozenSnapshot.id));
+      },
+      undo() {
+        setArchitecturalObjects(prev => [...prev, frozenSnapshot]);
+        const restoredIds = prevSelectedObjectIds.filter(id =>
+          architecturalObjectsRef.current.some(obj => obj.id === id) || id === frozenSnapshot.id
+        );
+        setSelectedObjectId(restoredIds.includes(prevSelectedObjectId ?? '') ? prevSelectedObjectId : null);
+        setSelectedObjectIds(restoredIds);
+      },
+    });
+  }, [selectedObjectId, selectedObjectIds, executeCommand]);
 
   // Handler for object reset
   const handleObjectReset = useCallback((object: ArchitecturalObject) => {
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        // Check if this is a single-point element (doors)
-        const isSinglePoint = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    // Capture all current values that reset will change
+    const isSinglePoint = current.posX !== undefined && current.posY !== undefined && current.posZ !== undefined;
+    const prevFields = isSinglePoint ? {
+      posX: current.posX, posY: current.posY, posZ: current.posZ,
+      rotationX: current.rotationX, rotationY: current.rotationY, rotationZ: current.rotationZ,
+      width: current.width, height: current.height, depth: current.depth,
+      wasMoved: current.wasMoved ?? false, wasRotated: current.wasRotated ?? false, wasResized: current.wasResized ?? false,
+    } : {
+      startPoint: current.startPoint ? [...current.startPoint] as [number, number, number] : undefined,
+      endPoint: current.endPoint ? [...current.endPoint] as [number, number, number] : undefined,
+      height: current.height, rotation: current.rotation,
+      wasMoved: current.wasMoved ?? false, wasRotated: current.wasRotated ?? false, wasHeightChanged: current.wasHeightChanged ?? false,
+    };
 
-        if (isSinglePoint) {
-          // Reset single-point element properties
-          return {
-            ...obj,
-            posX: obj.originalPosX ?? obj.posX,
-            posY: obj.originalPosY ?? obj.posY,
-            posZ: obj.originalPosZ ?? obj.posZ,
-            rotationX: obj.originalRotationX ?? obj.rotationX ?? 0,
-            rotationY: obj.originalRotationY ?? obj.rotationY ?? 0,
-            rotationZ: obj.originalRotationZ ?? obj.rotationZ ?? 0,
-            width: obj.originalWidth ?? obj.width,
-            height: obj.originalHeight ?? obj.height,
-            depth: obj.originalDepth ?? obj.depth,
-            wasMoved: false,
-            wasRotated: false,
-            wasResized: false
-          };
-        } else {
-          // Reset two-point element properties
-          return {
-            ...obj,
-            startPoint: obj.originalStartPoint || obj.startPoint,
-            endPoint: obj.originalEndPoint || obj.endPoint,
-            height: obj.originalHeight ?? obj.height,
-            rotation: obj.originalRotation ?? obj.rotation ?? 0,
-            wasMoved: false,
-            wasRotated: false,
-            wasHeightChanged: false
-          };
-        }
-      }
-      return obj;
-    }));
-
-    if (selectedObject?.id === object.id) {
-      setSelectedObject(prev => {
-        if (!prev) return null;
-
-        const isSinglePoint = prev.posX !== undefined && prev.posY !== undefined && prev.posZ !== undefined;
-
-        if (isSinglePoint) {
-          return {
-            ...prev,
-            posX: prev.originalPosX ?? prev.posX,
-            posY: prev.originalPosY ?? prev.posY,
-            posZ: prev.originalPosZ ?? prev.posZ,
-            rotationX: prev.originalRotationX ?? prev.rotationX ?? 0,
-            rotationY: prev.originalRotationY ?? prev.rotationY ?? 0,
-            rotationZ: prev.originalRotationZ ?? prev.rotationZ ?? 0,
-            width: prev.originalWidth ?? prev.width,
-            height: prev.originalHeight ?? prev.height,
-            depth: prev.originalDepth ?? prev.depth,
-            wasMoved: false,
-            wasRotated: false,
-            wasResized: false
-          };
-        } else {
-          return {
-            ...prev,
-            startPoint: prev.originalStartPoint || prev.startPoint,
-            endPoint: prev.originalEndPoint || prev.endPoint,
-            height: prev.originalHeight ?? prev.height,
-            rotation: prev.originalRotation ?? prev.rotation ?? 0,
-            wasMoved: false,
-            wasRotated: false,
-            wasHeightChanged: false
-          };
-        }
-      });
-    }
-  }, [selectedObject]);
+    executeCommand({
+      commandName: 'ResetObject',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => {
+          const sp = obj.posX !== undefined && obj.posY !== undefined && obj.posZ !== undefined;
+          if (sp) {
+            return {
+              ...obj,
+              posX: obj.originalPosX ?? obj.posX, posY: obj.originalPosY ?? obj.posY, posZ: obj.originalPosZ ?? obj.posZ,
+              rotationX: obj.originalRotationX ?? obj.rotationX ?? 0, rotationY: obj.originalRotationY ?? obj.rotationY ?? 0, rotationZ: obj.originalRotationZ ?? obj.rotationZ ?? 0,
+              width: obj.originalWidth ?? obj.width, height: obj.originalHeight ?? obj.height, depth: obj.originalDepth ?? obj.depth,
+              wasMoved: false, wasRotated: false, wasResized: false,
+            };
+          } else {
+            return {
+              ...obj,
+              startPoint: obj.originalStartPoint || obj.startPoint, endPoint: obj.originalEndPoint || obj.endPoint,
+              height: obj.originalHeight ?? obj.height, rotation: obj.originalRotation ?? obj.rotation ?? 0,
+              wasMoved: false, wasRotated: false, wasHeightChanged: false,
+            };
+          }
+        });
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, ...prevFields,
+        }));
+      },
+    });
+  }, [executeCommand]);
 
   // Handler for object variant change
   const handleObjectVariantChange = useCallback((object: ArchitecturalObject, variant: FixtureVariant) => {
-    console.log(`[3DViewerModifier] Changing variant for ${object.type} ${object.id} to:`, variant);
+    const current = findObjectById(architecturalObjectsRef.current, object.id);
+    if (!current) return;
+    const prevVariant = current.variant;
+    const prevGlbUrl = current.customProperties?.glbUrl;
 
-    // Use new field names (name, url) with fallback to deprecated ones (block_name, glb_url)
     const variantName = variant.name || variant.block_name || 'Unknown';
     const variantUrl = variant.url || variant.glb_url;
 
-    setArchitecturalObjects(prev => prev.map(obj => {
-      if (obj.id === object.id) {
-        return {
-          ...obj,
-          variant: variantName,
-          customProperties: {
-            ...obj.customProperties,
-            glbUrl: variantUrl
-          }
-        };
-      }
-      return obj;
-    }));
-
-    // Update selected object as well
-    setSelectedObject(prev => {
-      if (!prev || prev.id !== object.id) return prev;
-      return {
-        ...prev,
-        variant: variantName,
-        customProperties: {
-          ...prev.customProperties,
-          glbUrl: variantUrl
-        }
-      };
+    executeCommand({
+      commandName: 'ObjectVariantChange',
+      do() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, variant: variantName, customProperties: { ...obj.customProperties, glbUrl: variantUrl },
+        }));
+      },
+      undo() {
+        updateObjectById(setArchitecturalObjects, object.id, obj => ({
+          ...obj, variant: prevVariant, customProperties: { ...obj.customProperties, glbUrl: prevGlbUrl },
+        }));
+      },
     });
-  }, []);
+  }, [executeCommand]);
 
   // Helper function to get floor index mapping if floors have been reordered or deleted
   const getFloorIndexMapping = useCallback((): Map<number, number> | null => {
@@ -1944,11 +1948,10 @@ export function ThreeDViewerModifier() {
         // Exclude forDelete fixtures (marked when split or type-changed)
         if (location.forDelete) return false;
 
-        // Exclude deleted fixtures
-        const key = generateFixtureUID(location);
-        return !deletedFixtures.has(key);
+        // Exclude deleted fixtures (keyed by _stableId)
+        return !deletedFixtures.has(location._stableId);
       });
-      
+
       for (const location of currentFloorLocations) {
         try {
           const fixtureGLTF = await new Promise<GLTF>((resolve, reject) => {
@@ -3189,55 +3192,36 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
   }, []);
 
   const handleGizmoRotationChange = useCallback((location: LocationData, newRotation: [number, number, number]) => {
-    const key = generateFixtureUID(location);
-    setLocationData(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return {
-          ...loc,
-          rotationX: newRotation[0],
-          rotationY: newRotation[1],
-          rotationZ: newRotation[2],
+    const stableId = location._stableId;
+    if (!stableId) return;
+
+    const current = findFixtureById(locationDataRef.current, stableId);
+    if (!current) return;
+
+    const prevRotX = current.rotationX; const prevRotY = current.rotationY; const prevRotZ = current.rotationZ;
+    const prevWasRotated = current.wasRotated ?? false;
+    const prevOrigRotX = current.originalRotationX; const prevOrigRotY = current.originalRotationY; const prevOrigRotZ = current.originalRotationZ;
+
+    executeCommand({
+      commandName: 'GizmoRotation',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc, rotationX: newRotation[0], rotationY: newRotation[1], rotationZ: newRotation[2],
           wasRotated: true,
           originalRotationX: loc.originalRotationX ?? loc.rotationX,
           originalRotationY: loc.originalRotationY ?? loc.rotationY,
           originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
-        };
-      }
-      return loc;
-    }));
-
-    setSelectedLocation(prev => {
-      if (prev && generateFixtureUID(prev) === key) {
-        return {
-          ...prev,
-          rotationX: newRotation[0],
-          rotationY: newRotation[1],
-          rotationZ: newRotation[2],
-          wasRotated: true,
-          originalRotationX: prev.originalRotationX ?? prev.rotationX,
-          originalRotationY: prev.originalRotationY ?? prev.rotationY,
-          originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
-        };
-      }
-      return prev;
+        }));
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc, rotationX: prevRotX, rotationY: prevRotY, rotationZ: prevRotZ,
+          wasRotated: prevWasRotated,
+          originalRotationX: prevOrigRotX, originalRotationY: prevOrigRotY, originalRotationZ: prevOrigRotZ,
+        }));
+      },
     });
-
-    setSelectedLocations(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return {
-          ...loc,
-          rotationX: newRotation[0],
-          rotationY: newRotation[1],
-          rotationZ: newRotation[2],
-          wasRotated: true,
-          originalRotationX: loc.originalRotationX ?? loc.rotationX,
-          originalRotationY: loc.originalRotationY ?? loc.rotationY,
-          originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
-        };
-      }
-      return loc;
-    }));
-  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+  }, [executeCommand]);
 
   const handleFloorPlateClick = useCallback((plateData: any) => {
     setSelectedFloorPlate(plateData);
@@ -3255,20 +3239,22 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
     if (editFloorplatesMode) {
       setSelectedFloorPlate(null);
     } else {
-      setSelectedLocations([]);
-      setSelectedLocation(null);
-      setSelectedObject(null);
+      setSelectedLocationIds([]);
+      setSelectedLocationId(null);
+      setSelectedObjectId(null);
+      setSelectedObjectIds([]);
     }
-  }, [isAddingObject, isTransforming, editFloorplatesMode, setSelectedLocations, setSelectedLocation]);
+  }, [isAddingObject, isTransforming, editFloorplatesMode]);
 
   // Clear selections when spawn point mode changes
   useEffect(() => {
     if (setSpawnPointMode) {
       // Clear fixture selections when entering spawn point mode
-      setSelectedLocation(null);
-      setSelectedLocations([]);
+      setSelectedLocationId(null);
+      setSelectedLocationIds([]);
       setSelectedFloorPlate(null);
-      setSelectedObject(null);
+      setSelectedObjectId(null);
+      setSelectedObjectIds([]);
     }
   }, [setSpawnPointMode]);
 
@@ -3606,10 +3592,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
       const trackedOriginalKey = originalKey;
       originalFixtures.add(trackedOriginalKey);
       
-      // Check if this fixture has been deleted - skip if so
-      // Check both original UID and current UID for deletion since deletion uses current UID
-      const currentKey = generateFixtureUID(matchingLocation);
-      if (deletedFixtures.has(trackedOriginalKey) || deletedFixtures.has(currentKey)) {
+      // Check if this fixture has been deleted - skip if so (keyed by _stableId)
+      if (deletedFixtures.has(matchingLocation._stableId)) {
         continue; // Skip deleted fixtures
       }
       
@@ -4535,9 +4519,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           // Exclude forDelete fixtures
           if (location.forDelete) return false;
 
-          // Exclude deleted fixtures
-          const key = generateFixtureUID(location);
-          return !deletedFixtures.has(key);
+          // Exclude deleted fixtures (keyed by _stableId)
+          return !deletedFixtures.has(location._stableId);
         })
         .forEach(location => {
           if (location.brand && location.brand.trim() !== '') {
@@ -4612,6 +4595,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             const fixtureId = values[14]?.trim() || undefined; // Fixture ID (optional, 15th column)
 
             const locationItem = {
+              _stableId: '',  // Placeholder — ensureStableId fills this after load
               // Current state
               blockName,
               floorIndex: parseInt(values[1]) || 0,
@@ -4717,8 +4701,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             });
           }
 
-          // First time loading: use CSV data (without doors)
-          const newData = [...finalDataWithGLBs];
+          // First time loading: assign _stableId to every fixture and use CSV data (without doors)
+          const newData = finalDataWithGLBs.map(loc => ensureStableId(loc));
           return newData;
         });
 
@@ -5009,6 +4993,10 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             setFloorHeights(prev => { const next = new Map(prev); next.set(idx, v); return next; });
           }}
           onFixtureStyleChange={setFixtureStyle}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
         />
         <Canvas3D
           cameraPosition={cameraPosition}
@@ -5133,30 +5121,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 });
               });
 
-              // Update selected locations with the same values
-              setSelectedLocations(prev => {
-                return prev.map(loc => {
-                  // Get current origin values for this fixture
-                  const currentOriginX = loc.originX ?? 0;
-                  const currentOriginY = loc.originY ?? 0;
-
-                  // Calculate the origin difference to adjust position
-                  const originDiffX = keepSamePosition ? 0 : currentOriginX - newOriginX;
-                  const originDiffY = keepSamePosition ? 0 : currentOriginY - newOriginY;
-
-                  return {
-                    ...loc,
-                    floorIndex: newFloorIndex,
-                    originX: newOriginX,
-                    originY: newOriginY,
-                    posX: loc.posX + originDiffX,
-                    posY: loc.posY + originDiffY,
-                    wasMoved: true,
-                    originalPosX: loc.originalPosX ?? loc.posX,
-                    originalPosY: loc.originalPosY ?? loc.posY,
-                  };
-                });
-              });
             }}
           />
         )}
@@ -5168,8 +5132,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             editMode={editMode}
             floorNames={floorNames}
             onClose={() => {
-              setSelectedObjects([]);
-              setSelectedObject(null);
+              setSelectedObjectIds([]);
+              setSelectedObjectId(null);
             }}
             onCopyObjects={(objects) => {
               const success = copyArchObjects(objects, jobId || undefined);
@@ -5179,8 +5143,8 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
               // Delete multiple objects
               const objectIds = objects.map(obj => obj.id);
               setArchitecturalObjects(prev => prev.filter(obj => !objectIds.includes(obj.id)));
-              setSelectedObjects([]);
-              setSelectedObject(null);
+              setSelectedObjectIds([]);
+              setSelectedObjectId(null);
             }}
           />
         )}
@@ -5190,7 +5154,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
           <ObjectInfoPanel
             selectedObject={selectedObject}
             editMode={editMode}
-            onClose={() => setSelectedObject(null)}
+            onClose={() => setSelectedObjectId(null)}
             onRotate={handleObjectRotate}
             onHeightChange={handleObjectHeightChange}
             onPositionChange={handleObjectPointsChange}
@@ -5221,7 +5185,7 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
             spawnPoints={spawnPoints}
             modifiedFloorPlates={modifiedFloorPlates}
             fixtureTypeMap={fixtureTypeMap.current}
-            onCloseLocation={() => setSelectedLocation(null)}
+            onCloseLocation={() => setSelectedLocationId(null)}
             onCloseFloorPlate={() => setSelectedFloorPlate(null)}
             onOpenFixtureTypeModal={() => setFixtureTypeModalOpen(true)}
             onOpenBrandModal={() => setBrandModalOpen(true)}
@@ -5257,22 +5221,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 return loc;
               }));
 
-              // Update selected location
-              setSelectedLocation(prev => {
-                if (prev && generateFixtureUID(prev) === key) {
-                  return {
-                    ...prev,
-                    rotationX: newRotation[0],
-                    rotationY: newRotation[1],
-                    rotationZ: newRotation[2],
-                    wasRotated: true,
-                    originalRotationX: prev.originalRotationX ?? prev.rotationX,
-                    originalRotationY: prev.originalRotationY ?? prev.rotationY,
-                    originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
-                  };
-                }
-                return prev;
-              });
             }}
             availableFloorIndices={availableFloorIndices}
             floorNames={floorNames}
@@ -5314,23 +5262,6 @@ const createModifiedZipBlob = useCallback(async (): Promise<Blob> => {
                 });
               });
 
-              // Update selected location with the same values
-              setSelectedLocation(prev => {
-                if (prev && generateFixtureUID(prev) === key) {
-                  return {
-                    ...prev,
-                    floorIndex: newFloorIndex,
-                    originX: newOriginX,
-                    originY: newOriginY,
-                    posX: prev.posX + originDiffX,
-                    posY: prev.posY + originDiffY,
-                    wasMoved: true,
-                    originalPosX: prev.originalPosX ?? prev.posX,
-                    originalPosY: prev.originalPosY ?? prev.posY,
-                  };
-                }
-                return prev;
-              });
             }}
           />
         )}

@@ -183,6 +183,7 @@ function parseLocationCsv(csvText: string): LocationData[] {
     const fixtureId = values[14]?.trim() || undefined;
 
     data.push({
+      _stableId: `${ingestionTimestamp}-${i}-${Math.random().toString(36).substr(2, 9)}`,
       blockName,
       floorIndex,
       originX,

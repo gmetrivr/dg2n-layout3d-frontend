@@ -1,6 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 
 export interface LocationData {
+  // Stable identity — assigned once on load or creation, never changes
+  _stableId: string;
+
   // Current state (what's displayed and used)
   blockName: string;
   floorIndex: number;
@@ -32,7 +35,7 @@ export interface LocationData {
   originalHierarchy?: number;
   originalGlbUrl?: string;
   originalFixtureId?: string;
-  
+
   // Modification tracking
   wasMoved?: boolean;
   wasRotated?: boolean;
@@ -66,85 +69,54 @@ export function generateOriginalUID(location: LocationData): string {
   const originalPosZ = location.originalPosZ ?? location.posZ;
   const originalBlockName = location.originalBlockName ?? location.blockName;
   const timestamp = location._ingestionTimestamp || location._updateTimestamp || Date.now();
-  
+
   return `${originalBlockName}-${originalPosX.toFixed(3)}-${originalPosY.toFixed(3)}-${originalPosZ.toFixed(3)}-${timestamp}`;
 }
 
 export function useFixtureSelection(editFloorplatesMode: boolean = false) {
-  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
-  const [selectedLocations, setSelectedLocations] = useState<LocationData[]>([]);
+  // ID-based selection state — derived LocationData objects computed via useMemo in parent
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([]);
 
-  // Handle multi-select functionality
   const handleFixtureClick = useCallback((clickedLocation: LocationData, event?: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean }) => {
     if (editFloorplatesMode) return;
     const isMultiSelect = event?.shiftKey || event?.metaKey || event?.ctrlKey;
-    
+    const clickedId = clickedLocation._stableId;
+    if (!clickedId) return;
+
     if (isMultiSelect) {
-      setSelectedLocations(prev => {
-        // Include current single selection if we're transitioning from single to multi
-        const currentSelections = prev.length === 0 && selectedLocation ? [selectedLocation] : prev;
-        
-        const isAlreadySelected = currentSelections.some(loc => 
-          loc.blockName === clickedLocation.blockName &&
-          Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
-          Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
-          Math.abs(loc.posZ - clickedLocation.posZ) < 0.001
-        );
-        
-        if (isAlreadySelected) {
-          // Remove from selection
-          const newSelection = currentSelections.filter(loc => !(loc.blockName === clickedLocation.blockName &&
-            Math.abs(loc.posX - clickedLocation.posX) < 0.001 &&
-            Math.abs(loc.posY - clickedLocation.posY) < 0.001 &&
-            Math.abs(loc.posZ - clickedLocation.posZ) < 0.001));
-          
-          return newSelection;
+      setSelectedLocationIds(prev => {
+        // Include current single selection if transitioning from single to multi
+        const currentIds = prev.length === 0 && selectedLocationId ? [selectedLocationId] : prev;
+        if (currentIds.includes(clickedId)) {
+          return currentIds.filter(id => id !== clickedId);
         } else {
-          // Add to selection
-          const newSelection = [...currentSelections, clickedLocation];
-          return newSelection;
+          return [...currentIds, clickedId];
         }
       });
-      
-      // Update selectedLocation based on new selection state
-      setSelectedLocation(null); // Will be updated by useEffect
+      setSelectedLocationId(null);
     } else {
-      // Single select
-      setSelectedLocations([clickedLocation]);
-      setSelectedLocation(clickedLocation);
+      setSelectedLocationId(clickedId);
+      setSelectedLocationIds([clickedId]);
     }
-  }, [editFloorplatesMode, selectedLocation]);
+  }, [editFloorplatesMode, selectedLocationId]);
 
-  // Check if a location is selected (check selectedLocations array as single source of truth)
+  // Check if a location is selected by _stableId
   const isLocationSelected = useCallback((location: LocationData) => {
-    const locationUID = generateFixtureUID(location);
-    return selectedLocations.some(loc => 
-      generateFixtureUID(loc) === locationUID
-    );
-  }, [selectedLocations]);
+    return location._stableId ? selectedLocationIds.includes(location._stableId) : false;
+  }, [selectedLocationIds]);
 
   // Clear all selections
   const clearSelections = useCallback(() => {
-    setSelectedLocation(null);
-    setSelectedLocations([]);
+    setSelectedLocationId(null);
+    setSelectedLocationIds([]);
   }, []);
-  
-  // Sync selectedLocation with selectedLocations array
-  useEffect(() => {
-    if (selectedLocations.length === 1) {
-      setSelectedLocation(selectedLocations[0]);
-    } else if (selectedLocations.length > 1) {
-      setSelectedLocation(null);
-    } else {
-      setSelectedLocation(null);
-    }
-  }, [selectedLocations]);
 
   return {
-    selectedLocation,
-    selectedLocations,
-    setSelectedLocation,
-    setSelectedLocations,
+    selectedLocationId,
+    selectedLocationIds,
+    setSelectedLocationId,
+    setSelectedLocationIds,
     handleFixtureClick,
     isLocationSelected,
     clearSelections,

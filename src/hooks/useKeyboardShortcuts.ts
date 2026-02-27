@@ -3,26 +3,23 @@ import { useEffect } from 'react';
 export interface KeyboardShortcutHandlers {
   onCopy?: () => void;
   onPaste?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
   enabled?: boolean;
 }
 
 /**
- * Hook to handle keyboard shortcuts for copy/paste operations
- * Listens for Ctrl+C/Cmd+C and Ctrl+V/Cmd+V
- * Disabled when typing in input fields
+ * Hook to handle keyboard shortcuts for copy/paste and undo/redo operations.
+ * Listens for Ctrl+C/Cmd+C, Ctrl+V/Cmd+V, Ctrl+Z/Cmd+Z, Ctrl+Y/Cmd+Shift+Z.
+ * Disabled when typing in input fields (focus guard).
  */
 export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers) {
   useEffect(() => {
     if (handlers.enabled === false) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts when typing in input/textarea
-      const target = e.target as HTMLElement;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target.isContentEditable
-      ) {
+      // Focus guard — don't intercept when a text input is focused
+      if (document.activeElement?.closest('input, textarea, select, [contenteditable="true"]')) {
         return;
       }
 
@@ -40,6 +37,21 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers) {
       if (modKey && e.key === 'v' && handlers.onPaste) {
         e.preventDefault();
         handlers.onPaste();
+      }
+
+      // Undo: Ctrl+Z / Cmd+Z
+      if (modKey && e.key === 'z' && !e.shiftKey && handlers.onUndo) {
+        e.preventDefault();
+        handlers.onUndo();
+      }
+
+      // Redo: Ctrl+Y / Cmd+Shift+Z
+      if (handlers.onRedo) {
+        const isRedo = (modKey && e.key === 'y') || (modKey && e.shiftKey && e.key === 'z') || (modKey && e.shiftKey && e.key === 'Z');
+        if (isRedo) {
+          e.preventDefault();
+          handlers.onRedo();
+        }
       }
     };
 

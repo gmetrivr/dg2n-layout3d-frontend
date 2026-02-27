@@ -2,45 +2,7 @@ import { Pencil, Copy, Trash2, Check, SeparatorHorizontal } from 'lucide-react';
 import { Button } from "@/shadcn/components/ui/button";
 import { useState, useEffect } from 'react';
 import { SplitFixtureModal } from './SplitFixtureModal';
-
-interface LocationData {
-  blockName: string;
-  floorIndex: number;
-  originX?: number;
-  originY?: number;
-  posX: number;
-  posY: number;
-  posZ: number;
-  rotationX: number;
-  rotationY: number;
-  rotationZ: number;
-  brand: string;
-  count: number;
-  hierarchy: number;
-  glbUrl?: string;
-  _updateTimestamp?: number;
-  _ingestionTimestamp?: number;
-  // Original state (from CSV ingestion)
-  originalBlockName?: string;
-  originalPosX?: number;
-  originalPosY?: number;
-  originalPosZ?: number;
-  originalRotationX?: number;
-  originalRotationY?: number;
-  originalRotationZ?: number;
-  originalBrand?: string;
-  originalCount?: number;
-  originalHierarchy?: number;
-  // Modification tracking flags
-  wasMoved?: boolean;
-  wasRotated?: boolean;
-  wasTypeChanged?: boolean;
-  wasBrandChanged?: boolean;
-  wasCountChanged?: boolean;
-  wasHierarchyChanged?: boolean;
-  // Deletion tracking
-  forDelete?: boolean;
-}
+import type { LocationData } from '../hooks/useFixtureSelection';
 
 
 interface FloorPlateData {

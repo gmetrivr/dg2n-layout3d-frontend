@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, ChevronDown, ChevronRight, Settings, Plus, Clipboard } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Settings, Plus, Clipboard, Undo2, Redo2 } from 'lucide-react';
 import { Select } from "./ui/select";
 import { MultiSelect } from "./ui/multi-select";
 import { Button } from "@/shadcn/components/ui/button";
@@ -103,6 +103,10 @@ interface LeftControlPanelProps {
   onMeasuringChange?: (enabled: boolean) => void;
   onClearMeasurement?: () => void;
   onPaste?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
   onFloorHeightChange: (value: string) => void;
   onFixtureStyleChange: (value: string) => void;
 }
@@ -168,6 +172,10 @@ export function LeftControlPanel({
   onMeasuringChange,
   onClearMeasurement,
   onPaste,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   floorHeight,
   fixtureStyle,
   onFloorHeightChange,
@@ -567,6 +575,30 @@ export function LeftControlPanel({
                 <Clipboard className="h-4 w-4" />
                 Paste ({clipboardState.itemCount})
               </button>
+            )}
+
+            {/* Undo / Redo Buttons */}
+            {(onUndo || onRedo) && (
+              <div className="flex gap-2">
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className="flex items-center gap-1 text-sm px-3 py-1.5 rounded border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed flex-1 justify-center"
+                  title="Undo (Ctrl+Z)"
+                >
+                  <Undo2 className="h-4 w-4" />
+                  Undo
+                </button>
+                <button
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  className="flex items-center gap-1 text-sm px-3 py-1.5 rounded border border-border hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed flex-1 justify-center"
+                  title="Redo (Ctrl+Y)"
+                >
+                  <Redo2 className="h-4 w-4" />
+                  Redo
+                </button>
+              </div>
             )}
           </>
         )}

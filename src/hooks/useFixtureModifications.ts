@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react';
-import { type LocationData, generateFixtureUID } from './useFixtureSelection';
+import type { RefObject } from 'react';
+import { type LocationData } from './useFixtureSelection';
+import { type Command } from './useUndoRedo';
+import { findFixtureById, updateFixtureById } from './fixtureHelpers';
 
-// Legacy interfaces - keeping for backward compatibility but no longer actively used
-// All modification data is now embedded directly in LocationData objects
+// Legacy interfaces — kept for backward compatibility but no longer actively used
 export interface MovedFixture {
   originalPosition: [number, number, number];
   newPosition: [number, number, number];
@@ -35,537 +37,724 @@ export interface ModifiedFixtureHierarchy {
   newHierarchy: number;
 }
 
+/** Generate a stable ID without importing uuid. */
+function newStableId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+}
+
 export function useFixtureModifications(
   selectedLocation: LocationData | null,
   selectedLocations: LocationData[],
   selectedFloorPlate: any,
-  setSelectedLocation: React.Dispatch<React.SetStateAction<LocationData | null>>,
-  setSelectedLocations: React.Dispatch<React.SetStateAction<LocationData[]>>,
+  setSelectedLocationId: React.Dispatch<React.SetStateAction<string | null>>,
+  setSelectedLocationIds: React.Dispatch<React.SetStateAction<string[]>>,
   setLocationData: React.Dispatch<React.SetStateAction<LocationData[]>>,
-  setSelectedFloorPlate: React.Dispatch<React.SetStateAction<any>>
+  setSelectedFloorPlate: React.Dispatch<React.SetStateAction<any>>,
+  executeCommand: (cmd: Command) => void,
+  locationDataRef: RefObject<LocationData[]>
 ) {
-  // All modification tracking is now done via embedded flags in LocationData
-  // No more separate Maps needed
   const [modifiedFloorPlates, setModifiedFloorPlates] = useState<Map<string, any>>(new Map());
+  // deletedFixtures now stores _stableId values (not generateFixtureUID output)
   const [deletedFixtures, setDeletedFixtures] = useState<Set<string>>(new Set());
   const [deletedFixturePositions, setDeletedFixturePositions] = useState<Set<string>>(new Set());
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [fixturesToDelete, setFixturesToDelete] = useState<LocationData[]>([]);
 
+  // ─── Move ─────────────────────────────────────────────────────────────────
+
   const handlePositionChange = useCallback((location: LocationData, newPosition: [number, number, number]) => {
-    // This function is called only when transform ends (from Canvas3D)
-    // Single state update to minimize re-renders and preserve transform controls
-    const key = generateFixtureUID(location);
-    
-    // Batch all updates in a single state change to prevent multiple re-renders
-    setLocationData(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return {
-          ...loc,
-          posX: newPosition[0],
-          posY: newPosition[1], 
-          posZ: newPosition[2],
-          wasMoved: true,
-          // Preserve original position for reset functionality
-          originalPosX: loc.originalPosX ?? loc.posX,
-          originalPosY: loc.originalPosY ?? loc.posY,
-          originalPosZ: loc.originalPosZ ?? loc.posZ,
-        };
-      }
-      return loc;
-    }));
+    const stableId = location._stableId;
+    if (!stableId) return;
 
-    // Update selectedLocation without triggering re-selection that breaks transform controls
-    setSelectedLocation(prev => {
-      if (prev && generateFixtureUID(prev) === key) {
-        return {
-          ...prev,
-          posX: newPosition[0],
-          posY: newPosition[1],
-          posZ: newPosition[2],
+    const cur = findFixtureById(locationDataRef.current!, stableId) ?? location;
+    const prevX = cur.posX;
+    const prevY = cur.posY;
+    const prevZ = cur.posZ;
+    const prevWasMoved = cur.wasMoved;
+    const prevOrigX = cur.originalPosX;
+    const prevOrigY = cur.originalPosY;
+    const prevOrigZ = cur.originalPosZ;
+    const [newX, newY, newZ] = newPosition;
+
+    executeCommand({
+      commandName: 'MoveFixture',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          posX: newX,
+          posY: newY,
+          posZ: newZ,
           wasMoved: true,
-          originalPosX: prev.originalPosX ?? prev.posX,
-          originalPosY: prev.originalPosY ?? prev.posY,
-          originalPosZ: prev.originalPosZ ?? prev.posZ,
-        };
-      }
-      return prev;
+          originalPosX: loc.originalPosX ?? prevX,
+          originalPosY: loc.originalPosY ?? prevY,
+          originalPosZ: loc.originalPosZ ?? prevZ,
+        }));
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          posX: prevX,
+          posY: prevY,
+          posZ: prevZ,
+          wasMoved: prevWasMoved,
+          originalPosX: prevOrigX,
+          originalPosY: prevOrigY,
+          originalPosZ: prevOrigZ,
+        }));
+      },
     });
+  }, [setLocationData, executeCommand, locationDataRef]);
 
-    // Also update selectedLocations to keep the array in sync
-    setSelectedLocations(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return {
-          ...loc,
-          posX: newPosition[0],
-          posY: newPosition[1],
-          posZ: newPosition[2],
-          wasMoved: true,
-          originalPosX: loc.originalPosX ?? loc.posX,
-          originalPosY: loc.originalPosY ?? loc.posY,
-          originalPosZ: loc.originalPosZ ?? loc.posZ,
-        };
-      }
-      return loc;
-    }));
-  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
-
+  // ─── Rotate (single) ──────────────────────────────────────────────────────
 
   const handleRotateFixture = useCallback((degrees: number) => {
     if (!selectedLocation) return;
-    
-    const key = generateFixtureUID(selectedLocation);
-    
-    // Batch all updates in a single state change to prevent multiple re-renders
-    setLocationData(prev => prev.map(loc => {
-      const locKey = generateFixtureUID(loc);
-      if (locKey === key) {
-        // Calculate new rotation
-        let newRotationZ = loc.rotationZ + degrees;
-        newRotationZ = ((newRotationZ % 360) + 360) % 360;
-        
-        return {
-          ...loc,
-          // Update current rotation
-          rotationZ: newRotationZ,
-          // Set rotation flag and preserve original rotation
-          wasRotated: true,
-          originalRotationX: loc.originalRotationX ?? loc.rotationX,
-          originalRotationY: loc.originalRotationY ?? loc.rotationY,
-          originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
-        };
-      }
-      return loc;
-    }));
+    const stableId = selectedLocation._stableId;
+    if (!stableId) return;
 
-    // Update selectedLocation without triggering re-selection that breaks transform controls
-    setSelectedLocation(prev => {
-      if (prev && generateFixtureUID(prev) === key) {
-        let newRotationZ = prev.rotationZ + degrees;
-        newRotationZ = ((newRotationZ % 360) + 360) % 360;
-        
-        return {
-          ...prev,
-          rotationZ: newRotationZ,
-          wasRotated: true,
-          originalRotationX: prev.originalRotationX ?? prev.rotationX,
-          originalRotationY: prev.originalRotationY ?? prev.rotationY,
-          originalRotationZ: prev.originalRotationZ ?? prev.rotationZ,
-        };
-      }
-      return prev;
+    const cur = findFixtureById(locationDataRef.current!, stableId) ?? selectedLocation;
+    const prevRotZ = cur.rotationZ;
+    const prevWasRotated = cur.wasRotated;
+    const prevOrigRotX = cur.originalRotationX;
+    const prevOrigRotY = cur.originalRotationY;
+    const prevOrigRotZ = cur.originalRotationZ;
+
+    executeCommand({
+      commandName: 'RotateFixture',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => {
+          let newRotationZ = loc.rotationZ + degrees;
+          newRotationZ = ((newRotationZ % 360) + 360) % 360;
+          return {
+            ...loc,
+            rotationZ: newRotationZ,
+            wasRotated: true,
+            originalRotationX: loc.originalRotationX ?? loc.rotationX,
+            originalRotationY: loc.originalRotationY ?? loc.rotationY,
+            originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
+          };
+        });
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          rotationZ: prevRotZ,
+          wasRotated: prevWasRotated,
+          originalRotationX: prevOrigRotX,
+          originalRotationY: prevOrigRotY,
+          originalRotationZ: prevOrigRotZ,
+        }));
+      },
     });
-  }, [selectedLocation, setLocationData, setSelectedLocation]);
+  }, [selectedLocation, setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Rotate (multi) ───────────────────────────────────────────────────────
 
   const handleMultiRotateFixture = useCallback((degrees: number) => {
-    // Update LocationData for all selected fixtures
-    setLocationData(prev => prev.map(loc => {
-      const isSelected = selectedLocations.some(selectedLoc => 
-        generateFixtureUID(selectedLoc) === generateFixtureUID(loc)
-      );
-      
-      if (isSelected) {
-        // Calculate new rotation
-        let newRotationZ = loc.rotationZ + degrees;
-        newRotationZ = ((newRotationZ % 360) + 360) % 360;
-        
-        return {
-          ...loc,
-          // Update current rotation
-          rotationZ: newRotationZ,
-          // Set rotation flag and preserve original rotation
-          wasRotated: true,
-          originalRotationX: loc.originalRotationX ?? loc.rotationX,
-          originalRotationY: loc.originalRotationY ?? loc.rotationY,
-          originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
-        };
-      }
-      return loc;
-    }));
+    const stableIds = selectedLocations.map(loc => loc._stableId).filter(Boolean) as string[];
+    if (stableIds.length === 0) return;
 
-    // Update selectedLocations
-    setSelectedLocations(prev => prev.map(loc => {
-      let newRotationZ = loc.rotationZ + degrees;
-      newRotationZ = ((newRotationZ % 360) + 360) % 360;
-      
-      return {
-        ...loc,
-        rotationZ: newRotationZ,
-        wasRotated: true,
-        originalRotationX: loc.originalRotationX ?? loc.rotationX,
-        originalRotationY: loc.originalRotationY ?? loc.rotationY,
-        originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
-      };
-    }));
-  }, [selectedLocations]);
-
-  const handleMultiPositionChange = useCallback((delta: [number, number, number]) => {
-    // Apply position delta to all selected fixtures
-    // This is called when dragging multiple fixtures together
-
-    // Update LocationData for all selected fixtures
-    setLocationData(prev => prev.map(loc => {
-      const isSelected = selectedLocations.some(selectedLoc =>
-        generateFixtureUID(selectedLoc) === generateFixtureUID(loc)
-      );
-
-      if (isSelected) {
-        return {
-          ...loc,
-          posX: loc.posX + delta[0],
-          posY: loc.posY + delta[1],
-          posZ: loc.posZ + delta[2],
-          wasMoved: true,
-          // Preserve original position for reset functionality
-          originalPosX: loc.originalPosX ?? loc.posX,
-          originalPosY: loc.originalPosY ?? loc.posY,
-          originalPosZ: loc.originalPosZ ?? loc.posZ,
-        };
-      }
-      return loc;
-    }));
-
-    // Update selectedLocations
-    setSelectedLocations(prev => prev.map(loc => ({
-      ...loc,
-      posX: loc.posX + delta[0],
-      posY: loc.posY + delta[1],
-      posZ: loc.posZ + delta[2],
-      wasMoved: true,
-      originalPosX: loc.originalPosX ?? loc.posX,
-      originalPosY: loc.originalPosY ?? loc.posY,
-      originalPosZ: loc.originalPosZ ?? loc.posZ,
-    })));
-
-    // If single selection is also set, update it
-    setSelectedLocation(prev => {
-      if (prev && selectedLocations.some(loc => generateFixtureUID(loc) === generateFixtureUID(prev))) {
-        return {
-          ...prev,
-          posX: prev.posX + delta[0],
-          posY: prev.posY + delta[1],
-          posZ: prev.posZ + delta[2],
-          wasMoved: true,
-          originalPosX: prev.originalPosX ?? prev.posX,
-          originalPosY: prev.originalPosY ?? prev.posY,
-          originalPosZ: prev.originalPosZ ?? prev.posZ,
-        };
-      }
-      return prev;
-    });
-  }, [selectedLocations, setLocationData, setSelectedLocations, setSelectedLocation]);
-
-  const handleResetPosition = useCallback((location: LocationData, clearSelection = false) => {
-    // Reset fixture to original values using embedded data
-    const resetLocation: LocationData = {
-      ...location,
-      // Reset position
-      posX: location.originalPosX ?? location.posX,
-      posY: location.originalPosY ?? location.posY,
-      posZ: location.originalPosZ ?? location.posZ,
-      // Reset rotation
-      rotationX: location.originalRotationX ?? location.rotationX,
-      rotationY: location.originalRotationY ?? location.rotationY,
-      rotationZ: location.originalRotationZ ?? location.rotationZ,
-      // Reset other properties
-      blockName: location.originalBlockName ?? location.blockName,
-      brand: location.originalBrand ?? location.brand,
-      count: location.originalCount ?? location.count,
-      hierarchy: location.originalHierarchy ?? location.hierarchy,
-      // Clear modification flags
-      wasMoved: false,
-      wasRotated: false,
-      wasTypeChanged: false,
-      wasBrandChanged: false,
-      wasCountChanged: false,
-      wasHierarchyChanged: false,
+    type RotSnapshot = {
+      stableId: string;
+      prevRotZ: number;
+      prevWasRotated: boolean | undefined;
+      prevOrigRotX: number | undefined;
+      prevOrigRotY: number | undefined;
+      prevOrigRotZ: number | undefined;
     };
 
-    const locationKey = generateFixtureUID(location);
+    const snapshots: RotSnapshot[] = stableIds.map(id => {
+      const loc = findFixtureById(locationDataRef.current!, id);
+      return {
+        stableId: id,
+        prevRotZ: loc?.rotationZ ?? 0,
+        prevWasRotated: loc?.wasRotated,
+        prevOrigRotX: loc?.originalRotationX,
+        prevOrigRotY: loc?.originalRotationY,
+        prevOrigRotZ: loc?.originalRotationZ,
+      };
+    });
 
-    // Update location data
-    setLocationData(prev => prev.map(loc =>
-      generateFixtureUID(loc) === locationKey ? resetLocation : loc
-    ));
+    const stableIdSet = new Set(stableIds);
 
-    // Clear selections if requested (used when resetting from multi-selection)
-    if (clearSelection) {
-      setSelectedLocations([]);
-      setSelectedLocation(null);
-    } else {
-      // Update selectedLocations array if this fixture is part of multi-selection
-      setSelectedLocations(prev =>
-        prev.map(loc =>
-          generateFixtureUID(loc) === locationKey ? resetLocation : loc
-        )
-      );
+    executeCommand({
+      commandName: 'RotateFixture',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId || !stableIdSet.has(loc._stableId)) return loc;
+          let newRotationZ = loc.rotationZ + degrees;
+          newRotationZ = ((newRotationZ % 360) + 360) % 360;
+          return {
+            ...loc,
+            rotationZ: newRotationZ,
+            wasRotated: true,
+            originalRotationX: loc.originalRotationX ?? loc.rotationX,
+            originalRotationY: loc.originalRotationY ?? loc.rotationY,
+            originalRotationZ: loc.originalRotationZ ?? loc.rotationZ,
+          };
+        }));
+      },
+      undo() {
+        const prevMap = new Map(snapshots.map(s => [s.stableId, s]));
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const saved = prevMap.get(loc._stableId);
+          if (!saved) return loc;
+          return {
+            ...loc,
+            rotationZ: saved.prevRotZ,
+            wasRotated: saved.prevWasRotated,
+            originalRotationX: saved.prevOrigRotX,
+            originalRotationY: saved.prevOrigRotY,
+            originalRotationZ: saved.prevOrigRotZ,
+          };
+        }));
+      },
+    });
+  }, [selectedLocations, setLocationData, executeCommand, locationDataRef]);
 
-      // Update single selection
-      setSelectedLocation(null);
-      setTimeout(() => setSelectedLocation(resetLocation), 10);
-    }
-  }, [setSelectedLocation, setSelectedLocations, setLocationData]);
+  // ─── Move multi ───────────────────────────────────────────────────────────
 
-  const handleResetMultiplePositions = useCallback((locations: LocationData[]) => {
-    // Create a Set of keys for all locations to reset
-    const keysToReset = new Set(locations.map(loc => generateFixtureUID(loc)));
+  const handleMultiPositionChange = useCallback((delta: [number, number, number]) => {
+    const stableIds = selectedLocations.map(loc => loc._stableId).filter(Boolean) as string[];
+    if (stableIds.length === 0) return;
 
-    // Update location data - reset all matching fixtures
-    setLocationData(prev => prev.map(loc => {
-      const locKey = generateFixtureUID(loc);
-      if (keysToReset.has(locKey)) {
-        return {
+    type PosSnapshot = {
+      stableId: string;
+      prevX: number; prevY: number; prevZ: number;
+      newX: number; newY: number; newZ: number;
+      prevWasMoved: boolean | undefined;
+      prevOrigX: number | undefined;
+      prevOrigY: number | undefined;
+      prevOrigZ: number | undefined;
+    };
+
+    const snapshots: PosSnapshot[] = stableIds.map(id => {
+      const loc = findFixtureById(locationDataRef.current!, id);
+      const px = loc?.posX ?? 0;
+      const py = loc?.posY ?? 0;
+      const pz = loc?.posZ ?? 0;
+      return {
+        stableId: id,
+        prevX: px, prevY: py, prevZ: pz,
+        newX: px + delta[0], newY: py + delta[1], newZ: pz + delta[2],
+        prevWasMoved: loc?.wasMoved,
+        prevOrigX: loc?.originalPosX,
+        prevOrigY: loc?.originalPosY,
+        prevOrigZ: loc?.originalPosZ,
+      };
+    });
+
+    const doMap = new Map(snapshots.map(s => [s.stableId, s]));
+
+    executeCommand({
+      commandName: 'MoveFixtures',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const data = doMap.get(loc._stableId);
+          if (!data) return loc;
+          return {
+            ...loc,
+            posX: data.newX,
+            posY: data.newY,
+            posZ: data.newZ,
+            wasMoved: true,
+            originalPosX: loc.originalPosX ?? data.prevX,
+            originalPosY: loc.originalPosY ?? data.prevY,
+            originalPosZ: loc.originalPosZ ?? data.prevZ,
+          };
+        }));
+      },
+      undo() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const data = doMap.get(loc._stableId);
+          if (!data) return loc;
+          return {
+            ...loc,
+            posX: data.prevX,
+            posY: data.prevY,
+            posZ: data.prevZ,
+            wasMoved: data.prevWasMoved,
+            originalPosX: data.prevOrigX,
+            originalPosY: data.prevOrigY,
+            originalPosZ: data.prevOrigZ,
+          };
+        }));
+      },
+    });
+  }, [selectedLocations, setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Reset (single) ───────────────────────────────────────────────────────
+
+  const handleResetPosition = useCallback((location: LocationData) => {
+    const stableId = location._stableId;
+    if (!stableId) return;
+
+    const cur = findFixtureById(locationDataRef.current!, stableId) ?? location;
+
+    // Capture all current fields that reset will change
+    const prevPosX = cur.posX;
+    const prevPosY = cur.posY;
+    const prevPosZ = cur.posZ;
+    const prevRotX = cur.rotationX;
+    const prevRotY = cur.rotationY;
+    const prevRotZ = cur.rotationZ;
+    const prevBrand = cur.brand;
+    const prevBlockName = cur.blockName;
+    const prevGlbUrl = cur.glbUrl;
+    const prevCount = cur.count;
+    const prevHierarchy = cur.hierarchy;
+    const prevWasMoved = cur.wasMoved;
+    const prevWasRotated = cur.wasRotated;
+    const prevWasTypeChanged = cur.wasTypeChanged;
+    const prevWasBrandChanged = cur.wasBrandChanged;
+    const prevWasCountChanged = cur.wasCountChanged;
+    const prevWasHierarchyChanged = cur.wasHierarchyChanged;
+    const prevOrigPosX = cur.originalPosX;
+    const prevOrigPosY = cur.originalPosY;
+    const prevOrigPosZ = cur.originalPosZ;
+    const prevOrigRotX = cur.originalRotationX;
+    const prevOrigRotY = cur.originalRotationY;
+    const prevOrigRotZ = cur.originalRotationZ;
+    const prevOrigBrand = cur.originalBrand;
+    const prevOrigBlockName = cur.originalBlockName;
+    const prevOrigGlbUrl = cur.originalGlbUrl;
+    const prevOrigCount = cur.originalCount;
+    const prevOrigHierarchy = cur.originalHierarchy;
+
+    executeCommand({
+      commandName: 'ResetFixture',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => ({
           ...loc,
-          // Reset position
           posX: loc.originalPosX ?? loc.posX,
           posY: loc.originalPosY ?? loc.posY,
           posZ: loc.originalPosZ ?? loc.posZ,
-          // Reset rotation
           rotationX: loc.originalRotationX ?? loc.rotationX,
           rotationY: loc.originalRotationY ?? loc.rotationY,
           rotationZ: loc.originalRotationZ ?? loc.rotationZ,
-          // Reset other properties
           blockName: loc.originalBlockName ?? loc.blockName,
           brand: loc.originalBrand ?? loc.brand,
           count: loc.originalCount ?? loc.count,
           hierarchy: loc.originalHierarchy ?? loc.hierarchy,
-          // Clear modification flags
           wasMoved: false,
           wasRotated: false,
           wasTypeChanged: false,
           wasBrandChanged: false,
           wasCountChanged: false,
           wasHierarchyChanged: false,
-        };
-      }
-      return loc;
-    }));
+        }));
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          posX: prevPosX,
+          posY: prevPosY,
+          posZ: prevPosZ,
+          rotationX: prevRotX,
+          rotationY: prevRotY,
+          rotationZ: prevRotZ,
+          brand: prevBrand,
+          blockName: prevBlockName,
+          glbUrl: prevGlbUrl,
+          count: prevCount,
+          hierarchy: prevHierarchy,
+          wasMoved: prevWasMoved,
+          wasRotated: prevWasRotated,
+          wasTypeChanged: prevWasTypeChanged,
+          wasBrandChanged: prevWasBrandChanged,
+          wasCountChanged: prevWasCountChanged,
+          wasHierarchyChanged: prevWasHierarchyChanged,
+          originalPosX: prevOrigPosX,
+          originalPosY: prevOrigPosY,
+          originalPosZ: prevOrigPosZ,
+          originalRotationX: prevOrigRotX,
+          originalRotationY: prevOrigRotY,
+          originalRotationZ: prevOrigRotZ,
+          originalBrand: prevOrigBrand,
+          originalBlockName: prevOrigBlockName,
+          originalGlbUrl: prevOrigGlbUrl,
+          originalCount: prevOrigCount,
+          originalHierarchy: prevOrigHierarchy,
+        }));
+      },
+    });
+  }, [setLocationData, executeCommand, locationDataRef]);
 
-    // Clear multi-selection after resetting
-    setSelectedLocations([]);
-    setSelectedLocation(null);
-  }, [setSelectedLocation, setSelectedLocations, setLocationData]);
+  // ─── Reset (multi) ────────────────────────────────────────────────────────
+
+  const handleResetMultiplePositions = useCallback((locations: LocationData[]) => {
+    type ResetSnapshot = {
+      stableId: string;
+      prevPosX: number; prevPosY: number; prevPosZ: number;
+      prevRotX: number; prevRotY: number; prevRotZ: number;
+      prevBrand: string; prevBlockName: string; prevGlbUrl?: string;
+      prevCount: number; prevHierarchy: number;
+      prevWasMoved?: boolean; prevWasRotated?: boolean; prevWasTypeChanged?: boolean;
+      prevWasBrandChanged?: boolean; prevWasCountChanged?: boolean; prevWasHierarchyChanged?: boolean;
+      prevOrigPosX?: number; prevOrigPosY?: number; prevOrigPosZ?: number;
+      prevOrigRotX?: number; prevOrigRotY?: number; prevOrigRotZ?: number;
+      prevOrigBrand?: string; prevOrigBlockName?: string; prevOrigGlbUrl?: string;
+      prevOrigCount?: number; prevOrigHierarchy?: number;
+    };
+
+    const snapshots: ResetSnapshot[] = locations.map(loc => {
+      const cur = findFixtureById(locationDataRef.current!, loc._stableId) ?? loc;
+      return {
+        stableId: loc._stableId,
+        prevPosX: cur.posX, prevPosY: cur.posY, prevPosZ: cur.posZ,
+        prevRotX: cur.rotationX, prevRotY: cur.rotationY, prevRotZ: cur.rotationZ,
+        prevBrand: cur.brand, prevBlockName: cur.blockName, prevGlbUrl: cur.glbUrl,
+        prevCount: cur.count, prevHierarchy: cur.hierarchy,
+        prevWasMoved: cur.wasMoved, prevWasRotated: cur.wasRotated, prevWasTypeChanged: cur.wasTypeChanged,
+        prevWasBrandChanged: cur.wasBrandChanged, prevWasCountChanged: cur.wasCountChanged, prevWasHierarchyChanged: cur.wasHierarchyChanged,
+        prevOrigPosX: cur.originalPosX, prevOrigPosY: cur.originalPosY, prevOrigPosZ: cur.originalPosZ,
+        prevOrigRotX: cur.originalRotationX, prevOrigRotY: cur.originalRotationY, prevOrigRotZ: cur.originalRotationZ,
+        prevOrigBrand: cur.originalBrand, prevOrigBlockName: cur.originalBlockName, prevOrigGlbUrl: cur.originalGlbUrl,
+        prevOrigCount: cur.originalCount, prevOrigHierarchy: cur.originalHierarchy,
+      };
+    });
+
+    const stableIdSet = new Set(snapshots.map(s => s.stableId));
+    const prevMap = new Map(snapshots.map(s => [s.stableId, s]));
+
+    executeCommand({
+      commandName: 'ResetFixtures',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId || !stableIdSet.has(loc._stableId)) return loc;
+          return {
+            ...loc,
+            posX: loc.originalPosX ?? loc.posX,
+            posY: loc.originalPosY ?? loc.posY,
+            posZ: loc.originalPosZ ?? loc.posZ,
+            rotationX: loc.originalRotationX ?? loc.rotationX,
+            rotationY: loc.originalRotationY ?? loc.rotationY,
+            rotationZ: loc.originalRotationZ ?? loc.rotationZ,
+            blockName: loc.originalBlockName ?? loc.blockName,
+            brand: loc.originalBrand ?? loc.brand,
+            count: loc.originalCount ?? loc.count,
+            hierarchy: loc.originalHierarchy ?? loc.hierarchy,
+            wasMoved: false,
+            wasRotated: false,
+            wasTypeChanged: false,
+            wasBrandChanged: false,
+            wasCountChanged: false,
+            wasHierarchyChanged: false,
+          };
+        }));
+        setSelectedLocationId(null);
+        setSelectedLocationIds([]);
+      },
+      undo() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const saved = prevMap.get(loc._stableId);
+          if (!saved) return loc;
+          return {
+            ...loc,
+            posX: saved.prevPosX, posY: saved.prevPosY, posZ: saved.prevPosZ,
+            rotationX: saved.prevRotX, rotationY: saved.prevRotY, rotationZ: saved.prevRotZ,
+            brand: saved.prevBrand, blockName: saved.prevBlockName, glbUrl: saved.prevGlbUrl,
+            count: saved.prevCount, hierarchy: saved.prevHierarchy,
+            wasMoved: saved.prevWasMoved, wasRotated: saved.prevWasRotated, wasTypeChanged: saved.prevWasTypeChanged,
+            wasBrandChanged: saved.prevWasBrandChanged, wasCountChanged: saved.prevWasCountChanged, wasHierarchyChanged: saved.prevWasHierarchyChanged,
+            originalPosX: saved.prevOrigPosX, originalPosY: saved.prevOrigPosY, originalPosZ: saved.prevOrigPosZ,
+            originalRotationX: saved.prevOrigRotX, originalRotationY: saved.prevOrigRotY, originalRotationZ: saved.prevOrigRotZ,
+            originalBrand: saved.prevOrigBrand, originalBlockName: saved.prevOrigBlockName, originalGlbUrl: saved.prevOrigGlbUrl,
+            originalCount: saved.prevOrigCount, originalHierarchy: saved.prevOrigHierarchy,
+          };
+        }));
+        // Rule 1 — no selection restore on undo of reset; selection was cleared in do()
+      },
+    });
+  }, [setLocationData, setSelectedLocationId, setSelectedLocationIds, executeCommand, locationDataRef]);
+
+  // ─── Floor brand change ───────────────────────────────────────────────────
 
   const handleBrandChange = useCallback((newBrand: string) => {
     if (!selectedFloorPlate) return;
-    
-    const key = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
+
+    const plateKey = selectedFloorPlate.meshName || `${selectedFloorPlate.surfaceId}-${selectedFloorPlate.brand}`;
+    const newEntry = {
+      ...selectedFloorPlate,
+      brand: newBrand,
+      originalBrand: selectedFloorPlate.originalBrand || selectedFloorPlate.brand
+    };
+
+    // Capture prev synchronously before any state changes
+    let capturedPrevEntry: any = undefined;
     setModifiedFloorPlates(prev => {
-      const newMap = new Map(prev);
-      newMap.set(key, {
-        ...selectedFloorPlate,
-        brand: newBrand,
-        originalBrand: selectedFloorPlate.originalBrand || selectedFloorPlate.brand
-      });
-      return newMap;
+      capturedPrevEntry = prev.has(plateKey) ? Object.freeze({ ...prev.get(plateKey) }) : undefined;
+      return prev; // no-op read
     });
-    
-    setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
-  }, [selectedFloorPlate, setSelectedFloorPlate]);
+    // Since setModifiedFloorPlates is async, we read the ref-like value directly from closure
+    // Actually we need to read from current modifiedFloorPlates...
+    // We capture via a ref pattern instead — see below
+
+    executeCommand({
+      commandName: 'FloorBrandChange',
+      do() {
+        setModifiedFloorPlates(prev => {
+          const newMap = new Map(prev);
+          newMap.set(plateKey, newEntry);
+          return newMap;
+        });
+        setSelectedFloorPlate((prev: any) => prev ? { ...prev, brand: newBrand } : null);
+      },
+      undo() {
+        setModifiedFloorPlates(prev => {
+          const newMap = new Map(prev);
+          if (capturedPrevEntry === undefined) {
+            newMap.delete(plateKey);
+          } else {
+            newMap.set(plateKey, capturedPrevEntry);
+          }
+          return newMap;
+        });
+        setSelectedFloorPlate((prev: any) => {
+          if (!prev) return null;
+          return { ...prev, brand: capturedPrevEntry?.brand ?? selectedFloorPlate.brand };
+        });
+      },
+    });
+  }, [selectedFloorPlate, setSelectedFloorPlate, executeCommand]);
+
+  // ─── Fixture brand change ─────────────────────────────────────────────────
 
   const handleFixtureBrandChange = useCallback((newBrand: string) => {
-    if (selectedLocations.length > 1) {
-      // Update selected locations
-      setSelectedLocations(prev => prev.map(loc => ({ 
-        ...loc, 
-        brand: newBrand,
-        wasBrandChanged: true,
-        originalBrand: loc.originalBrand ?? loc.brand
-      })));
-      
-      // Update location data
-      setLocationData(prev => prev.map(loc => {
-        const isSelected = selectedLocations.some(selectedLoc => 
-          generateFixtureUID(selectedLoc) === generateFixtureUID(loc)
-        );
-        if (isSelected) {
+    // Collect targets: prefer selectedLocations (includes single too), fall back to selectedLocation
+    const targets = selectedLocations.length > 0
+      ? selectedLocations
+      : (selectedLocation ? [selectedLocation] : []);
+    if (targets.length === 0) return;
+
+    type BrandSnapshot = {
+      stableId: string;
+      prevBrand: string;
+      prevWasBrandChanged?: boolean;
+      prevOriginalBrand?: string;
+    };
+
+    const snapshots: BrandSnapshot[] = targets.map(loc => {
+      const cur = findFixtureById(locationDataRef.current!, loc._stableId) ?? loc;
+      return {
+        stableId: loc._stableId,
+        prevBrand: cur.brand,
+        prevWasBrandChanged: cur.wasBrandChanged,
+        prevOriginalBrand: cur.originalBrand,
+      };
+    });
+
+    const stableIdSet = new Set(snapshots.map(s => s.stableId));
+    const prevMap = new Map(snapshots.map(s => [s.stableId, s]));
+
+    executeCommand({
+      commandName: 'BrandChange',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId || !stableIdSet.has(loc._stableId)) return loc;
           return {
             ...loc,
             brand: newBrand,
             wasBrandChanged: true,
-            originalBrand: loc.originalBrand ?? loc.brand
+            originalBrand: loc.originalBrand ?? loc.brand,
           };
-        }
-        return loc;
-      }));
-    } else if (selectedLocation) {
-      const key = generateFixtureUID(selectedLocation);
-      
-      setSelectedLocation(prev => prev ? { 
-        ...prev, 
-        brand: newBrand,
-        wasBrandChanged: true,
-        originalBrand: prev.originalBrand ?? prev.brand
-      } : null);
-      
-      // Update location data
-      setLocationData(prev => prev.map(loc => {
-        if (generateFixtureUID(loc) === key) {
+        }));
+      },
+      undo() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const saved = prevMap.get(loc._stableId);
+          if (!saved) return loc;
           return {
             ...loc,
-            brand: newBrand,
-            wasBrandChanged: true,
-            originalBrand: loc.originalBrand ?? loc.brand
+            brand: saved.prevBrand,
+            wasBrandChanged: saved.prevWasBrandChanged,
+            originalBrand: saved.prevOriginalBrand,
           };
-        }
-        return loc;
-      }));
-    }
-  }, [selectedLocation, selectedLocations, setSelectedLocation, setSelectedLocations, setLocationData]);
+        }));
+      },
+    });
+  }, [selectedLocation, selectedLocations, setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Fixture count change (single) ────────────────────────────────────────
 
   const handleFixtureCountChange = useCallback((location: LocationData, newCount: number) => {
-    const key = generateFixtureUID(location);
-    
-    setSelectedLocation(prev => prev ? { 
-      ...prev, 
-      count: newCount,
-      wasCountChanged: true,
-      originalCount: prev.originalCount ?? prev.count
-    } : null);
-    
-    setLocationData(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return { 
-          ...loc, 
+    const stableId = location._stableId;
+    if (!stableId) return;
+    const cur = findFixtureById(locationDataRef.current!, stableId) ?? location;
+    const prevCount = cur.count;
+    const prevWasCountChanged = cur.wasCountChanged;
+    const prevOriginalCount = cur.originalCount;
+
+    executeCommand({
+      commandName: 'CountChange',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
           count: newCount,
           wasCountChanged: true,
-          originalCount: loc.originalCount ?? loc.count
-        };
-      }
-      return loc;
-    }));
-  }, [setSelectedLocation, setLocationData]);
+          originalCount: loc.originalCount ?? loc.count,
+        }));
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          count: prevCount,
+          wasCountChanged: prevWasCountChanged,
+          originalCount: prevOriginalCount,
+        }));
+      },
+    });
+  }, [setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Fixture count change (multi) ─────────────────────────────────────────
 
   const handleFixtureCountChangeMulti = useCallback((locations: LocationData[], newCount: number) => {
-    setSelectedLocations(prev => prev.map(loc => ({ 
-      ...loc, 
-      count: newCount,
-      wasCountChanged: true,
-      originalCount: loc.originalCount ?? loc.count
-    })));
-    
-    setLocationData(prev => prev.map(loc => {
-      const locationKey = generateFixtureUID(loc);
-      const isModified = locations.some(selectedLoc => {
-        const selectedKey = generateFixtureUID(selectedLoc);
-        return selectedKey === locationKey;
-      });
-      
-      if (isModified) {
-        return { 
-          ...loc, 
-          count: newCount,
-          wasCountChanged: true,
-          originalCount: loc.originalCount ?? loc.count
-        };
-      }
-      return loc;
-    }));
-  }, [setSelectedLocations, setLocationData]);
+    type CountSnapshot = { stableId: string; prevCount: number; prevWasCountChanged?: boolean; prevOriginalCount?: number };
+
+    const snapshots: CountSnapshot[] = locations.map(loc => {
+      const cur = findFixtureById(locationDataRef.current!, loc._stableId) ?? loc;
+      return {
+        stableId: loc._stableId,
+        prevCount: cur.count,
+        prevWasCountChanged: cur.wasCountChanged,
+        prevOriginalCount: cur.originalCount,
+      };
+    });
+
+    const stableIdSet = new Set(snapshots.map(s => s.stableId));
+    const prevMap = new Map(snapshots.map(s => [s.stableId, s]));
+
+    executeCommand({
+      commandName: 'CountChange',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId || !stableIdSet.has(loc._stableId)) return loc;
+          return {
+            ...loc,
+            count: newCount,
+            wasCountChanged: true,
+            originalCount: loc.originalCount ?? loc.count,
+          };
+        }));
+      },
+      undo() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const saved = prevMap.get(loc._stableId);
+          if (!saved) return loc;
+          return {
+            ...loc,
+            count: saved.prevCount,
+            wasCountChanged: saved.prevWasCountChanged,
+            originalCount: saved.prevOriginalCount,
+          };
+        }));
+      },
+    });
+  }, [setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Fixture hierarchy change (single) ────────────────────────────────────
 
   const handleFixtureHierarchyChange = useCallback((location: LocationData, newHierarchy: number) => {
-    const key = generateFixtureUID(location);
-    
-    setSelectedLocation(prev => prev ? { 
-      ...prev, 
-      hierarchy: newHierarchy,
-      wasHierarchyChanged: true,
-      originalHierarchy: prev.originalHierarchy ?? prev.hierarchy
-    } : null);
-    
-    setLocationData(prev => prev.map(loc => {
-      if (generateFixtureUID(loc) === key) {
-        return { 
-          ...loc, 
-          hierarchy: newHierarchy,
-          wasHierarchyChanged: true,
-          originalHierarchy: loc.originalHierarchy ?? loc.hierarchy
-        };
-      }
-      return loc;
-    }));
-  }, [setSelectedLocation, setLocationData]);
+    const stableId = location._stableId;
+    if (!stableId) return;
+    const cur = findFixtureById(locationDataRef.current!, stableId) ?? location;
+    const prevHierarchy = cur.hierarchy;
+    const prevWasHierarchyChanged = cur.wasHierarchyChanged;
+    const prevOriginalHierarchy = cur.originalHierarchy;
 
-  const handleFixtureHierarchyChangeMulti = useCallback((locations: LocationData[], newHierarchy: number) => {
-    setSelectedLocations(prev => prev.map(loc => ({ 
-      ...loc, 
-      hierarchy: newHierarchy,
-      wasHierarchyChanged: true,
-      originalHierarchy: loc.originalHierarchy ?? loc.hierarchy
-    })));
-    
-    setLocationData(prev => prev.map(loc => {
-      const locationKey = generateFixtureUID(loc);
-      const isModified = locations.some(selectedLoc => {
-        const selectedKey = generateFixtureUID(selectedLoc);
-        return selectedKey === locationKey;
-      });
-      
-      if (isModified) {
-        return { 
-          ...loc, 
+    executeCommand({
+      commandName: 'HierarchyChange',
+      do() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
           hierarchy: newHierarchy,
           wasHierarchyChanged: true,
-          originalHierarchy: loc.originalHierarchy ?? loc.hierarchy
-        };
-      }
-      return loc;
-    }));
-  }, [setSelectedLocations, setLocationData]);
+          originalHierarchy: loc.originalHierarchy ?? loc.hierarchy,
+        }));
+      },
+      undo() {
+        updateFixtureById(setLocationData, stableId, loc => ({
+          ...loc,
+          hierarchy: prevHierarchy,
+          wasHierarchyChanged: prevWasHierarchyChanged,
+          originalHierarchy: prevOriginalHierarchy,
+        }));
+      },
+    });
+  }, [setLocationData, executeCommand, locationDataRef]);
+
+  // ─── Duplicate ────────────────────────────────────────────────────────────
 
   const handleDuplicateFixture = useCallback((location: LocationData) => {
-    // Calculate new hierarchy as max+1 for the current floor
-    setLocationData(prev => {
-      const currentFloorFixtures = prev.filter(loc =>
-        loc.floorIndex === location.floorIndex && !loc.forDelete
-      );
-      const maxHierarchy = currentFloorFixtures.length > 0
-        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
-        : 0;
-      const newHierarchy = maxHierarchy + 1;
+    const currentData = locationDataRef.current!;
 
-      // Create duplicate with current position/properties (all modifications are embedded in location object)
-      const duplicatedFixture: LocationData = {
-        ...location,
-        // Use current position (current position includes any moves)
-        posX: location.posX,  // Duplicate in place
-        posY: location.posY,
-        posZ: location.posZ,
-        // Set new hierarchy
-        hierarchy: newHierarchy,
-        // Keep current blockName, rotation, brand, count (includes all modifications)
-        // Reset modification flags since this is a "new" fixture
-        wasMoved: false, // Will be set to true if the duplicate is moved later
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-        wasDuplicated: true, // Mark as duplicate
-        // Preserve original values for reset functionality
-        originalPosX: location.posX, // Original position of the source fixture (not the duplicate's position)
-        originalPosY: location.posY,
-        originalPosZ: location.posZ,
-        originalRotationX: location.rotationX,
-        originalRotationY: location.rotationY,
-        originalRotationZ: location.rotationZ,
-        originalBlockName: location.blockName,
-        originalBrand: location.brand,
-        originalCount: location.count,
-        originalHierarchy: newHierarchy,
-        originalGlbUrl: location.glbUrl,
-        // Generate new unique timestamps to ensure unique UID even at same position
-        _updateTimestamp: Date.now() + Math.random() * 1000,
-        _ingestionTimestamp: Date.now() + Math.random() * 1000 // New unique timestamp for the duplicate
-      };
+    // Compute hierarchy at command-creation time
+    const currentFloorFixtures = currentData.filter(loc =>
+      loc.floorIndex === location.floorIndex && !loc.forDelete
+    );
+    const maxHierarchy = currentFloorFixtures.length > 0
+      ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+      : 0;
+    const newHierarchy = maxHierarchy + 1;
 
-      setSelectedLocation(duplicatedFixture);
-      setSelectedLocations([duplicatedFixture]);
+    const dupStableId = newStableId(); // creation site — inline assignment
+    const dupTimestamp = Date.now() + Math.random() * 1000;
 
-      // Add the duplicated fixture to the location data
-      return [...prev, duplicatedFixture];
+    const duplicatedFixture: LocationData = {
+      ...location,
+      _stableId: dupStableId,
+      hierarchy: newHierarchy,
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: true,
+      originalPosX: location.posX,
+      originalPosY: location.posY,
+      originalPosZ: location.posZ,
+      originalRotationX: location.rotationX,
+      originalRotationY: location.rotationY,
+      originalRotationZ: location.rotationZ,
+      originalBlockName: location.blockName,
+      originalBrand: location.brand,
+      originalCount: location.count,
+      originalHierarchy: newHierarchy,
+      originalGlbUrl: location.glbUrl,
+      _updateTimestamp: dupTimestamp,
+      _ingestionTimestamp: dupTimestamp,
+    };
+
+    executeCommand({
+      commandName: 'DuplicateFixture',
+      do() {
+        setLocationData(prev => [...prev, duplicatedFixture]);
+        setSelectedLocationId(dupStableId);
+        setSelectedLocationIds([dupStableId]);
+      },
+      undo() {
+        setLocationData(prev => prev.filter(loc => loc._stableId !== dupStableId));
+        // Rule 3 — clear selection only if still pointing at the duplicate
+        setSelectedLocationId(cur => cur === dupStableId ? null : cur);
+        setSelectedLocationIds(cur =>
+          cur.length === 1 && cur[0] === dupStableId ? [] : cur
+        );
+      },
     });
-  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+  }, [setLocationData, setSelectedLocationId, setSelectedLocationIds, executeCommand, locationDataRef]);
+
+  // ─── Delete (dialog open helpers) ────────────────────────────────────────
 
   const handleDeleteFixture = useCallback((location: LocationData) => {
     setFixturesToDelete([location]);
@@ -577,362 +766,442 @@ export function useFixtureModifications(
     setDeleteConfirmationOpen(true);
   }, []);
 
+  // ─── Confirm delete ───────────────────────────────────────────────────────
+
   const handleConfirmDelete = useCallback(() => {
-    const keysToDelete = new Set<string>();
-    
-    fixturesToDelete.forEach(location => {
-      const key = generateFixtureUID(location);
-      keysToDelete.add(key);
+    const prevSelectedId = selectedLocation?._stableId ?? null;
+    const prevSelectedIds = selectedLocations.map(loc => loc._stableId);
+
+    type DeleteItem = { stableId: string; positionKey: string | null };
+
+    const deletionItems: DeleteItem[] = fixturesToDelete.map(location => {
+      const stableId = location._stableId;
+
+      // Stability guard for positionKeys
+      let positionKey: string | null = null;
+      if (
+        location.originalBlockName != null &&
+        location.originalPosX != null &&
+        location.originalPosY != null &&
+        location.originalPosZ != null
+      ) {
+        positionKey = `${location.originalBlockName}-${location.originalPosX.toFixed(3)}-${location.originalPosY.toFixed(3)}-${location.originalPosZ.toFixed(3)}`;
+      }
+
+      return { stableId, positionKey };
     });
-    
-    setDeletedFixtures(prev => new Set([...prev, ...keysToDelete]));
-    
-    setSelectedLocation(null);
-    setSelectedLocations([]);
-    
+
+    const stableIds = deletionItems.map(d => d.stableId);
+    const nonNullPositionKeys = deletionItems.map(d => d.positionKey).filter(k => k !== null) as string[];
+
+    executeCommand({
+      commandName: 'DeleteFixture',
+      do() {
+        setDeletedFixtures(prev => new Set([...prev, ...stableIds]));
+        if (nonNullPositionKeys.length > 0) {
+          setDeletedFixturePositions(prev => new Set([...prev, ...nonNullPositionKeys]));
+        }
+        // Rule 2 — clear selection for deleted fixtures
+        setSelectedLocationId(cur => stableIds.includes(cur ?? '') ? null : cur);
+        setSelectedLocationIds(cur => cur.filter(id => !stableIds.includes(id)));
+      },
+      undo() {
+        setDeletedFixtures(prev => {
+          const next = new Set(prev);
+          stableIds.forEach(id => next.delete(id));
+          return next;
+        });
+        if (nonNullPositionKeys.length > 0) {
+          setDeletedFixturePositions(prev => {
+            const next = new Set(prev);
+            nonNullPositionKeys.forEach(k => next.delete(k));
+            return next;
+          });
+        }
+        // Rule 2 — restore selection filtered to existing
+        const restoredIds = prevSelectedIds.filter(id =>
+          locationDataRef.current!.some(loc => loc._stableId === id)
+        );
+        setSelectedLocationId(
+          restoredIds.includes(prevSelectedId ?? '') ? prevSelectedId : null
+        );
+        setSelectedLocationIds(restoredIds);
+      },
+    });
+
     setDeleteConfirmationOpen(false);
     setFixturesToDelete([]);
-  }, [fixturesToDelete, setSelectedLocation, setSelectedLocations]);
+  }, [
+    fixturesToDelete,
+    selectedLocation,
+    selectedLocations,
+    setSelectedLocationId,
+    setSelectedLocationIds,
+    executeCommand,
+    locationDataRef,
+  ]);
+
+  // ─── Split ────────────────────────────────────────────────────────────────
 
   const handleSplitFixture = useCallback((location: LocationData, leftCount: number, rightCount: number) => {
-    // Calculate positioning for the split fixtures
-    // Take the center point and create a line with total length = count * 0.6 units
-    // Split this line into two segments based on the split counts
+    const originalStableId = location._stableId;
+    if (!originalStableId) return;
 
-    const fixtureLength = 0.6; // Length of one fixture in units
+    const prevSelectedId = selectedLocation?._stableId ?? null;
+    const prevSelectedIds = selectedLocations.map(loc => loc._stableId);
+
+    const fixtureLength = 0.6;
     const originalTotalLength = location.count * fixtureLength;
     const leftSegmentLength = leftCount * fixtureLength;
     const rightSegmentLength = rightCount * fixtureLength;
-
-    // Calculate the midpoints of each segment
-    // Left segment: starts at -originalTotalLength/2, midpoint at start + leftSegmentLength/2
     const leftMidpointOffset = (-originalTotalLength / 2) + (leftSegmentLength / 2);
-    // Right segment: starts at -originalTotalLength/2 + leftSegmentLength, midpoint at start + rightSegmentLength/2
     const rightMidpointOffset = (-originalTotalLength / 2) + leftSegmentLength + (rightSegmentLength / 2);
+    const rotationZ_rad = (location.rotationZ * Math.PI) / 180;
+    const leftGroupX = location.posX + (leftMidpointOffset * Math.cos(rotationZ_rad));
+    const leftGroupY = location.posY + (leftMidpointOffset * Math.sin(rotationZ_rad));
+    const rightGroupX = location.posX + (rightMidpointOffset * Math.cos(rotationZ_rad));
+    const rightGroupY = location.posY + (rightMidpointOffset * Math.sin(rotationZ_rad));
 
-    // Apply rotation to the offsets (if fixture is rotated)
-    const rotationZ = (location.rotationZ * Math.PI) / 180; // Convert to radians
+    const currentData = locationDataRef.current!;
+    const currentFloorFixtures = currentData.filter(loc =>
+      loc.floorIndex === location.floorIndex && !loc.forDelete
+    );
+    const maxHierarchy = currentFloorFixtures.length > 0
+      ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+      : 0;
+    const leftHierarchy = maxHierarchy + 1;
+    const rightHierarchy = maxHierarchy + 2;
 
-    // Calculate final positions considering rotation
-    const leftGroupX = location.posX + (leftMidpointOffset * Math.cos(rotationZ));
-    const leftGroupY = location.posY + (leftMidpointOffset * Math.sin(rotationZ));
+    const leftStableId = newStableId();
+    const rightStableId = newStableId();
+    const leftTimestamp = Date.now() + Math.floor(Math.random() * 10000);
+    const rightTimestamp = Date.now() + 50000 + Math.floor(Math.random() * 10000);
 
-    const rightGroupX = location.posX + (rightMidpointOffset * Math.cos(rotationZ));
-    const rightGroupY = location.posY + (rightMidpointOffset * Math.sin(rotationZ));
+    const leftSplitFixture: LocationData = {
+      ...location,
+      _stableId: leftStableId,
+      posX: leftGroupX,
+      posY: leftGroupY,
+      posZ: location.posZ,
+      count: leftCount,
+      hierarchy: leftHierarchy,
+      wasSplit: true,
+      originalCount: leftCount,
+      originalHierarchy: leftHierarchy,
+      _updateTimestamp: leftTimestamp,
+      _ingestionTimestamp: leftTimestamp,
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false,
+    };
 
-    // Mark the original fixture for deletion by capturing its UID before state update
-    const originalKey = generateFixtureUID(location);
+    const rightSplitFixture: LocationData = {
+      ...location,
+      _stableId: rightStableId,
+      posX: rightGroupX,
+      posY: rightGroupY,
+      posZ: location.posZ,
+      count: rightCount,
+      hierarchy: rightHierarchy,
+      wasSplit: true,
+      originalCount: rightCount,
+      originalHierarchy: rightHierarchy,
+      _updateTimestamp: rightTimestamp,
+      _ingestionTimestamp: rightTimestamp,
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false,
+    };
 
-    // Single atomic update: mark original for deletion and add split fixtures
-    setLocationData(prev => {
-      // Calculate new hierarchies as max+1 and max+2 for the current floor
-      const currentFloorFixtures = prev.filter(loc =>
-        loc.floorIndex === location.floorIndex && !loc.forDelete
-      );
-      const maxHierarchy = currentFloorFixtures.length > 0
-        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
-        : 0;
-      const leftHierarchy = maxHierarchy + 1;
-      const rightHierarchy = maxHierarchy + 2;
-
-      // Create left split fixture
-      const leftSplitFixture: LocationData = {
-        ...location,
-        posX: leftGroupX,
-        posY: leftGroupY,
-        posZ: location.posZ, // Keep same Z position
-        count: leftCount,
-        hierarchy: leftHierarchy,
-        wasSplit: true,
-        originalCount: leftCount, // New fixture's original count is the split value
-        originalHierarchy: leftHierarchy,
-        // Generate new unique identifiers with sufficient separation
-        _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-        _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-        // Clear other modification flags since this is a new fixture
-        wasMoved: false,
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-        wasDuplicated: false
-      };
-
-      // Create right split fixture
-      const rightSplitFixture: LocationData = {
-        ...location,
-        posX: rightGroupX,
-        posY: rightGroupY,
-        posZ: location.posZ, // Keep same Z position
-        count: rightCount,
-        hierarchy: rightHierarchy,
-        wasSplit: true,
-        originalCount: rightCount, // New fixture's original count is the split value
-        originalHierarchy: rightHierarchy,
-        // Generate new unique identifiers with sufficient separation
-        _updateTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
-        _ingestionTimestamp: Date.now() + 50000 + Math.floor(Math.random() * 10000),
-        // Clear other modification flags since this is a new fixture
-        wasMoved: false,
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-        wasDuplicated: false
-      };
-
-      // Mark the original fixture as forDelete (preserve all properties for UID stability)
-      const withMarkedOriginal = prev.map(loc =>
-        generateFixtureUID(loc) === originalKey
-          ? { ...loc, forDelete: true }  // Only add forDelete flag, don't change any other properties
-          : loc
-      );
-
-      // Add the new split fixtures
-      const newData = [...withMarkedOriginal, leftSplitFixture, rightSplitFixture];
-
-      return newData;
+    executeCommand({
+      commandName: 'SplitFixture',
+      do() {
+        setLocationData(prev => {
+          const withMarkedOriginal = prev.map(loc =>
+            loc._stableId === originalStableId ? { ...loc, forDelete: true } : loc
+          );
+          return [...withMarkedOriginal, leftSplitFixture, rightSplitFixture];
+        });
+        setSelectedLocationId(null);
+        setSelectedLocationIds([]);
+      },
+      undo() {
+        setLocationData(prev => {
+          const withoutSplit = prev.filter(loc =>
+            loc._stableId !== leftStableId && loc._stableId !== rightStableId
+          );
+          return withoutSplit.map(loc =>
+            loc._stableId === originalStableId ? { ...loc, forDelete: false } : loc
+          );
+        });
+        // Rule 2 — restore selection filtered to existing
+        const restoredIds = prevSelectedIds.filter(id =>
+          locationDataRef.current!.some(loc => loc._stableId === id)
+        );
+        setSelectedLocationId(
+          restoredIds.includes(prevSelectedId ?? '') ? prevSelectedId : null
+        );
+        setSelectedLocationIds(restoredIds);
+      },
     });
+  }, [selectedLocation, selectedLocations, setLocationData, setSelectedLocationId, setSelectedLocationIds, executeCommand, locationDataRef]);
 
-    // Clear selection
-    setSelectedLocation(null);
-    setSelectedLocations([]);
-  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+  // ─── canMergeFixtures ──────────────────────────────────────────────────────
 
   const canMergeFixtures = useCallback((fixtures: LocationData[], fixtureTypeMap: Map<string, string>): boolean => {
-    // Fast early exits for performance
     if (fixtures.length !== 2) return false;
-    
     const [fixtureA, fixtureB] = fixtures;
-    
-    // Check types first (cheapest check)
     const typeA = fixtureTypeMap.get(fixtureA.blockName);
     const typeB = fixtureTypeMap.get(fixtureB.blockName);
     if (typeA !== "WALL-BAY" || typeB !== "WALL-BAY") return false;
-    
-    // Check rotation alignment (also cheap)
     const rotationDiff = Math.abs(fixtureA.rotationZ - fixtureB.rotationZ);
     if (rotationDiff > 1 && rotationDiff < 359) return false;
-    
-    // Only do expensive position calculations if basic checks pass
     const fixtureLength = 0.6;
     const rotationZ = (fixtureA.rotationZ * Math.PI) / 180;
-    
     const cosRot = Math.cos(rotationZ);
     const sinRot = Math.sin(rotationZ);
-    
     const tolerance = 0.2;
-    
-    // New approach: Check if the fixtures are actually touching edge-to-edge
-    // Calculate the edges of each fixture along the orientation axis
     const projA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
     const projB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
-    
-    // Calculate the edges of each fixture
     const aLeftEdge = projA - (fixtureA.count * fixtureLength * 0.5);
     const aRightEdge = projA + (fixtureA.count * fixtureLength * 0.5);
     const bLeftEdge = projB - (fixtureB.count * fixtureLength * 0.5);
     const bRightEdge = projB + (fixtureB.count * fixtureLength * 0.5);
-    
-    // Check if they're touching: A's right edge touches B's left edge OR B's right edge touches A's left edge
     const gapAB = Math.abs(aRightEdge - bLeftEdge);
     const gapBA = Math.abs(bRightEdge - aLeftEdge);
-    
-    // Also check if they're on the same perpendicular line (same position perpendicular to orientation)
     const perpA = -fixtureA.posX * sinRot + fixtureA.posY * cosRot;
     const perpB = -fixtureB.posX * sinRot + fixtureB.posY * cosRot;
     const perpGap = Math.abs(perpA - perpB);
-    
-    // They're adjacent if: 
-    // 1. One of the edge gaps is very small (touching)
-    // 2. They're aligned perpendicular to the orientation
     return (gapAB < tolerance || gapBA < tolerance) && perpGap < tolerance;
   }, []);
+
+  // ─── Merge ────────────────────────────────────────────────────────────────
+
+  const handleMergeFixtures = useCallback((fixtures: LocationData[]) => {
+    if (fixtures.length !== 2) return;
+    const [fixtureA, fixtureB] = fixtures;
+
+    const stableIdA = fixtureA._stableId;
+    const stableIdB = fixtureB._stableId;
+    if (!stableIdA || !stableIdB) return;
+
+    const prevSelectedId = selectedLocation?._stableId ?? null;
+    const prevSelectedIds = selectedLocations.map(loc => loc._stableId);
+
+    // Stability guard for positionKeys
+    let positionKeyA: string | null = null;
+    if (
+      fixtureA.originalBlockName != null &&
+      fixtureA.originalPosX != null &&
+      fixtureA.originalPosY != null &&
+      fixtureA.originalPosZ != null
+    ) {
+      positionKeyA = `${fixtureA.originalBlockName}-${fixtureA.originalPosX.toFixed(3)}-${fixtureA.originalPosY.toFixed(3)}-${fixtureA.originalPosZ.toFixed(3)}`;
+    }
+
+    let positionKeyB: string | null = null;
+    if (
+      fixtureB.originalBlockName != null &&
+      fixtureB.originalPosX != null &&
+      fixtureB.originalPosY != null &&
+      fixtureB.originalPosZ != null
+    ) {
+      positionKeyB = `${fixtureB.originalBlockName}-${fixtureB.originalPosX.toFixed(3)}-${fixtureB.originalPosY.toFixed(3)}-${fixtureB.originalPosZ.toFixed(3)}`;
+    }
+
+    const nonNullPositionKeys = [positionKeyA, positionKeyB].filter(k => k !== null) as string[];
+
+    // Frozen snapshots of A and B for undo restoration
+    const snapA = Object.freeze({ ...fixtureA });
+    const snapB = Object.freeze({ ...fixtureB });
+
+    // Calculate merged position
+    const totalCount = fixtureA.count + fixtureB.count;
+    const fixtureLength = 0.6;
+    const rotationZ_rad = (fixtureA.rotationZ * Math.PI) / 180;
+    const cosRot = Math.cos(rotationZ_rad);
+    const sinRot = Math.sin(rotationZ_rad);
+    const projectionA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
+    const projectionB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
+    const leftFixture = projectionA < projectionB ? fixtureA : fixtureB;
+    const totalSpan = totalCount * fixtureLength;
+    const leftEdgeX = leftFixture.posX - (leftFixture.count * fixtureLength * 0.5 * cosRot);
+    const leftEdgeY = leftFixture.posY - (leftFixture.count * fixtureLength * 0.5 * sinRot);
+    const centerX = leftEdgeX + (totalSpan * 0.5 * cosRot);
+    const centerY = leftEdgeY + (totalSpan * 0.5 * sinRot);
+
+    const currentData = locationDataRef.current!;
+    const currentFloorFixtures = currentData.filter(loc =>
+      loc.floorIndex === fixtureA.floorIndex && !loc.forDelete
+    );
+    const maxHierarchy = currentFloorFixtures.length > 0
+      ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
+      : 0;
+    const newHierarchy = maxHierarchy + 1;
+    const mergedTimestamp = Date.now() + Math.floor(Math.random() * 10000);
+    const mergedStableId = newStableId();
+
+    const mergedFixture: LocationData = {
+      ...fixtureA,
+      _stableId: mergedStableId,
+      posX: centerX,
+      posY: centerY,
+      count: totalCount,
+      hierarchy: newHierarchy,
+      wasMerged: true,
+      originalCount: totalCount,
+      originalHierarchy: newHierarchy,
+      _updateTimestamp: mergedTimestamp,
+      _ingestionTimestamp: mergedTimestamp,
+      wasMoved: false,
+      wasRotated: false,
+      wasTypeChanged: false,
+      wasBrandChanged: false,
+      wasCountChanged: false,
+      wasHierarchyChanged: false,
+      wasDuplicated: false,
+      wasSplit: false,
+    };
+
+    executeCommand({
+      commandName: 'MergeFixtures',
+      do() {
+        setDeletedFixtures(prev => new Set([...prev, stableIdA, stableIdB]));
+        setLocationData(prev => {
+          const withoutOriginals = prev.filter(loc =>
+            loc._stableId !== stableIdA && loc._stableId !== stableIdB
+          );
+          return [...withoutOriginals, mergedFixture];
+        });
+        if (nonNullPositionKeys.length > 0) {
+          setDeletedFixturePositions(prev => new Set([...prev, ...nonNullPositionKeys]));
+        }
+        setSelectedLocationId(null);
+        setSelectedLocationIds([]);
+      },
+      undo() {
+        setDeletedFixtures(prev => {
+          const next = new Set(prev);
+          next.delete(stableIdA);
+          next.delete(stableIdB);
+          return next;
+        });
+        setLocationData(prev => {
+          const withoutMerged = prev.filter(loc => loc._stableId !== mergedStableId);
+          return [...withoutMerged, snapA, snapB];
+        });
+        if (nonNullPositionKeys.length > 0) {
+          setDeletedFixturePositions(prev => {
+            const next = new Set(prev);
+            nonNullPositionKeys.forEach(k => next.delete(k));
+            return next;
+          });
+        }
+        // Rule 2 — restore selection filtered to existing
+        const restoredIds = prevSelectedIds.filter(id =>
+          locationDataRef.current!.some(loc => loc._stableId === id)
+        );
+        setSelectedLocationId(
+          restoredIds.includes(prevSelectedId ?? '') ? prevSelectedId : null
+        );
+        setSelectedLocationIds(restoredIds);
+      },
+    });
+  }, [selectedLocation, selectedLocations, setLocationData, setSelectedLocationId, setSelectedLocationIds, executeCommand, locationDataRef]);
+
+  // ─── Align ────────────────────────────────────────────────────────────────
 
   const handleAlignFixtures = useCallback((
     fixtures: LocationData[],
     alignment: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom',
-    _transformSpace: 'world' | 'local' // Unused for now, both modes use world axes
+    _transformSpace: 'world' | 'local'
   ) => {
     if (fixtures.length < 2) return;
 
-    // Calculate new positions for each fixture
     const newPositions = new Map<string, [number, number, number]>();
-
-    // Both world and local modes use world axes alignment for now
-    // Note: Horizontal (left-right) is X-axis, vertical (top-bottom) is Y-axis
     let targetValue: number;
 
     if (alignment === 'left') {
-      // Horizontal left = minimum X (leftmost)
       targetValue = Math.min(...fixtures.map(f => f.posX));
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [targetValue, f.posY, f.posZ]));
     } else if (alignment === 'center-h') {
-      // Horizontal center = average X
       targetValue = fixtures.reduce((sum, f) => sum + f.posX, 0) / fixtures.length;
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [targetValue, f.posY, f.posZ]));
     } else if (alignment === 'right') {
-      // Horizontal right = maximum X (rightmost)
       targetValue = Math.max(...fixtures.map(f => f.posX));
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [targetValue, fixture.posY, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [targetValue, f.posY, f.posZ]));
     } else if (alignment === 'top') {
-      // Vertical top = maximum Y (top)
       targetValue = Math.max(...fixtures.map(f => f.posY));
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [f.posX, targetValue, f.posZ]));
     } else if (alignment === 'center-v') {
-      // Vertical center = average Y
       targetValue = fixtures.reduce((sum, f) => sum + f.posY, 0) / fixtures.length;
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [f.posX, targetValue, f.posZ]));
     } else if (alignment === 'bottom') {
-      // Vertical bottom = minimum Y (bottom)
       targetValue = Math.min(...fixtures.map(f => f.posY));
-      fixtures.forEach(fixture => {
-        newPositions.set(generateFixtureUID(fixture), [fixture.posX, targetValue, fixture.posZ]);
-      });
+      fixtures.forEach(f => newPositions.set(f._stableId, [f.posX, targetValue, f.posZ]));
     }
 
-    // Batch update all fixtures at once
-    setLocationData(prev => prev.map(loc => {
-      const key = generateFixtureUID(loc);
-      if (newPositions.has(key)) {
-        const [newX, newY, newZ] = newPositions.get(key)!;
-        return {
-          ...loc,
-          posX: newX,
-          posY: newY,
-          posZ: newZ,
-          wasMoved: true,
-          originalPosX: loc.originalPosX ?? loc.posX,
-          originalPosY: loc.originalPosY ?? loc.posY,
-          originalPosZ: loc.originalPosZ ?? loc.posZ,
-        };
-      }
-      return loc;
-    }));
+    type AlignSnapshot = {
+      stableId: string;
+      prevX: number; prevY: number; prevZ: number;
+      prevWasMoved?: boolean;
+      prevOrigX?: number; prevOrigY?: number; prevOrigZ?: number;
+    };
 
-    // Update selectedLocations
-    setSelectedLocations(prev => prev.map(loc => {
-      const key = generateFixtureUID(loc);
-      if (newPositions.has(key)) {
-        const [newX, newY, newZ] = newPositions.get(key)!;
-        return {
-          ...loc,
-          posX: newX,
-          posY: newY,
-          posZ: newZ,
-          wasMoved: true,
-          originalPosX: loc.originalPosX ?? loc.posX,
-          originalPosY: loc.originalPosY ?? loc.posY,
-          originalPosZ: loc.originalPosZ ?? loc.posZ,
-        };
-      }
-      return loc;
-    }));
-  }, [setLocationData, setSelectedLocations]);
-
-  const handleMergeFixtures = useCallback((fixtures: LocationData[]) => {
-    if (fixtures.length !== 2) return;
-
-    const [fixtureA, fixtureB] = fixtures;
-
-    // Generate keys IMMEDIATELY to avoid any reference issues
-    const keyA = generateFixtureUID(fixtureA);
-    const keyB = generateFixtureUID(fixtureB);
-
-    const totalCount = fixtureA.count + fixtureB.count;
-
-    // Calculate the actual center of the combined stack
-    // The GLB positions should remain unchanged, so we need to find where
-    // the center of the totalCount stack would be to keep all GLBs in place
-    const fixtureLength = 0.6;
-    const rotationZ = (fixtureA.rotationZ * Math.PI) / 180;
-    const cosRot = Math.cos(rotationZ);
-    const sinRot = Math.sin(rotationZ);
-
-    // Determine which fixture is leftmost along the orientation axis
-    const projectionA = fixtureA.posX * cosRot + fixtureA.posY * sinRot;
-    const projectionB = fixtureB.posX * cosRot + fixtureB.posY * sinRot;
-
-    const leftFixture = projectionA < projectionB ? fixtureA : fixtureB;
-
-    // Calculate where the center of the merged stack should be
-    // Find the leftmost edge of the leftmost fixture's stack
-    const totalSpan = totalCount * fixtureLength;
-    const leftEdgeX = leftFixture.posX - (leftFixture.count * fixtureLength * 0.5 * cosRot);
-    const leftEdgeY = leftFixture.posY - (leftFixture.count * fixtureLength * 0.5 * sinRot);
-
-    // The center of the merged stack is at the leftmost edge + half the total span
-    const centerX = leftEdgeX + (totalSpan * 0.5 * cosRot);
-    const centerY = leftEdgeY + (totalSpan * 0.5 * sinRot);
-
-    // Mark both original fixtures as deleted for export purposes FIRST
-    // This ensures the viewer filter catches them immediately
-    setDeletedFixtures(prev => new Set([...prev, keyA, keyB]));
-
-    setLocationData(prev => {
-      // Calculate new hierarchy as max+1 for the current floor
-      const currentFloorFixtures = prev.filter(loc =>
-        loc.floorIndex === fixtureA.floorIndex && !loc.forDelete
-      );
-      const maxHierarchy = currentFloorFixtures.length > 0
-        ? Math.max(...currentFloorFixtures.map(loc => loc.hierarchy))
-        : 0;
-      const newHierarchy = maxHierarchy + 1;
-
-      // Create merged fixture at the center point
-      const mergedFixture: LocationData = {
-        ...fixtureA, // Use first fixture as base
-        posX: centerX,
-        posY: centerY,
-        count: totalCount,
-        hierarchy: newHierarchy,
-        wasMerged: true, // New flag to track merged fixtures
-        originalCount: totalCount, // Set original count to the merged value
-        originalHierarchy: newHierarchy,
-        // Generate new unique identifier
-        _updateTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-        _ingestionTimestamp: Date.now() + Math.floor(Math.random() * 10000),
-        // Clear other modification flags since this is a new fixture
-        wasMoved: false,
-        wasRotated: false,
-        wasTypeChanged: false,
-        wasBrandChanged: false,
-        wasCountChanged: false,
-        wasHierarchyChanged: false,
-        wasDuplicated: false,
-        wasSplit: false
+    const snapshots: AlignSnapshot[] = fixtures.map(f => {
+      const cur = findFixtureById(locationDataRef.current!, f._stableId) ?? f;
+      return {
+        stableId: f._stableId,
+        prevX: cur.posX, prevY: cur.posY, prevZ: cur.posZ,
+        prevWasMoved: cur.wasMoved,
+        prevOrigX: cur.originalPosX, prevOrigY: cur.originalPosY, prevOrigZ: cur.originalPosZ,
       };
-
-      // Remove both original fixtures and add merged fixture
-      const withoutOriginals = prev.filter(loc => {
-        const key = generateFixtureUID(loc);
-        return key !== keyA && key !== keyB;
-      });
-
-      return [...withoutOriginals, mergedFixture];
     });
 
-    // Store original positions of deleted fixtures for export matching
-    const positionKeyA = `${fixtureA.originalBlockName || fixtureA.blockName}-${(fixtureA.originalPosX || fixtureA.posX).toFixed(3)}-${(fixtureA.originalPosY || fixtureA.posY).toFixed(3)}-${(fixtureA.originalPosZ || fixtureA.posZ).toFixed(3)}`;
-    const positionKeyB = `${fixtureB.originalBlockName || fixtureB.blockName}-${(fixtureB.originalPosX || fixtureB.posX).toFixed(3)}-${(fixtureB.originalPosY || fixtureB.posY).toFixed(3)}-${(fixtureB.originalPosZ || fixtureB.posZ).toFixed(3)}`;
-    setDeletedFixturePositions(prev => new Set([...prev, positionKeyA, positionKeyB]));
+    const prevMap = new Map(snapshots.map(s => [s.stableId, s]));
 
-    // Clear selection
-    setSelectedLocation(null);
-    setSelectedLocations([]);
-  }, [setLocationData, setSelectedLocation, setSelectedLocations]);
+    executeCommand({
+      commandName: 'AlignFixtures',
+      do() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId || !newPositions.has(loc._stableId)) return loc;
+          const [newX, newY, newZ] = newPositions.get(loc._stableId)!;
+          const snap = prevMap.get(loc._stableId)!;
+          return {
+            ...loc,
+            posX: newX, posY: newY, posZ: newZ,
+            wasMoved: true,
+            originalPosX: loc.originalPosX ?? snap.prevX,
+            originalPosY: loc.originalPosY ?? snap.prevY,
+            originalPosZ: loc.originalPosZ ?? snap.prevZ,
+          };
+        }));
+      },
+      undo() {
+        setLocationData(prev => prev.map(loc => {
+          if (!loc._stableId) return loc;
+          const saved = prevMap.get(loc._stableId);
+          if (!saved) return loc;
+          return {
+            ...loc,
+            posX: saved.prevX, posY: saved.prevY, posZ: saved.prevZ,
+            wasMoved: saved.prevWasMoved,
+            originalPosX: saved.prevOrigX,
+            originalPosY: saved.prevOrigY,
+            originalPosZ: saved.prevOrigZ,
+          };
+        }));
+      },
+    });
+  }, [setLocationData, executeCommand, locationDataRef]);
 
   return {
     // State
@@ -958,7 +1227,6 @@ export function useFixtureModifications(
     handleFixtureCountChange,
     handleFixtureCountChangeMulti,
     handleFixtureHierarchyChange,
-    handleFixtureHierarchyChangeMulti,
     handleDuplicateFixture,
     handleDeleteFixture,
     handleDeleteFixtures,
