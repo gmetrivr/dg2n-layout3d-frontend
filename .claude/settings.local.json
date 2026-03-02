@@ -29,7 +29,9 @@
       "Bash(test:*)",
       "Bash(bats:*)",
       "Bash(rm fab/current)",
-      "Bash(direnv allow)"
+      "Bash(direnv allow)",
+      "Read(.env.example)",
+      "Edit(.env.example)"
     ],
     "deny": [],
     "ask": []
